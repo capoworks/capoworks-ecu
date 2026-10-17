@@ -25,6 +25,20 @@ extern bool verboseMode;
 EventQueue::EventQueue(efidur_t lateDelay)
 	: m_lateDelay(lateDelay) {}
 
+static bool isBatchShapeValid(const ScheduledAction* events, size_t count) {
+	if (!events || count == 0 || count > MaxScheduleBatchSize) {
+		return false;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		if (!events[i].action || (i > 0 && events[i].time < events[i - 1].time)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 /**
  * @return true if inserted into the head of the list
  */
@@ -77,6 +91,67 @@ bool EventQueue::insertTask(scheduling_s* scheduling, efitick_t timeX, action_s 
 		assertListIsSorted();
 		return false;
 	}
+}
+
+bool EventQueue::insertBatch(const ScheduledAction* events, size_t count) {
+	if (!isBatchShapeValid(events, count)) {
+		return false;
+	}
+
+	scheduling_s* reserved[MaxScheduleBatchSize];
+	for (size_t i = 0; i < count; i++) {
+		reserved[i] = m_schedulingPool.get();
+		if (!reserved[i]) {
+			for (size_t j = 0; j < i; j++) {
+				m_schedulingPool.tryReturn(reserved[j]);
+			}
+			return false;
+		}
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		reserved[i]->momentX = events[i].time;
+		reserved[i]->next = nullptr;
+		reserved[i]->action = events[i].action;
+	}
+
+	// Merge the reserved records as a stable group. Advancing over existing equal
+	// timestamps keeps ordinary insertTask ordering intact, while never advancing
+	// over a later batch record keeps tied batch callbacks in caller order.
+	scheduling_s* before = nullptr;
+	scheduling_s* current = m_head;
+	size_t next = 0;
+	while (current && next < count) {
+		if (current->momentX <= reserved[next]->momentX) {
+			before = current;
+			current = current->next;
+		} else {
+			reserved[next]->next = current;
+			if (before) {
+				before->next = reserved[next];
+			} else {
+				m_head = reserved[next];
+			}
+			before = reserved[next];
+			next++;
+		}
+	}
+
+	while (next < count) {
+		if (before) {
+			before->next = reserved[next];
+		} else {
+			m_head = reserved[next];
+		}
+		before = reserved[next];
+		next++;
+	}
+
+	assertListIsSorted();
+#if EFI_PROD_CODE
+	getTunerStudioOutputChannels()->schedulingUsedCount = m_schedulingPool.used();
+#endif
+	return true;
 }
 
 void EventQueue::remove(scheduling_s* scheduling) {
