@@ -63,6 +63,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Use explicit trigger queue membership and tail pointers for constant-time insertion and unqueued-event cancellation
  - Prevent stale trigger-scheduled events and overdwell callbacks from interfering with newer ignition cycles after stop/restart or trigger reconfiguration; keep HPFP shutdown timers from restarting an old scheduling chain
  - The small embedded INI drive uses 512-byte clusters so the combined Capoworks definition and documentation fit without enlarging the image.
  - Board-fixed settings are now read-only in TunerStudio and protected during tune import, avoiding configuration CRC errors from editing board-enforced values.
