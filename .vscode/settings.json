@@ -32,4 +32,8 @@
 		"editor.formatOnSave": true
 	},
 	"C_Cpp.clang_format_style": "file",
+	"java.compile.nullAnalysis.mode": "automatic",
+	"java.import.exclusions": [
+		"**/java_console/luaformatter/**"
+	],
 }
