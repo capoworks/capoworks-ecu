@@ -30,6 +30,7 @@ struct AngleBasedEvent {
 	TriggerQueueMembership queueMembership = TriggerQueueMembership::None;
 
 	TrgPhase eventPhase;
+	AngleTimingPolicy timingPolicy = AngleTimingPolicy::Legacy;
 
 	void setAngle(EngPhase angle);
 

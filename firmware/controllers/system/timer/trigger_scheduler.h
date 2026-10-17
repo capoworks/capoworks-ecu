@@ -2,9 +2,18 @@
 
 class TriggerScheduler : public EngineModule {
 public:
-	void schedule(AngleBasedEvent* event, EngPhase angle, action_s action);
+	void schedule(
+			AngleBasedEvent* event,
+			EngPhase angle,
+			action_s action,
+			AngleTimingPolicy policy = AngleTimingPolicy::Legacy);
 
-	bool scheduleOrQueue(AngleBasedEvent* event, EngPhase angle, action_s action, const EnginePhaseInfo& phase);
+	bool scheduleOrQueue(
+			AngleBasedEvent* event,
+			EngPhase angle,
+			action_s action,
+			const EnginePhaseInfo& phase,
+			AngleTimingPolicy policy = AngleTimingPolicy::Legacy);
 
 	void onEnginePhase(float rpm, const EnginePhaseInfo& phase) override;
 	void onEngineStop() override;

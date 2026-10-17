@@ -606,6 +606,7 @@ void TriggerCentral::handleShaftSignal(TriggerEvent signal, efitick_t timestamp)
 
 	// Don't propagate state if we don't know where we are
 	if (!decodeResult) {
+		instantRpm.ignitionProfile.reset();
 		// We don't have sync, but report to the wave chart anyway as index 0.
 		reportEventToWaveChart(timestamp, signal, 0, triggerShape.useOnlyRisingEdges);
 
@@ -864,6 +865,7 @@ static void calculateTriggerSynchPoint(
 TriggerDecoderBase initState("init");
 
 void TriggerCentral::updateWaveform() {
+	instantRpm.ignitionProfile.reset();
 	// Re-read config in case it's changed
 	primaryTriggerConfiguration.update();
 	for (int camIndex = 0; camIndex < CAMS_PER_BANK; camIndex++) {

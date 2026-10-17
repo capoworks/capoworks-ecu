@@ -50,6 +50,7 @@ public:
 		}
 
 		triggerFormDetails.prepareEventAngles(&triggerShape);
+		instantRpm.ignitionProfile.configure(triggerShape, triggerFormDetails);
 #endif
 	}
 
