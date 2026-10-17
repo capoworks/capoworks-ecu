@@ -37,10 +37,14 @@ expected<float> readGppwmChannel(gppwm_channel_e channel) {
 			return Sensor::get(SensorType::LuaGauge7);
 		case GPPWM_LuaGauge8:
 			return Sensor::get(SensorType::LuaGauge8);
-		case GPPWM_FuelLoad:
-			return getFuelingLoad();
-		case GPPWM_IgnLoad:
-			return getIgnitionLoad();
+		case GPPWM_FuelLoad: {
+			const float load = getFuelingLoad();
+			return std::isfinite(load) ? expected<float>(load) : unexpected;
+		}
+		case GPPWM_IgnLoad: {
+			const float load = getIgnitionLoad();
+			return std::isfinite(load) ? expected<float>(load) : unexpected;
+		}
 		case GPPWM_AuxTemp1:
 			return Sensor::get(SensorType::AuxTemp1);
 		case GPPWM_AuxTemp2:

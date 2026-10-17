@@ -2,6 +2,7 @@
 CONTROLLERS_ALGO_SRC_CPP = $(PROJECT_DIR)/controllers/algo/ignition/ignition_state.cpp \
 	$(PROJECT_DIR)/controllers/algo/malfunction_central.cpp \
 	$(PROJECT_DIR)/controllers/algo/fuel_math.cpp \
+	$(PROJECT_DIR)/controllers/algo/airmass_loads.cpp \
 	$(PROJECT_DIR)/controllers/algo/accel_enrichment.cpp \
 	$(PROJECT_DIR)/controllers/algo/wall_fuel.cpp \
 	$(PROJECT_DIR)/controllers/algo/launch_control.cpp \

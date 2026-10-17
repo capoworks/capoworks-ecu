@@ -57,6 +57,21 @@ static void setDefaultVETable() {
 	config->alphaNBaroReferencePressure = 101.325f;
 	config->airmassTemperatureSource = AirmassTemperatureSource::Tcharge;
 	config->idleVeLoadSource = IdleVeLoadSource::EffectiveMap;
+	config->injectionPhaseLoadSource = AFR_None;
+	for (auto& source : config->ignitionTrimLoadSource) {
+		source = AFR_None;
+	}
+	config->stftLoadSource = AFR_None;
+	config->stagingLoadSource = AFR_None;
+	config->lambdaDeviationLoadSource = AFR_None;
+	config->lambdaMonitorLoadSource = AFR_None;
+	config->trailingSparkLoadSource = AFR_None;
+	config->ignitionIatLoadSource = AFR_None;
+	config->knockRetardLoadSource = AFR_None;
+	for (auto& source : config->knockGainLoadSource) {
+		source = AFR_None;
+	}
+	config->hpfpTargetLoadSource = AFR_MAP;
 
 	setRpmTableBin(config->baroCorrRpmBins);
 	setLinearCurve(config->baroCorrPressureBins, 75, 105, 1);

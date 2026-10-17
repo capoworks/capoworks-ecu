@@ -11,6 +11,7 @@
 
 #include "speed_density.h"
 #include "fuel_math.h"
+#include "airmass_loads.h"
 #include "closed_loop_fuel.h"
 #include "launch_control.h"
 #include "injector_model.h"
@@ -140,23 +141,61 @@ void EngineState::periodicFastCallback() {
 	FuelAirmassCapture fuelCapture;
 	captureFuelAirmassInputs(rpm, fuelCalculation, fuelCapture);
 	auto fuelCandidate = calculateFuelPublication(rpm, isCranking, fuelCapture);
+	const bool hasCurrentConsumerContext = fuelCapture.Standalone && fuelCandidate.Valid && !fuelCandidate.Stale &&
+										   fuelCandidate.ConsumerLoads.Prepared;
+	const AirmassConsumerLoadContext currentLoads(fuelCandidate.ConsumerLoads);
+	const auto currentConsumerLoad = [&](AirmassConsumer consumer, float legacyLoad, size_t cylinder = 0) {
+		if (hasCurrentConsumerContext) {
+			return currentLoads.get(consumer, cylinder);
+		}
+		if (!fuelCapture.Standalone) {
+			const AirmassConsumerLoadContext legacyLoads(consumer, legacyLoad);
+			return legacyLoads.get(consumer, cylinder);
+		}
+		return NAN;
+	};
 
 	const float luaFuelMult = engine->engineState.lua.fuelMult;
 	const float luaFuelAdd = engine->engineState.lua.fuelAdd;
 	float cycleFuelMass = 0;
-	if (fuelCandidate.Valid && !fuelCandidate.Stale) {
+	if (fuelCandidate.Valid && !fuelCandidate.Stale &&
+		(!fuelCapture.Standalone || engineConfiguration->isInjectionEnabled)) {
 		cycleFuelMass = fuelCandidate.CycleInjectionMass * luaFuelMult + luaFuelAdd;
 	}
 	ClosedLoopFuelResult clResult;
 	if (fuelCandidate.Valid && !fuelCandidate.Stale) {
-		clResult = fuelClosedLoopCorrection(fuelCandidate.FuelingLoad, fuelCandidate.TargetLambda);
+		const float stftLoad = currentConsumerLoad(AirmassConsumer::Stft, fuelCandidate.FuelingLoad);
+		clResult = fuelClosedLoopCorrection(stftLoad, fuelCandidate.TargetLambda);
 	}
 
 	const float nextFuelLoad = fuelCandidate.Valid ? fuelCandidate.FuelingLoad : 0;
 	const float nextIgnitionLoad = fuelCandidate.Valid ? fuelCandidate.IgnitionLoad : 0;
-	engine->lambdaMonitor.update(rpm, nextFuelLoad);
+	float lambdaMonitorLoad = nextFuelLoad;
+	float lambdaDeviationLoad = nextFuelLoad;
+	if (hasCurrentConsumerContext) {
+		const bool monitorNeeded = engineConfiguration->lambdaProtectionEnable || engine->lambdaMonitor.isCut();
+		lambdaMonitorLoad = monitorNeeded ? currentLoads.get(AirmassConsumer::LambdaMonitor) : 0;
+		lambdaDeviationLoad = engineConfiguration->lambdaProtectionEnable
+									? currentLoads.get(AirmassConsumer::LambdaDeviation)
+									: lambdaMonitorLoad;
+	} else if (fuelCapture.Standalone) {
+		// A failed or stale physical candidate is unavailable, not a low load.
+		lambdaMonitorLoad = NAN;
+		lambdaDeviationLoad = NAN;
+	} else {
+		lambdaMonitorLoad = currentConsumerLoad(AirmassConsumer::LambdaMonitor, nextFuelLoad);
+		lambdaDeviationLoad = currentConsumerLoad(AirmassConsumer::LambdaDeviation, nextFuelLoad);
+	}
+	engine->lambdaMonitor.update(rpm, lambdaMonitorLoad, lambdaDeviationLoad, fuelCandidate.TargetLambda);
 
-	engine->ignitionState.updateAdvanceCorrections(nextIgnitionLoad);
+	float ignitionIatLoad = nextIgnitionLoad;
+	if (!fuelCapture.Standalone || engineConfiguration->isIgnitionEnabled) {
+		const float selected = currentConsumerLoad(AirmassConsumer::IgnitionIat, nextIgnitionLoad);
+		if (std::isfinite(selected)) {
+			ignitionIatLoad = selected;
+		}
+	}
+	engine->ignitionState.updateAdvanceCorrections(ignitionIatLoad);
 	float untrimmedAdvance =
 			engine->ignitionState.getAdvance(rpm, nextIgnitionLoad, isCranking) * engine->ignitionState.luaTimingMult +
 			engine->ignitionState.luaTimingAdd;
@@ -199,7 +238,16 @@ void EngineState::periodicFastCallback() {
 			cylinderFuelMasses[i] = cylinderMass;
 		}
 
-		cylinderTiming[i] = untrimmedAdvance + getCylinderIgnitionTrim(i, ignitionTrimInterpolation);
+		angle_t ignitionTrim = 0;
+		if (!fuelCapture.Standalone || engineConfiguration->isIgnitionEnabled) {
+			const float load = currentConsumerLoad(AirmassConsumer::IgnitionTrim, nextIgnitionLoad, i);
+			if (std::isfinite(load)) {
+				PreparedTable3DInterpolation selectedInterpolation(
+						config->ignTrimLoadBins, load, config->ignTrimRpmBins, rpm);
+				ignitionTrim = getCylinderIgnitionTrim(i, selectedInterpolation);
+			}
+		}
+		cylinderTiming[i] = untrimmedAdvance + ignitionTrim;
 	}
 
 	const auto injectionMode = getCurrentInjectionMode();
@@ -211,7 +259,9 @@ void EngineState::periodicFastCallback() {
 	if (fuelPublicationValid) {
 		const float injectionFuelMass =
 				cycleFuelMass * getInjectionModeDurationMultiplier(injectionMode, calculationCylinderCount);
-		nextStage2Fraction = getStage2InjectionFraction(rpm, fuelCandidate.AfrTableYAxis);
+		const float stagingLoad = currentConsumerLoad(AirmassConsumer::Staging, fuelCandidate.AfrTableYAxis);
+		nextStage2Fraction =
+				engineConfiguration->enableStagedInjection ? getStage2InjectionFraction(rpm, stagingLoad) : 0;
 		const float stage2InjectionMass = injectionFuelMass * nextStage2Fraction;
 		const float stage1InjectionMass = injectionFuelMass - stage2InjectionMass;
 
@@ -220,7 +270,8 @@ void EngineState::periodicFastCallback() {
 				engineConfiguration->enableStagedInjection
 						? engine->module<InjectorModelSecondary>()->getInjectionDuration(stage2InjectionMass)
 						: 0;
-		nextInjectionOffset = getInjectionOffset(rpm, nextFuelLoad);
+		nextInjectionOffset =
+				getInjectionOffset(rpm, currentConsumerLoad(AirmassConsumer::InjectionPhase, nextFuelLoad));
 
 		const float totalInjectionTime =
 				nextInjectionDuration * getNumberOfInjections(injectionMode, calculationCylinderCount);
@@ -255,6 +306,17 @@ void EngineState::periodicFastCallback() {
 		publicationCurrent = isFuelCaptureCurrentLocked(fuelCapture, admission);
 		if (publicationCurrent) {
 			fuelPublicationValid &= calculationCylinderCount == engine->engineState.cylinderCount;
+			if (fuelCapture.Standalone) {
+				fuelPublicationValid &=
+						fuelCandidate.ConsumerLoads.Prepared && fuelCandidate.ConsumerLoads.Snapshot.Valid;
+			}
+			if (fuelPublicationValid && fuelCapture.Standalone &&
+				!publishAirmassConsumerLoads(fuelCandidate.ConsumerLoads, admission)) {
+				// A newer publication won the race. Leave its loads and fuel intact.
+				publicationCurrent = false;
+			}
+		}
+		if (publicationCurrent) {
 			if (fuelPublicationValid) {
 				airmassCalculationValid = true;
 				baseFuel = fuelCandidate.BaseFuelMass;
@@ -274,6 +336,7 @@ void EngineState::periodicFastCallback() {
 				engine->fuelComputer.targetLambda = fuelCandidate.TargetLambda;
 				engine->fuelComputer.targetAFR = fuelCandidate.TargetAFR;
 				engine->fuelComputer.stoichiometricRatio = fuelCandidate.StoichiometricRatio;
+				engine->fuelComputer.publishResolvedLambdaLoad(fuelCandidate.ResolvedLambdaLoad);
 				engine->engineState.currentVe =
 						fuelCandidate.Diagnostics.Ve.HasValue ? fuelCandidate.Diagnostics.Ve.Ve : 0;
 				engine->engineState.veTableYAxis =
@@ -320,6 +383,7 @@ void EngineState::periodicFastCallback() {
 				engine->fuelComputer.targetLambda = 0;
 				engine->fuelComputer.targetAFR = 0;
 				engine->fuelComputer.stoichiometricRatio = 0;
+				engine->fuelComputer.publishResolvedLambdaLoad(0);
 				engine->engineState.currentVe = 0;
 				engine->engineState.veTableYAxis = 0;
 				engine->engineState.idleVeTableYAxis = 0;
@@ -332,6 +396,9 @@ void EngineState::periodicFastCallback() {
 				}
 				for (auto& cylinder : engine->cylinders) {
 					cylinder.setInjectionMass(0);
+				}
+				if (fuelCapture.Standalone) {
+					invalidateAirmassConsumerLoadsLocked();
 				}
 			}
 
@@ -347,14 +414,30 @@ void EngineState::periodicFastCallback() {
 	}
 
 	if (publicationCurrent) {
-		trailingSparkAngle = interpolate3d(
-				config->trailingIgnitionTable,
-				config->trailingIgnitionLoadBins,
-				nextFuelLoad,
-				config->trailingIgnitionRpmBins,
-				rpm);
-
-		multispark.count = getMultiSparkCount(rpm);
+		if (!fuelCapture.Standalone) {
+			// Preserve the legacy computation even when spark outputs are disabled.
+			const float trailingLoad = currentConsumerLoad(AirmassConsumer::TrailingSpark, nextFuelLoad);
+			trailingSparkAngle = std::isfinite(trailingLoad) ? interpolate3d(
+																	   config->trailingIgnitionTable,
+																	   config->trailingIgnitionLoadBins,
+																	   trailingLoad,
+																	   config->trailingIgnitionRpmBins,
+																	   rpm)
+															 : 0;
+			multispark.count = getMultiSparkCount(rpm);
+		} else {
+			const float trailingLoad = currentConsumerLoad(AirmassConsumer::TrailingSpark, 0);
+			trailingSparkAngle = engineConfiguration->isIgnitionEnabled && engineConfiguration->enableTrailingSparks &&
+												 std::isfinite(trailingLoad)
+									   ? interpolate3d(
+												 config->trailingIgnitionTable,
+												 config->trailingIgnitionLoadBins,
+												 trailingLoad,
+												 config->trailingIgnitionRpmBins,
+												 rpm)
+									   : 0;
+			multispark.count = engineConfiguration->isIgnitionEnabled ? getMultiSparkCount(rpm) : 0;
+		}
 	}
 
 #if EFI_LAUNCH_CONTROL

@@ -4,6 +4,8 @@
 
 struct LambdaMonitorBase : public lambda_monitor_s {
 	void update(float rpm, float load);
+	void update(float rpm, float load, float deviationLoad);
+	void update(float rpm, float load, float deviationLoad, float targetLambda);
 	bool isCut() const;
 
 protected:
@@ -21,8 +23,18 @@ protected:
 	// Returns true if OK to leave the "cut" state
 	virtual bool restoreConditionsMet(float rpm, float load) const;
 
+	float getDeviationLoadForUpdate() const {
+		return m_currentDeviationLoad;
+	}
+
+	float getTargetLambdaForUpdate() const {
+		return m_currentTargetLambda;
+	}
+
 private:
 	Timer m_timeSinceGoodLambda;
+	float m_currentDeviationLoad = NAN;
+	float m_currentTargetLambda = NAN;
 };
 
 class LambdaMonitor : public LambdaMonitorBase {

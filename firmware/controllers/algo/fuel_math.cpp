@@ -366,14 +366,46 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 
 	candidate.SdAirMassInOneCylinder = airmass.CylinderAirmass;
 	candidate.NormalizedCylinderFilling = 100 * airmass.CylinderAirmass / standardAirCharge;
-	candidate.FuelingLoad = airmass.EngineLoadPercent;
 	candidateFuelComputer.sdAirMassInOneCylinder = candidate.SdAirMassInOneCylinder;
 	candidateFuelComputer.normalizedCylinderFilling = candidate.NormalizedCylinderFilling;
-	candidate.IgnitionLoad =
-			candidateFuelComputer.getLoadOverride(airmass.EngineLoadPercent, engineConfiguration->ignOverrideMode);
+
+	if (capture.Standalone) {
+		AirmassInputs consumerInputs = capture.Inputs;
+		if (capture.Strategy == LM_REAL_MAF) {
+			// MAF's native table coordinate is the pre-trim EngineLoadPercent,
+			// while cylinder filling uses the final corrected air mass.
+			consumerInputs.NativeLoad = airmass.EngineLoadPercent;
+		}
+		if (capture.Strategy == LM_ALPHA_N || capture.Strategy == LM_REAL_MAF) {
+			// Consumer snapshots need an effective MAP independently of the
+			// Alpha-N multiplication policy. Resolve a copy so the model's
+			// native coordinate and fuel validity remain untouched.
+			resolveCapturedMap(consumerInputs);
+		}
+		candidate.ConsumerLoads = prepareAirmassConsumerLoads(consumerInputs, airmass.CylinderAirmass);
+		if (!candidate.ConsumerLoads.Prepared || !candidate.ConsumerLoads.Snapshot.Valid) {
+			candidate.Fault = AirmassInjectionFault::Result;
+			return candidate;
+		}
+	}
+
+	const AirmassConsumerLoadContext selectedLoads(candidate.ConsumerLoads);
+	if (capture.Standalone) {
+		candidate.FuelingLoad = selectedLoads.getSelectedLoad(AFR_None);
+		// Ignition is optional for fuel validity. When enabled, its captured
+		// source is required; a missing sensor receives the upstream substitute.
+		candidate.IgnitionLoad = engineConfiguration->isIgnitionEnabled
+									   ? selectedLoads.getSelectedLoad(capture.Inputs.IgnitionOverride)
+									   : 0;
+	} else {
+		// Preserve legacy model numerics and live fallback behavior.
+		candidate.FuelingLoad = airmass.EngineLoadPercent;
+		candidate.IgnitionLoad =
+				candidateFuelComputer.getLoadOverride(airmass.EngineLoadPercent, engineConfiguration->ignOverrideMode);
+	}
 	if (!std::isfinite(candidate.SdAirMassInOneCylinder) || candidate.SdAirMassInOneCylinder < 0 ||
 		!std::isfinite(candidate.NormalizedCylinderFilling) || !std::isfinite(candidate.FuelingLoad) ||
-		!std::isfinite(candidate.IgnitionLoad)) {
+		(engineConfiguration->isIgnitionEnabled && !std::isfinite(candidate.IgnitionLoad))) {
 		candidate.Fault = AirmassInjectionFault::Result;
 		return candidate;
 	}
@@ -382,16 +414,46 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 	const float gramPerMs = rpm == 0 ? 0 : gramPerCycle / getEngineCycleDuration(rpm);
 	candidate.AirflowEstimate = gramPerMs * 3600000 /* milliseconds per hour */ / 1000 /* grams per kg */;
 
-	float baseFuelMass = candidateFuelComputer.getCycleFuel(airmass.CylinderAirmass, rpm, airmass.EngineLoadPercent);
-	const float globalCorrection = engineConfiguration->globalFuelCorrection;
-	if (!std::isfinite(baseFuelMass) || baseFuelMass < 0 || !std::isfinite(globalCorrection) || globalCorrection < 0) {
-		candidate.Fault = AirmassInjectionFault::Correction;
-		return candidate;
+	const bool lambdaTargetRequired = capture.Standalone ? candidate.ConsumerLoads.Snapshot.LambdaTargetRequired : true;
+	const bool publishFuelOutputs = !capture.Standalone || engineConfiguration->isInjectionEnabled;
+	float baseFuelMass = 0;
+	if (lambdaTargetRequired) {
+		if (capture.Standalone) {
+			const float lambdaLoad = selectedLoads.getSelectedLoad(capture.Inputs.LambdaOverride);
+			if (!std::isfinite(lambdaLoad)) {
+				candidate.Fault = AirmassInjectionFault::Load;
+				return candidate;
+			}
+			candidate.ResolvedLambdaLoad = lambdaLoad;
+			baseFuelMass = candidateFuelComputer.getCycleFuelWithResolvedLoad(airmass.CylinderAirmass, rpm, lambdaLoad);
+		} else {
+			baseFuelMass = candidateFuelComputer.getCycleFuel(airmass.CylinderAirmass, rpm, airmass.EngineLoadPercent);
+		}
+		if (!std::isfinite(baseFuelMass) || baseFuelMass < 0) {
+			candidate.Fault = AirmassInjectionFault::Correction;
+			return candidate;
+		}
+	} else if (capture.Standalone) {
+		candidateFuelComputer.publishResolvedLambdaLoad(0);
+		candidateFuelComputer.afrTableYAxis = 0;
+		candidateFuelComputer.targetLambda = 0;
+		candidateFuelComputer.targetAFR = 0;
+		candidateFuelComputer.stoichiometricRatio = 0;
 	}
-	baseFuelMass *= globalCorrection;
-	if (!std::isfinite(baseFuelMass) || baseFuelMass < 0) {
-		candidate.Fault = AirmassInjectionFault::Correction;
-		return candidate;
+
+	if (publishFuelOutputs && lambdaTargetRequired) {
+		const float globalCorrection = engineConfiguration->globalFuelCorrection;
+		if (!std::isfinite(globalCorrection) || globalCorrection < 0) {
+			candidate.Fault = AirmassInjectionFault::Correction;
+			return candidate;
+		}
+		baseFuelMass *= globalCorrection;
+		if (!std::isfinite(baseFuelMass) || baseFuelMass < 0) {
+			candidate.Fault = AirmassInjectionFault::Correction;
+			return candidate;
+		}
+	} else {
+		baseFuelMass = 0;
 	}
 
 	candidate.BaseFuelMass = baseFuelMass;
@@ -400,8 +462,18 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 	candidate.TargetAFR = candidateFuelComputer.targetAFR;
 	candidate.StoichiometricRatio = candidateFuelComputer.stoichiometricRatio;
 
-	float cycleFuelMass;
-	if (isCranking) {
+	float cycleFuelMass = 0;
+	if (capture.Standalone && !engineConfiguration->isInjectionEnabled) {
+		// A valid air mass remains usable for ignition and diagnostics without
+		// requiring an AFR target that no injector will consume.
+		candidate.CrankingCoolantTemperatureCoefficient = 0;
+		candidate.CrankingTpsCoefficient = 0;
+		candidate.CrankingDurationCoefficient = 0;
+		candidate.CrankingFuel = 0;
+		candidate.RunningBaseFuel = 0;
+		candidate.RunningFuel = 0;
+		candidate.TotalFuelCorrection = 0;
+	} else if (isCranking) {
 		const auto cranking =
 				calculateCrankingFuel3(baseFuelMass, engine->rpmCalculator.getRevolutionCounterSinceStart());
 		candidate.CrankingCoolantTemperatureCoefficient = cranking.CoolantTemperatureCoefficient;
@@ -426,13 +498,16 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		cycleFuelMass = 0;
 	}
 
-	engine->module<InjectorModelPrimary>()->prepare();
-	if (engineConfiguration->enableStagedInjection) {
-		engine->module<InjectorModelSecondary>()->prepare();
+	if (publishFuelOutputs) {
+		engine->module<InjectorModelPrimary>()->prepare();
+		if (engineConfiguration->enableStagedInjection) {
+			engine->module<InjectorModelSecondary>()->prepare();
+		}
 	}
 
-	const floatms_t tpsAccelEnrich = engine->module<TpsAccelEnrichment>()->getTpsEnrichment();
-	const float tpsFuelMass = engine->module<InjectorModelPrimary>()->getFuelMassForDuration(tpsAccelEnrich);
+	const floatms_t tpsAccelEnrich = publishFuelOutputs ? engine->module<TpsAccelEnrichment>()->getTpsEnrichment() : 0;
+	const float tpsFuelMass =
+			publishFuelOutputs ? engine->module<InjectorModelPrimary>()->getFuelMassForDuration(tpsAccelEnrich) : 0;
 	candidate.TpsAccelEnrich = tpsAccelEnrich;
 
 	if (!std::isfinite(cycleFuelMass) || cycleFuelMass < 0 || !std::isfinite(tpsAccelEnrich) || tpsAccelEnrich < 0 ||
@@ -441,7 +516,7 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		return candidate;
 	}
 
-	candidate.CycleInjectionMass = cycleFuelMass + tpsFuelMass;
+	candidate.CycleInjectionMass = publishFuelOutputs ? cycleFuelMass + tpsFuelMass : 0;
 	if (!std::isfinite(candidate.CycleInjectionMass) || candidate.CycleInjectionMass < 0) {
 		candidate.Fault = AirmassInjectionFault::Result;
 		return candidate;
