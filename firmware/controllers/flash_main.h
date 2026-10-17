@@ -17,6 +17,7 @@ void initFlash();
  * about 1-2 seconds, we cannot afford to do that while the engine is
  * running so we postpone the write until the engine is stopped. Direct writes
  * overlapping active flash I/O are queued, and reads are rejected while busy.
+ * Each copy is erased, programmed, and verified before the next copy is touched.
  */
 void writeToFlashNow();
 void setNeedToWriteConfiguration();
