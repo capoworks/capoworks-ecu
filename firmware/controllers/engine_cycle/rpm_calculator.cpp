@@ -68,6 +68,128 @@ float RpmCalculator::getCachedRpm() const {
 	return cachedRpmValue;
 }
 
+#if EFI_SHAFT_POSITION_INPUT
+
+RpmCalculator::RpmSample RpmCalculator::getRollingCycleRpm() const {
+	if (!engineConfiguration->idleTimingUseRollingRpm) {
+		return {};
+	}
+
+	RollingCycleTiming timing;
+	uint8_t multiplier;
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		auto& tc = engine->triggerCentral;
+		auto eventCount = tc.engineCycleEventCount;
+		if (eventCount == 0 || eventCount > efi::size(tc.instantRpm.timeOfLastEvent) ||
+			m_rollingShapeVersion != tc.triggerShape.version || m_rollingEventCount != eventCount ||
+			m_rollingHistoryCount < eventCount || m_rollingNextIndex >= eventCount ||
+			tc.instantRpm.timeOfLastEvent[m_rollingNextIndex] == 0) {
+			return {};
+		}
+		timing = m_rollingCycleTiming;
+		multiplier = m_rollingCycleMultiplier;
+	}
+
+	if (timing.period == 0) {
+		return {};
+	}
+
+	float scale = 60.0f * multiplier * NT_PER_SECOND;
+	RpmSample sample{scale / timing.period, 0};
+	if (timing.previousPeriod != 0 && timing.ratePeriod != timing.previousPeriod && timing.rateDt != 0) {
+		// A coincident event can change RPM without advancing time. Keep the derivative
+		// from the last non-coincident pair.
+		float rateRpm = timing.ratePeriod == timing.period ? sample.rpm : scale / timing.ratePeriod;
+		sample.rpmRate = (rateRpm - scale / timing.previousPeriod) * NT_PER_SECOND / timing.rateDt;
+	}
+	return sample;
+}
+
+void RpmCalculator::updateRollingCycleRpm(uint32_t index, const EnginePhaseInfo& phaseInfo) {
+	if (!engineConfiguration->idleTimingUseRollingRpm) {
+		return;
+	}
+
+	chibios_rt::CriticalSectionLocker csl;
+
+	auto& tc = engine->triggerCentral;
+	auto eventCount = tc.engineCycleEventCount;
+	if (eventCount == 0 || eventCount > efi::size(tc.instantRpm.timeOfLastEvent) || index >= eventCount) {
+		resetRollingCycleRpmLocked();
+		return;
+	}
+
+	bool shapeChanged = m_rollingShapeVersion != tc.triggerShape.version || m_rollingEventCount != eventCount;
+	bool phaseChanged = m_rollingCamResyncCounter != tc.triggerState.m_camResyncCounter;
+	bool sequenceChanged = m_rollingNextIndex != UINT32_MAX && index != m_rollingNextIndex;
+	if (shapeChanged || phaseChanged || sequenceChanged) {
+		// Do not compare timestamps across a different event mapping or engine phase.
+		resetRollingCycleRpmLocked();
+	}
+
+	if (m_rollingHistoryCount >= eventCount && tc.instantRpm.timeOfLastEvent[index] == 0) {
+		// Instant RPM history was cleared by a decoder resynchronization.
+		resetRollingCycleRpmLocked();
+	}
+
+	m_rollingShapeVersion = tc.triggerShape.version;
+	m_rollingEventCount = eventCount;
+	m_rollingCamResyncCounter = tc.triggerState.m_camResyncCounter;
+	m_rollingCycleMultiplier = getOperationMode() == TWO_STROKE ? 1 : 2;
+
+	uint32_t now = phaseInfo.timestamp;
+	if (m_rollingHistoryCount >= eventCount) {
+		// The same decoded index one cycle ago gives an exact full-angle window on
+		// irregular and missing-tooth wheels.
+		uint32_t elapsed = now - tc.instantRpm.timeOfLastEvent[index];
+		constexpr uint32_t minFourStroke = (NT_PER_SECOND + MAX_ALLOWED_RPM / 120 - 1) / (MAX_ALLOWED_RPM / 120);
+		constexpr uint32_t minTwoStroke = (NT_PER_SECOND + MAX_ALLOWED_RPM / 60 - 1) / (MAX_ALLOWED_RPM / 60);
+		uint32_t minPeriod = m_rollingCycleMultiplier == 1 ? minTwoStroke : minFourStroke;
+		if (elapsed < minPeriod) {
+			resetRollingCycleRpmLocked();
+			return;
+		}
+
+		uint32_t dt = now - m_rollingLastTime;
+		if (m_rollingCycleTiming.period == 0) {
+			m_rollingCycleTiming.previousPeriod = 0;
+		} else if (dt != 0) {
+			m_rollingCycleTiming.previousPeriod = m_rollingCycleTiming.period;
+			m_rollingCycleTiming.ratePeriod = elapsed;
+			m_rollingCycleTiming.rateDt = dt;
+		}
+		m_rollingCycleTiming.period = elapsed;
+	}
+	m_rollingLastTime = now;
+
+	// Rising-only decoding leaves every other timestamp slot unused.
+	uint32_t step = tc.triggerShape.useOnlyRisingEdges ? 2 : 1;
+	m_rollingHistoryCount = std::min(m_rollingHistoryCount + step, eventCount);
+	m_rollingNextIndex = index + step;
+	if (m_rollingNextIndex >= eventCount) {
+		m_rollingNextIndex -= eventCount;
+	}
+}
+
+void RpmCalculator::resetRollingCycleRpm() {
+	chibios_rt::CriticalSectionLocker csl;
+	resetRollingCycleRpmLocked();
+}
+
+void RpmCalculator::resetRollingCycleRpmLocked() {
+	m_rollingCycleTiming = {};
+	m_rollingLastTime = 0;
+	m_rollingNextIndex = UINT32_MAX;
+	m_rollingHistoryCount = 0;
+	m_rollingEventCount = 0;
+	m_rollingShapeVersion = -1;
+	m_rollingCamResyncCounter = 0;
+	m_rollingCycleMultiplier = 0;
+}
+
+#endif // EFI_SHAFT_POSITION_INPUT
+
 operation_mode_e lookupOperationMode() {
 	if (engineConfiguration->twoStroke) {
 		return TWO_STROKE;
@@ -236,6 +358,7 @@ void RpmCalculator::setStopSpinning() {
 	isSpinning = false;
 	revolutionCounterSinceStart = 0;
 	rpmRate = 0;
+	resetRollingCycleRpm();
 
 	if (cachedRpmValue != 0) {
 		assignRpmValue(0);
@@ -306,6 +429,11 @@ void rpmShaftPositionCallback(uint32_t trgEventIndex, const EnginePhaseInfo& pha
 		}
 
 		rpmState.onNewEngineCycle();
+	}
+
+	// Consume the previous-cycle timestamp before Instant RPM overwrites this slot.
+	if (engineConfiguration->idleTimingUseRollingRpm) {
+		rpmState.updateRollingCycleRpm(trgEventIndex, phaseInfo);
 	}
 
 	// Always update instant RPM even when not spinning up
