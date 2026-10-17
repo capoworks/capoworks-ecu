@@ -63,6 +63,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Electronic throttle and DC wastegate outputs stop immediately when disabled in configuration or when reinitialization fails.
  - Configuration flash operations are now serialized, so concurrent saves and reads cannot overwrite each other, and a failed write is not retried continuously without a new request.
  - Calibration burns now verify erase, programmed bytes, header, and CRC before replacing the remaining valid copy; a failed write stops immediately and reports how many copies were verified.
  - Bound every continuous ignition output pulse with an independent 1.5x nominal dwell guard. Physical ownership and pulse age survive callback promotion and repeated HIGH, competing occurrences cannot take over an energized coil, and the guard still forces LOW if the ignition occurrence was invalidated. Invalid dwell cannot energize a main, trailing or raw ignition output.
