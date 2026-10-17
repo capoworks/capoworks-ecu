@@ -20,6 +20,99 @@ TEST(limp, testFatalError) {
 	EXPECT_FALSE(dut.allowTriggerInput());
 }
 
+TEST(limp, floodClearRoadsideRestoresFuelWhenRunning) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	LimpManager dut;
+
+	engineConfiguration->isCylinderCleanupEnabled = true;
+	engineConfiguration->isCylinderCleanupLatching = false;
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 95);
+
+	engine->rpmCalculator.setRpmValue(300);
+	dut.updateState(300, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+	EXPECT_EQ(ClearReason::FloodClear, dut.allowInjection().reason);
+
+	engine->rpmCalculator.setRpmValue(engineConfiguration->cranking.rpm);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection());
+}
+
+TEST(limp, floodClearWorkshopLatchesUntilPedalRelease) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	LimpManager dut;
+
+	engineConfiguration->isCylinderCleanupEnabled = true;
+	engineConfiguration->isCylinderCleanupLatching = true;
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 95);
+
+	engine->rpmCalculator.setRpmValue(300);
+	dut.updateState(300, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+	EXPECT_EQ(ClearReason::FloodClear, dut.allowInjection().reason);
+
+	engine->rpmCalculator.setRpmValue(engineConfiguration->cranking.rpm);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+	EXPECT_EQ(ClearReason::FloodClear, dut.allowInjection().reason);
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 0);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection());
+
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 95);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection()) << "workshop mode must not rearm while already running";
+}
+
+TEST(limp, floodClearWorkshopLatchClearsWhenDisabledOrRoadsideSelected) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	LimpManager dut;
+
+	engineConfiguration->isCylinderCleanupEnabled = true;
+	engineConfiguration->isCylinderCleanupLatching = true;
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 95);
+
+	engine->rpmCalculator.setRpmValue(300);
+	dut.updateState(300, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+
+	engine->rpmCalculator.setRpmValue(engineConfiguration->cranking.rpm);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+
+	engineConfiguration->isCylinderCleanupEnabled = false;
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection()) << "disabling flood clear must release the workshop latch";
+
+	engineConfiguration->isCylinderCleanupEnabled = true;
+	engine->rpmCalculator.setRpmValue(0);
+	engine->rpmCalculator.setRpmValue(300);
+	dut.updateState(300, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+
+	engine->rpmCalculator.setRpmValue(engineConfiguration->cranking.rpm);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+
+	engineConfiguration->isCylinderCleanupLatching = false;
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection()) << "selecting Roadside must release the workshop latch";
+}
+
+TEST(limp, floodClearWorkshopDoesNotArmWhileAlreadyRunning) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	LimpManager dut;
+
+	engineConfiguration->isCylinderCleanupEnabled = true;
+	engineConfiguration->isCylinderCleanupLatching = true;
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 95);
+
+	engine->rpmCalculator.setRpmValue(engineConfiguration->cranking.rpm);
+	dut.updateState(engineConfiguration->cranking.rpm, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection()) << "selecting workshop mode must not cut a running engine";
+}
+
 TEST(limp, revLimit) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
