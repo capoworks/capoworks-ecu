@@ -135,17 +135,121 @@ static void prepareCylinderIgnitionSchedule(angle_t dwellAngleDuration, floatms_
 	engine->outputChannels.currentIgnitionMode = static_cast<uint8_t>(ignitionMode);
 }
 
-static void chargeTrailingSpark(IgnitionOutputPin* pin) {
-	pin->setHigh();
+static bool newIgnitionChargeAllowed() {
+	return engineConfiguration->isIgnitionEnabled && !hasFirmwareError() && getLimpManager()->allowIgnition().value;
 }
 
-static void fireTrailingSpark(IgnitionOutputPin* pin) {
-	pin->setLow();
+static void fireTrailingSpark(IgnitionContext ctx) {
+	chibios_rt::CriticalSectionLocker csl;
+	if (ctx.eventIndex >= MAX_CYLINDER_COUNT) {
+		return;
+	}
+	auto& event = engine->ignitionEvents.elements[ctx.eventIndex];
+	if (!event.trailingPending || ctx.generation != event.trailingGeneration) {
+		return;
+	}
+
+	// Invalidate before cancellation so an extracted duplicate cannot revive this cycle.
+	event.trailingPending = false;
+	event.trailingCharging = false;
+	engine->scheduler.cancel(&event.trailingSparkCharge);
+	engine->scheduler.cancel(&event.trailingSparkFire);
+	enginePins.trailingCoils[event.trailingCylinder].setLow();
+}
+
+static void chargeTrailingSpark(IgnitionContext ctx) {
+	chibios_rt::CriticalSectionLocker csl;
+	if (ctx.eventIndex >= MAX_CYLINDER_COUNT) {
+		return;
+	}
+	auto& event = engine->ignitionEvents.elements[ctx.eventIndex];
+	if (!event.trailingPending || ctx.generation != event.trailingGeneration) {
+		return;
+	}
+
+	// A copied callback may execute after the original already charged this cycle.
+	if (event.trailingCharging) {
+		return;
+	}
+
+	if (!newIgnitionChargeAllowed() || !engineConfiguration->enableTrailingSparks) {
+		event.trailingPending = false;
+		engine->scheduler.cancel(&event.trailingSparkCharge);
+		engine->scheduler.cancel(&event.trailingSparkFire);
+		return;
+	}
+
+	event.trailingCharging = true;
+	enginePins.trailingCoils[event.trailingCylinder].setHigh();
+}
+
+uint16_t IgnitionContext::outputsMask() const {
+	return eventIndex < MAX_CYLINDER_COUNT ? engine->ignitionEvents.elements[eventIndex].outputMaskSnapshot : 0;
+}
+
+static bool isCurrent(IgnitionContext ctx, const IgnitionEvent& event) {
+	return ctx.generation == event.generation && event.state != IgnitionOccurrenceState::Closed;
+}
+
+static void nextChargeGeneration(IgnitionEvent& event) {
+	event.chargeGeneration = (event.chargeGeneration + 1) & 0x7ffffff;
+	if (!event.chargeGeneration) {
+		event.chargeGeneration = 1;
+	}
+}
+
+static IgnitionContext chargeContext(IgnitionContext ctx, const IgnitionEvent& event) {
+	ctx.generation = event.chargeGeneration;
+	return ctx;
+}
+
+static IgnitionContext beginOccurrence(IgnitionEvent& event) {
+	nextChargeGeneration(event);
+	event.generation = (event.generation + 1) & 0x7ffffff;
+	if (!event.generation) {
+		event.generation = 1;
+	}
+	IgnitionContext ctx;
+	ctx.eventIndex = event.cylinderIndex;
+	ctx.generation = event.generation;
+	event.state = IgnitionOccurrenceState::ChargePending;
+	return ctx;
+}
+
+static void closeOccurrence(IgnitionEvent& event) {
+	// Invalidate BEFORE cancellation: an executor may already have copied action.
+	const auto priorState = event.state;
+	event.state = IgnitionOccurrenceState::Closed;
+
+	if (priorState == IgnitionOccurrenceState::ChargePending) {
+		// A multispark handoff can leave the trailing coil HIGH while the next main
+		// occurrence is still pending. Retire that lifecycle with this occurrence.
+		const bool wasTrailingCharging = event.trailingCharging;
+		event.trailingPending = false;
+		event.trailingCharging = false;
+		engine->scheduler.cancel(&event.trailingSparkCharge);
+		engine->scheduler.cancel(&event.trailingSparkFire);
+		if (wasTrailingCharging) {
+			enginePins.trailingCoils[event.trailingCylinder].setLow();
+		}
+	}
+
+	engine->scheduler.cancel(&event.dwellStartTimer);
+	engine->module<TriggerScheduler>()->cancel(&event.sparkEvent);
+	engine->scheduler.cancel(&event.sparkEvent.scheduling);
+	event.sparkEvent.fallbackIsCurrent = false;
 }
 
 void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
+	chibios_rt::CriticalSectionLocker csl;
+	if (ctx.eventIndex >= MAX_CYLINDER_COUNT) {
+		return;
+	}
 	efitick_t nowNt = getTimeNowNt();
 	auto& event = engine->ignitionEvents.elements[ctx.eventIndex];
+	if (!isCurrent(ctx, event)) {
+		return;
+	}
 	const bool staleOverdwell = ctx.isOverdwellProtect && !event.sparkEvent.fallbackIsCurrent;
 	if (ctx.isOverdwellProtect && !staleOverdwell) {
 		// The fallback fired before the expected trigger tooth. Do not later fire
@@ -154,8 +258,8 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
 	}
 
 	float actualDwellMs = event.actualDwellTimer.getElapsedSeconds(nowNt) * 1e3;
-	float minDwell = 0.8f * event.sparkDwell;
-	if (!ctx.isOverdwellProtect && actualDwellMs < minDwell) {
+	float minDwell = 0.8f * event.occurrenceDwell;
+	if (!ctx.isOverdwellProtect && event.state == IgnitionOccurrenceState::Charging && actualDwellMs < minDwell) {
 		float extraTimeUs = (minDwell - actualDwellMs) * 1e3;
 
 		if (extraTimeUs < 10) {
@@ -165,7 +269,7 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
 		efitick_t delayedFireTime = nowNt + efidur_t{(uint32_t)USF2NT(extraTimeUs)};
 
 		// cancel multispark in case of underdwell
-		ctx.sparksRemaining = 0;
+		event.sparksRemaining = 0;
 
 		// re-schedule ourselves at a later time once enough dwell has elapsed
 		// This is fine to do because it will retard the effective ignition timing, but
@@ -175,13 +279,17 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
 		return;
 	}
 
+	if (!staleOverdwell) {
+		closeOccurrence(event);
+	}
+
 #if EFI_UNIT_TEST
 	if (engine->onIgnitionEvent) {
 		engine->onIgnitionEvent(ctx, false);
 	}
 #endif
 
-	forEachSetBit(ctx.outputsMask, [](size_t idx) { enginePins.coils[idx].setLow(); });
+	forEachSetBit(event.outputMaskSnapshot, [](size_t idx) { enginePins.coils[idx].setLow(); });
 	if (staleOverdwell) {
 		// Still discharge the old outputs, but do not cancel or rebuild a newer cycle.
 		return;
@@ -202,24 +310,35 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
 	}
 
 	// If there are more sparks to fire, schedule them
-	if (ctx.sparksRemaining > 0 && !ctx.isOverdwellProtect) {
-		ctx.sparksRemaining--;
+	if (event.sparksRemaining > 0 && !ctx.isOverdwellProtect && newIgnitionChargeAllowed()) {
+		event.sparksRemaining--;
+		ctx = beginOccurrence(event);
+		event.occurrenceDwell = NT2USF(engine->engineState.multispark.dwell) * 0.001f;
 
 		efitick_t nextDwellStart = nowNt + engine->engineState.multispark.delay;
 		efitick_t nextFiring = nextDwellStart + engine->engineState.multispark.dwell;
 
 		// We can schedule both of these right away, since we're going for "asap" not "particular angle"
-		engine->scheduler.schedule("dwell", &event.dwellStartTimer, nextDwellStart, {&turnSparkPinHigh, ctx});
+		engine->scheduler.schedule(
+				"dwell", &event.dwellStartTimer, nextDwellStart, {&turnSparkPinHigh, chargeContext(ctx, event)});
 		engine->scheduler.schedule(
 				"firing", &event.sparkEvent.scheduling, nextFiring, {fireSparkAndPrepareNextSchedule, ctx});
 	} else {
-		if (engineConfiguration->enableTrailingSparks && !ctx.isOverdwellProtect) {
+		if (event.trailingPending && !ctx.isOverdwellProtect) {
+			IgnitionContext trailingCtx = ctx;
+			trailingCtx.generation = event.trailingGeneration;
 			// Trailing sparks are enabled - schedule an event for the corresponding trailing coil
 			scheduleByAngle(
 					&event.trailingSparkFire,
 					nowNt,
 					engine->engineState.trailingSparkAngle,
-					{&fireTrailingSpark, &enginePins.trailingCoils[event.cylinderNumber]});
+					{&fireTrailingSpark, trailingCtx});
+		}
+
+		if (event.trailingPending && ctx.isOverdwellProtect) {
+			IgnitionContext trailingCtx = ctx;
+			trailingCtx.generation = event.trailingGeneration;
+			fireTrailingSpark(trailingCtx);
 		}
 
 		// If all events have been scheduled, prepare for next time.
@@ -230,11 +349,24 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
 }
 
 void turnSparkPinHigh(IgnitionContext ctx) {
-	efitick_t nowNt = getTimeNowNt();
-
-	forEachSetBit(ctx.outputsMask, [](size_t idx) { enginePins.coils[idx].setHigh(); });
-
+	chibios_rt::CriticalSectionLocker csl;
+	if (ctx.eventIndex >= MAX_CYLINDER_COUNT) {
+		return;
+	}
 	auto& event = engine->ignitionEvents.elements[ctx.eventIndex];
+	if (ctx.generation != event.chargeGeneration || event.state != IgnitionOccurrenceState::ChargePending ||
+		event.wasSparkLimited) {
+		return;
+	}
+	ctx.generation = event.generation;
+	if (!newIgnitionChargeAllowed()) {
+		event.wasSparkLimited = true;
+		closeOccurrence(event);
+		return;
+	}
+	efitick_t nowNt = getTimeNowNt();
+	event.state = IgnitionOccurrenceState::Charging;
+	forEachSetBit(event.outputMaskSnapshot, [](size_t idx) { enginePins.coils[idx].setHigh(); });
 
 	event.actualDwellTimer.reset(nowNt);
 
@@ -244,14 +376,21 @@ void turnSparkPinHigh(IgnitionContext ctx) {
 	}
 #endif
 
-	if (engineConfiguration->enableTrailingSparks) {
-		IgnitionOutputPin* output = &enginePins.trailingCoils[event.cylinderNumber];
+	if (engineConfiguration->enableTrailingSparks && !event.trailingPending) {
+		event.trailingPending = true;
+		event.trailingCharging = false;
+		event.trailingGeneration = (event.trailingGeneration + 1) & 0x7ffffff;
+		if (!event.trailingGeneration) {
+			event.trailingGeneration = 1;
+		}
+		IgnitionContext trailingCtx = ctx;
+		trailingCtx.generation = event.trailingGeneration;
 		// Trailing sparks are enabled - schedule an event for the corresponding trailing coil
 		scheduleByAngle(
 				&event.trailingSparkCharge,
 				nowNt,
 				engine->engineState.trailingSparkAngle,
-				{&chargeTrailingSpark, output});
+				{&chargeTrailingSpark, trailingCtx});
 	}
 }
 
@@ -262,6 +401,15 @@ static void scheduleSparkEvent(
 		EngPhase dwellAngle,
 		EngPhase sparkAngle,
 		const EnginePhaseInfo& phase) {
+	chibios_rt::CriticalSectionLocker csl;
+	if (event.state != IgnitionOccurrenceState::Closed || event.trailingPending || event.sparkEvent.scheduling.action) {
+		// A previous charge still owns this timer, possibly across sync loss or
+		// configuration reset. Let it discharge its outputs before reusing the
+		// event: replacing it could strand an old coil, while retaining it could
+		// leave the new charge without a fallback if the old timer fires first.
+		return;
+	}
+
 	float angleOffset = dwellAngle - phase.currentEngPhase;
 	if (angleOffset < 0) {
 		angleOffset += engine->engineState.engineCycle;
@@ -270,10 +418,12 @@ static void scheduleSparkEvent(
 	engine->engineState.sparkCounter++;
 	event.wasSparkLimited = limitedSpark;
 
-	IgnitionContext ctx;
-	ctx.outputsMask = event.calculateIgnitionOutputMask();
-	ctx.eventIndex = event.cylinderIndex;
-	ctx.sparksRemaining = limitedSpark ? 0 : engine->engineState.multispark.count;
+	auto ctx = beginOccurrence(event);
+	event.outputMaskSnapshot = event.calculateIgnitionOutputMask();
+	event.occurrenceDwell = dwellMs;
+	event.trailingDwell = dwellMs;
+	event.trailingCylinder = event.cylinderNumber;
+	event.sparksRemaining = limitedSpark ? 0 : engine->engineState.multispark.count;
 
 	efitick_t chargeTime;
 
@@ -286,7 +436,8 @@ static void scheduleSparkEvent(
 		 * This way we make sure that coil dwell started while spark was enabled would fire and not burn
 		 * the coil.
 		 */
-		chargeTime = scheduleByAngle(&event.dwellStartTimer, phase.timestamp, angleOffset, {&turnSparkPinHigh, ctx});
+		chargeTime = scheduleByAngle(
+				&event.dwellStartTimer, phase.timestamp, angleOffset, {&turnSparkPinHigh, chargeContext(ctx, event)});
 	}
 
 	/**
@@ -296,8 +447,7 @@ static void scheduleSparkEvent(
 	efiAssertVoid(ObdCode::CUSTOM_ERR_6591, !std::isnan(sparkAngle.angle), "findAngle#4");
 	assertAngleRange(sparkAngle.angle, "findAngle#a5", ObdCode::CUSTOM_ERR_6549);
 
-	// Keep registration of the fallback atomic with the event it protects.
-	chibios_rt::CriticalSectionLocker csl;
+	// Registration of the charge, spark and fallback is protected by the same lock.
 	bool scheduled = engine->module<TriggerScheduler>()->scheduleOrQueue(
 			&event.sparkEvent, sparkAngle, {fireSparkAndPrepareNextSchedule, ctx}, phase);
 
@@ -311,6 +461,31 @@ static void scheduleSparkEvent(
 		}
 		engine->scheduler.schedule(
 				"overdwell", &event.sparkEvent.scheduling, fireTime, {fireSparkAndPrepareNextSchedule, ctx});
+	}
+}
+
+// A sync/configuration reset must never let an old pending HIGH occur later.
+// Main charging occurrences retain their armed LOW. A trailing pending charge is
+// dropped only before HIGH; once HIGH has happened, its matched LOW is retained.
+void cancelPendingIgnition() {
+	chibios_rt::CriticalSectionLocker csl;
+#if EFI_UNIT_TEST
+	if (!engine) {
+		return;
+	}
+#endif // EFI_UNIT_TEST
+
+	for (auto& event : engine->ignitionEvents.elements) {
+		if (event.state == IgnitionOccurrenceState::ChargePending) {
+			closeOccurrence(event);
+		}
+		event.sparksRemaining = 0;
+
+		engine->scheduler.cancel(&event.trailingSparkCharge);
+		if (event.trailingPending && !event.trailingCharging) {
+			event.trailingPending = false;
+			engine->scheduler.cancel(&event.trailingSparkFire);
+		}
 	}
 }
 

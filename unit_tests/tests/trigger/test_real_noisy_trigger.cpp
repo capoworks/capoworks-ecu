@@ -34,7 +34,7 @@ static void testNoOverdwell(const char* file) {
 		auto nowNt = getTimeNowNt();
 
 		int cyl = 0;
-		uint16_t mask = ctx.outputsMask;
+		uint16_t mask = ctx.outputsMask();
 		while (mask) {
 			if (mask & 0x1) {
 				if (state) {

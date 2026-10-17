@@ -12,32 +12,24 @@ int getNumberOfSparks(ignition_mode_e mode);
 percent_t getCoilDutyCycle(float rpm);
 void initializeIgnitionActions();
 
+// Passed by value through the one-word timer action. Mutable scheduling fields
+// live in IgnitionEvent; an extracted old callback cannot acquire a new occurrence.
 union IgnitionContext {
-	constexpr IgnitionContext() {
-		// First, initialize all bits to a preditable state
-		_pad = nullptr;
-
-		// Then initialize real values
-		outputsMask = 0;
-		eventIndex = 0xF;
-		sparksRemaining = 0;
-		isOverdwellProtect = false;
-	}
-
+	constexpr IgnitionContext() : _pad(nullptr) { eventIndex = 0xF; }
 	struct {
-		uint16_t outputsMask : 12;
-		uint8_t eventIndex : 4;
-
-		// How many additional sparks should we fire after the first one?
-		// For single sparks, this should be zero.
-		uint8_t sparksRemaining;
-
-		bool isOverdwellProtect : 1;
+		uint32_t eventIndex : 4;
+		uint32_t generation : 27;
+		uint32_t isOverdwellProtect : 1;
 	};
 	void* _pad;
+	uint16_t outputsMask() const;
 };
 
 static_assert(sizeof(IgnitionContext) <= sizeof(void*));
 
 void turnSparkPinHigh(IgnitionContext ctx);
 void fireSparkAndPrepareNextSchedule(IgnitionContext ctx);
+
+// Cancel main charges that have not reached HIGH yet. This is a main-loop
+// lifecycle operation; already charging outputs retain their scheduled LOW.
+void cancelPendingIgnition();
