@@ -58,6 +58,29 @@ static void setupHealthyCam(int bank, int cam) {
 	engine->triggerCentral.vvtPosition[bank][cam].t.reset();
 }
 
+TEST(SensorCheckerOil, InconsistentOilSensorsUseRangePerformanceDtcs) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	StoredValueSensor oilPressure(SensorType::OilPressure, MS2NT(500));
+	StoredValueSensor oilTemperature(SensorType::OilTemperature, MS2NT(500));
+	ASSERT_TRUE(oilPressure.Register());
+	ASSERT_TRUE(oilTemperature.Register());
+	oilPressure.invalidate(UnexpectedCode::Inconsistent);
+	oilTemperature.invalidate(UnexpectedCode::Inconsistent);
+
+	setupSensorCheckerPreconditions();
+	engine->module<SensorChecker>()->onSlowCallback();
+
+	EXPECT_FALSE(hasError(ObdCode::OBD_OilP_Timeout));
+	EXPECT_FALSE(hasError(ObdCode::OBD_OilT_Timeout));
+
+	runSensorChecks();
+
+	EXPECT_TRUE(hasError(ObdCode::OBD_OilP_Timeout));
+	EXPECT_TRUE(hasError(ObdCode::OBD_OilT_Timeout));
+	oilPressure.unregister();
+	oilTemperature.unregister();
+}
+
 // ==================== checkTriggerDecoder (crank) ====================
 
 TEST(SensorCheckerCrank, NoErrorWhenFewSyncErrors) {
