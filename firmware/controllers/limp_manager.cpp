@@ -262,7 +262,7 @@ void LimpManager::updateCutsInjectorDuty(float rpm, efitick_t nowNt, Clearable& 
 
 void LimpManager::updateCutsFloodClear(Clearable& allowFuel) {
 	bool floodClearRequested = engineConfiguration->isCylinderCleanupEnabled &&
-		Sensor::getOrZero(SensorType::DriverThrottleIntent) > CLEANUP_MODE_TPS;
+							   Sensor::getOrZero(SensorType::DriverThrottleIntent) > CLEANUP_MODE_TPS;
 
 	// Releasing the pedal (or disabling flood clear) always releases the workshop latch.
 	if (!floodClearRequested) {

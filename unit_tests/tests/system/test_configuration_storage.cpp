@@ -242,9 +242,7 @@ TEST_F(ConfigurationStorage, startsWithInvalidPrimaryWhenBackupIsOnlyValidCopy) 
 }
 
 TEST_F(ConfigurationStorage, rejectsPayloadChangedDuringProgramming) {
-	memory.afterFirstChunk = [this] {
-		reinterpret_cast<char*>(&newData.persistentConfiguration)[10] ^= 0x20;
-	};
+	memory.afterFirstChunk = [this] { reinterpret_cast<char*>(&newData.persistentConfiguration)[10] ^= 0x20; };
 	auto result = writeConfigurationCopies(firstAddress, secondAddress, newData);
 	EXPECT_FALSE(result.success());
 	EXPECT_EQ(result.phase, ConfigurationWritePhase::Verify);
@@ -254,9 +252,7 @@ TEST_F(ConfigurationStorage, rejectsPayloadChangedDuringProgramming) {
 }
 
 TEST_F(ConfigurationStorage, rejectsPayloadChangedAfterItsCrcWasCalculated) {
-	memory.beforeProgram = [this] {
-		reinterpret_cast<char*>(&newData.persistentConfiguration)[10] ^= 0x20;
-	};
+	memory.beforeProgram = [this] { reinterpret_cast<char*>(&newData.persistentConfiguration)[10] ^= 0x20; };
 	auto result = writeConfigurationCopies(firstAddress, secondAddress, newData);
 	EXPECT_FALSE(result.success());
 	EXPECT_EQ(result.phase, ConfigurationWritePhase::Verify);

@@ -33,8 +33,7 @@ bool isScheduleBatchValid(const ScheduledAction* events, size_t count, efitick_t
 
 		if (events[i].time >= now) {
 			// Unsigned distance is exact across the full signed timestamp range.
-			uint64_t forward =
-					static_cast<uint64_t>(events[i].time.count) - static_cast<uint64_t>(now.count);
+			uint64_t forward = static_cast<uint64_t>(events[i].time.count) - static_cast<uint64_t>(now.count);
 			if (forward >= maximumForward) {
 				return false;
 			}

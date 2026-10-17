@@ -689,8 +689,7 @@ void EtbController::update() {
 
 		if (m_flashResumePending) {
 			bool positionReady =
-					Sensor::hasUpdatedAfter(m_positionSensor, m_flashFinishedAt) &&
-					Sensor::get(m_positionSensor).Valid;
+					Sensor::hasUpdatedAfter(m_positionSensor, m_flashFinishedAt) && Sensor::get(m_positionSensor).Valid;
 			bool pedalReady =
 					!isEtbMode() || (Sensor::hasUpdatedAfter(SensorType::AcceleratorPedal, m_flashFinishedAt) &&
 									 Sensor::get(SensorType::AcceleratorPedal).Valid);
