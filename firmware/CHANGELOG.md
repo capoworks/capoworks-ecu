@@ -36,6 +36,7 @@ or
 
 ### Added
  - SD card logs are now organized into `YYYY/MM/DD` folders when the real-time clock is set. If the clock is not set, logs are still written to the root of the card with a sequential name.
+ - Add an opt-in "Service / Workshop" flood-clear mode that keeps fuel cut through the cranking-to-running transition until the accelerator is released. Roadside remains the default and restores fuel at running RPM; cranking priming now follows driver throttle intent and its flood-clear help reflects the 90% threshold.
  - Fahrenheit temperature support: pick "Fahrenheit" under Settings > Temperature Units in TunerStudio and all temperature gauges, datalogs, sensor adjustments, and thermistor calibration points display in °F. The stored tune is unchanged (always Celsius internally), so switching units never resets your configuration and works on every supported board.
  - Add mode for "true" wasted spark on odd fire engines (Viper V10) where companion cylinders are not exactly 360 degrees apart. Requires cam sync.
  - New `CPU usage` output channel showing approximate firmware CPU load
