@@ -48,7 +48,8 @@ rm -f $ZIP $IMAGE
 dd if=/dev/zero of=$IMAGE bs=1024 count=$FS_SIZE
 
 # create a FAT filesystem inside, name it "FOME EFI"
-mkfs.fat -v -r 64 $IMAGE
+# Use one sector per cluster so the small image does not waste 2 KiB per file.
+mkfs.fat -s 1 -v -r 64 $IMAGE
 # labels can be no longer than 11 characters
 fatlabel $IMAGE "FOME EFI"
 
