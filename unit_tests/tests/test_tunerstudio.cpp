@@ -2,8 +2,77 @@
 #include "airmass_injection_state.h"
 #include "tunerstudio.h"
 #include "tunerstudio_io.h"
+#include "status_loop.h"
+#include "limp_manager.h"
 
 static uint8_t st5TestBuffer[16000];
+
+TEST(VeAnalyzeTelemetry, crankingAndWallModelDisable) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	WallFuelController wallController;
+	engine->engineModules.get<WallFuelController>().set(&wallController);
+
+	engine->rpmCalculator.setRpmValue(300);
+	Sensor::setMockValue(SensorType::Rpm, 300);
+	updateTunerStudioState();
+	EXPECT_EQ(engine->outputChannels.veAnalyzeIsCranking, 1);
+
+	engine->rpmCalculator.setRpmValue(1500);
+	Sensor::setMockValue(SensorType::Rpm, 1500);
+	engineConfiguration->wwaeTau = 0.3f;
+	engineConfiguration->wwaeBeta = 0.3f;
+	wallController.onFastCallback();
+	engine->injectionEvents.elements[0].getWallFuel().wallFuelCorrection = -0.001f;
+	updateTunerStudioState();
+	EXPECT_EQ(engine->outputChannels.veAnalyzeIsCranking, 0);
+	EXPECT_NEAR(engine->outputChannels.wallFuelCorrectionValue, -1.0f, 0.01f);
+
+	// A previous correction must not keep filtering samples after the model is disabled.
+	engineConfiguration->wwaeTau = 0;
+	wallController.onFastCallback();
+	updateTunerStudioState();
+	EXPECT_FLOAT_EQ(engine->outputChannels.wallFuelCorrectionValue, 0);
+}
+
+TEST(VeAnalyzeTelemetry, cutRecoveryResetProgressAndSaturation) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->rpmCalculator.setRpmValue(1500);
+	Sensor::setMockValue(SensorType::Rpm, 1500);
+	auto& limp = engine->module<LimpManager>();
+
+	advanceTimeUs(10e6);
+	// A transient Lua spark cut exercises the same ECU recovery timer as limiter cuts.
+	engine->engineState.lua.luaIgnCut = true;
+	limp->updateState(1500, getTimeNowNt());
+	updateTunerStudioState();
+	EXPECT_FLOAT_EQ(engine->outputChannels.veAnalyzeTimeSinceCut, 0);
+
+	advanceTimeUs(1.5e6);
+	engine->engineState.lua.luaIgnCut = false;
+	limp->updateState(1500, getTimeNowNt());
+	updateTunerStudioState();
+	EXPECT_NEAR(engine->outputChannels.veAnalyzeTimeSinceCut, 1.5f, 0.01f);
+	advanceTimeUs(1e6);
+	updateTunerStudioState();
+	EXPECT_NEAR(engine->outputChannels.veAnalyzeTimeSinceCut, 2.5f, 0.01f);
+
+	advanceTimeUs(700e6);
+	updateTunerStudioState();
+	// The timer's 32-bit tick horizon may be reached before the packed field's maximum.
+	EXPECT_GT(engine->outputChannels.veAnalyzeTimeSinceCut, 2.0f);
+	EXPECT_LE(engine->outputChannels.veAnalyzeTimeSinceCut, 655.35f);
+
+	// The newer cut must restart the quiet period.
+	engine->engineState.lua.luaIgnCut = true;
+	limp->updateState(1500, getTimeNowNt());
+	updateTunerStudioState();
+	EXPECT_FLOAT_EQ(engine->outputChannels.veAnalyzeTimeSinceCut, 0);
+	engine->engineState.lua.luaIgnCut = false;
+	limp->updateState(1500, getTimeNowNt());
+	advanceTimeUs(0.5e6);
+	updateTunerStudioState();
+	EXPECT_NEAR(engine->outputChannels.veAnalyzeTimeSinceCut, 0.5f, 0.01f);
+}
 
 class BufferTsChannel : public TsChannelBase {
 public:

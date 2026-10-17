@@ -449,10 +449,8 @@ void EngineState::periodicFastCallback() {
 					publishAirmassDiagnostics(fuelCandidate.Diagnostics);
 				}
 			}
-			admission.completeCalculation(
-					fuelCalculation,
-					fuelPublicationValid,
-					fuelCandidate.HasBlendedDiagnostics ? fuelCandidate.Fault : AirmassInjectionFault::None);
+			// Every physical fallback status feeds VE Analyze admission.
+			admission.completeCalculation(fuelCalculation, fuelPublicationValid, fuelCandidate.Fault);
 		}
 	}
 
