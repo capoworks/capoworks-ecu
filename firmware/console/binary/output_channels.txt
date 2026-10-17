@@ -311,4 +311,21 @@ struct_no_prefix output_channels_s
 	int16_t autoscale knockRetardLoad;Load: knock retard;"", 0.1, 0, -3276, 3276, 1
 	int16_t[12 iterate] autoscale knockGainLoad;Load: knock gain;"", 0.1, 0, -3276, 3276, 1
 	int16_t autoscale hpfpTargetLoad;Load: HPFP target;"", 0.1, 0, -3276, 3276, 1
+
+	float blendedSdMass;Air blend: SD raw mass;"mg", 1000, 0, 0, 0, 2
+	float blendedAlphaNMass;Air blend: Alpha-N raw mass;"mg", 1000, 0, 0, 0, 2
+	uint16_t autoscale blendedRequestedAuthority;Air blend: requested Alpha-N weight;"%", 0.01, 0, 0, 100, 2
+	uint16_t autoscale blendedEffectiveAuthority;Air blend: effective Alpha-N weight;"%", 0.01, 0, 0, 100, 2
+	float blendedCorrection;Air blend: common correction multiplier;"", 1, 0, 0, 0, 3
+	uint8_t blendedFault;Air blend: model fault;"code", 1, 0, 0, 8, 0
+	uint16_t blendedFlags;Air blend: model flags;"bits", 1, 0, 0, 0, 0
+
+	uint8_t blendedStatus;Air blend: injection admission state;"code", 1, 0, 0, 4, 0
+	uint16_t autoscale blendedSdLoad;Air blend: SD branch load;"kPa", 0.1, 0, 0, 0, 2
+	uint16_t autoscale blendedAlphaNLoad;Air blend: Alpha-N branch load;"% TPS", 0.01, 0, 0, 100, 2
+	uint16_t autoscale blendedSdVe;Air blend: SD branch VE;"%", 0.1, 0, 0, 0, 1
+	uint16_t autoscale blendedAlphaNVe;Air blend: Alpha-N branch filling;"%", 0.1, 0, 0, 0, 1
+	float blendedLambdaLoad;Air blend: current lambda load;"", 1, 0, 0, 0, 2
+	float blendedAuthorityLoad;Air blend: authority Y coordinate;"", 1, 0, 0, 0, 2
+	uint8_t blendedVeAnalyzeEndpoint;Air blend: qualified analyze endpoint;"code", 1, 0, 0, 2, 0
 end_struct

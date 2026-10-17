@@ -32,11 +32,13 @@ or
 ## Unreleased
 
 ### Breaking Changes
+ - Advance the flash data version to `20031` for the appended SD + Alpha-N authority schema. Older binary tunes are rejected; transfer blend calibration manually.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
  - Advance the flash data version to `20030` for the experimental ignition settings and appended independent consumer selectors in the tune layout. Older binary tunes are rejected and defaults restored. Use the firmware's matching generated TunerStudio INI and transfer tune values manually; both experimental ignition settings remain Legacy by default.
 
 ### Added
+ - Add an SD + Alpha-N airmass blend authority table with selectable TPS or measured-MAP load axes.
  - Add opt-in full-engine-cycle RPM feedback for closed-loop idle air and ignition timing, with instantaneous fallback until a complete cycle is valid and a `rollingCycleRpm` diagnostic channel. Instantaneous feedback remains the default.
  - Add experimental opt-in ignition cycle-profile conversion and time-budget dwell planning on supported rising-only missing-tooth crank wheels with full cam sync. Time-budget planning requires individual coils, admits each target for one TDC occurrence, and retargets only within causal timing and physical dwell windows. Legacy timing remains the default and fallback; RPM and injection policies are unchanged.
  - Independent full-precision load coordinates for injection phase, ignition trims, staged injection, STFT, lambda protection, knock, trailing spark, IAT correction and HPFP, with per-function selector UI and diagnostic cursors.

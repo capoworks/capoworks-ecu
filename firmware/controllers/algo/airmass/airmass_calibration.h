@@ -14,14 +14,25 @@ enum class AirmassCalibration : uint8_t {
 	AlphaN,
 	MafTrim,
 	MapEstimate,
+	Authority,
 	Idle,
 	Correction0,
+};
+
+// Runtime-only qualified endpoint for composite VE analysis. Zero means no
+// usable endpoint; one and two select Speed Density and Alpha-N respectively.
+enum class AirmassVeAnalyzeEndpoint : uint8_t {
+	None,
+	SpeedDensity,
+	AlphaN,
 };
 
 struct AirmassCalibrationCache {
 	uint32_t Generation = 1;
 	uint32_t Known = 0;
 	uint32_t Valid = 0;
+	AirmassVeAnalyzeEndpoint AuthorityEndpoint = AirmassVeAnalyzeEndpoint::None;
+	bool AuthorityEndpointKnown = false;
 	int ConfigurationVersion = -1;
 #if EFI_UNIT_TEST
 	uint32_t Scans = 0;
@@ -34,3 +45,4 @@ void invalidateAirmassCalibration();
 
 bool isCapturedAirmassCalibrationValid(const AirmassInputs& inputs, AirmassCalibration calibration);
 bool isCapturedAirmassModelValid(const AirmassInputs& inputs, engine_load_mode_e model);
+AirmassVeAnalyzeEndpoint getCapturedAirmassAuthorityEndpoint(const AirmassInputs& inputs);

@@ -57,6 +57,10 @@ static void setDefaultVETable() {
 	config->alphaNBaroReferencePressure = 101.325f;
 	config->airmassTemperatureSource = AirmassTemperatureSource::Tcharge;
 	config->idleVeLoadSource = IdleVeLoadSource::EffectiveMap;
+	config->airmassBlendLoadSource = AirmassBlendLoadSource::Tps;
+	copyArray(config->airmassBlendLoadBins, {0.0f, 1.0f, 3.0f, 7.0f, 15.0f, 30.0f, 60.0f, 100.0f});
+	copyArray(config->airmassBlendRpmBins, {800, 1200, 2000, 3000, 4000, 5000, 6000, 8000});
+	setTable(config->airmassBlendTable, 0);
 	config->injectionPhaseLoadSource = AFR_None;
 	for (auto& source : config->ignitionTrimLoadSource) {
 		source = AFR_None;

@@ -5,7 +5,8 @@
 
 #define MAIN_LOOP_RATE 1000
 
-class MainLoop final : PeriodicController<1024> {
+// Captured fuel-publication/model nested frames require this stack budget.
+class MainLoop final : PeriodicController<5120> {
 public:
 	MainLoop();
 	void PeriodicTask(efitick_t nowNt) override;
