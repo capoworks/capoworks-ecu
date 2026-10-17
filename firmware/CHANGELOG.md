@@ -81,6 +81,7 @@ or
  - Improve WiFi reconnection reliability after your laptop goes to sleep/drops off the network while connected #713
  - Fix vehicle speed indication while using a BMW E90/Mk60e5 ABS controller as the speed source
  - Core8 v2.3/v2.4 critical error LED now uses PG11 instead of the low-side output9 PD14
+ - Configured MC33816 SPI selection is now honored instead of being overwritten during initialization
 
 ## May 2026 Release
 
