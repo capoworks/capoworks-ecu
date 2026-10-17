@@ -55,6 +55,7 @@ or
  - Added gauges for EGT channels 3-8 in TunerStudio
  - ECUs with WiFi (Atlas) can download logs over WiFi connection in addition to USB #842
  - ECUs with WiFi (Atlas) can download the TunerStudio ini matching the installed firmware over WiFi, from the same page as the logs. The page is available even with no SD card inserted.
+ - USB mass storage can now be enabled independently of SD-card file logging, allowing INI-only MSD builds without FatFs.
 
 
 ### Changed

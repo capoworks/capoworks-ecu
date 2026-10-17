@@ -18,9 +18,12 @@
 #include "pch.h"
 
 #if HAL_USE_USB_MSD
-#include "mmc_card.h"
 #include "mass_storage_device.h"
 #endif // HAL_USE_USB_MSD
+
+#if HAL_USE_USB_MSD && EFI_FILE_LOGGING
+#include "mmc_card.h"
+#endif // HAL_USE_USB_MSD && EFI_FILE_LOGGING
 
 #if HAL_USE_SERIAL_USB
 
@@ -403,7 +406,7 @@ static void usb_event(USBDriver *usbp, usbevent_t event) {
 		sduConfigureHookI(&SDU1);
 #endif
 
-		#if HAL_USE_USB_MSD
+		#if HAL_USE_USB_MSD && EFI_FILE_LOGGING
 			// Tell the MMC thread to wake up and mount the card as a USB device
 			onUsbConnectedNotifyMmcI();
 		#endif
