@@ -13,6 +13,7 @@
 #include "io_pins.h"
 #include "engine_configuration.h"
 #include "injection_gpio.h"
+#include "scheduler.h"
 
 void initPrimaryPins();
 void initOutputPins();
@@ -20,7 +21,43 @@ void turnAllPinsOff();
 
 #ifdef __cplusplus
 
-class IgnitionOutputPin : public NamedOutputPin {};
+// The physical output owns its guard independently of the ignition occurrence
+// which requested the pulse.
+class IgnitionOutputPin : public NamedOutputPin {
+public:
+	bool canCharge(uint32_t owner) const;
+	void setValue(int logicValue) override;
+	void setGuardIndex(uint8_t index) {
+		m_guardIndex = index;
+	}
+	static void expireGuard(void* encoded);
+	static bool validDwell(float dwellMs);
+	bool charge(uint32_t owner, float dwellMs, action_s guardAction);
+	void discharge(uint32_t owner);
+	void setLow() override;
+	bool stop();
+	void deInit();
+	bool ownedBy(uint32_t owner) const {
+		return m_owner == owner && getLogicValue();
+	}
+	efitick_t firstHigh() const {
+		return m_firstHigh;
+	}
+	efitick_t hardDeadline() const {
+		return m_hardDeadline;
+	}
+
+private:
+	scheduling_s m_guard;
+	efitick_t m_firstHigh = 0;
+	efitick_t m_hardDeadline = 0;
+	uint32_t m_owner = 0;
+	uint32_t m_physicalGeneration = 0;
+	action_s m_guardAction;
+	uint8_t m_guardIndex = 0;
+
+	void armGuard(float dwellMs, action_s action);
+};
 
 /**
  * OutputPin with semi-automated init/deinit on configuration change

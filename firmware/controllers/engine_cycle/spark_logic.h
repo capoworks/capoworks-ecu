@@ -23,6 +23,9 @@ union IgnitionContext {
 	};
 	void* _pad;
 	uint16_t outputsMask() const;
+	uint32_t owner() const {
+		return ((generation << 4) | eventIndex) + 1;
+	}
 };
 
 static_assert(sizeof(IgnitionContext) <= sizeof(void*));
@@ -33,3 +36,4 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx);
 // Cancel main charges that have not reached HIGH yet. This is a main-loop
 // lifecycle operation; already charging outputs retain their scheduled LOW.
 void cancelPendingIgnition();
+void stopIgnition();
