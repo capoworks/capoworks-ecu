@@ -83,6 +83,12 @@ AirmassEvaluation SpeedDensityAirmass::evaluateAirmass(
 	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
 	if (!evaluation.Valid) {
 		evaluation.Result.CylinderAirmass = 0;
+	} else {
+		// This standalone model owns the whole trim mass and indexes on the same
+		// captured MAP coordinate used by its physics.
+		evaluation.TrimSdActive = true;
+		evaluation.TrimSdWeightedMass = airmass;
+		evaluation.TrimSdLoadKpa = inputs.NativeMap.Map;
 	}
 	if (postState) {
 		publishAirmassDiagnostics(resultDiagnostics);
@@ -155,6 +161,10 @@ SpeedDensityAirmass::evaluateRawAirmass(const AirmassInputs& inputs, RawAirmassD
 	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
 	if (!evaluation.Valid) {
 		evaluation.Result.CylinderAirmass = 0;
+	} else {
+		evaluation.TrimSdActive = true;
+		evaluation.TrimSdWeightedMass = airmass;
+		evaluation.TrimSdLoadKpa = inputs.NativeMap.Map;
 	}
 	return evaluation;
 }

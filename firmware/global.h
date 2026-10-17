@@ -89,14 +89,13 @@ typedef unsigned int time_t;
 #endif
 
 /**
- * CAN reader and writer working areas only need ordinary SRAM: they are
- * CPU-only, DMA cannot reach CCM either way, and nothing about them depends on
- * the CCM bus.
+ * CAN reader/writer, USB console and USB mass-storage background objects only
+ * need ordinary SRAM: they are CPU-only, DMA cannot reach CCM either way, and
+ * nothing about them depends on the CCM bus.
  *
- * USB console, USB RX pump, mass storage and the main loop stay in CCM. This
- * keeps their existing placement while allowing boards whose 64k CCM has to
- * stay reserved for calibration and engine state to move only the CAN objects
- * to regular SRAM. Other boards keep their current placement.
+ * The main loop stays in CCM. This keeps other boards' existing placement while
+ * allowing boards whose 64k CCM must stay reserved for calibration, engine state
+ * and stack to move only background working areas to regular SRAM.
  */
 #if defined(EFI_RESERVE_CCM_FOR_CALIBRATION) && EFI_RESERVE_CCM_FOR_CALIBRATION
 #define CCM_OPTIONAL_BACKGROUND

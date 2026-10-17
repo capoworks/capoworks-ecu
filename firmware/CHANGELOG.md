@@ -32,12 +32,14 @@ or
 ## Unreleased
 
 ### Breaking Changes
+ - Advance the flash data version to `20032` and replace the former 4x4 residual cylinder fuel trims with separate 16x16 Speed Density and Alpha-N families. Older binary tunes are rejected; legacy fuel-trim cells are not migrated, so re-enter corrections in the new model maps. Per-cylinder ignition trims are unchanged.
  - Advance the flash data version to `20031` for the appended SD + Alpha-N authority schema. Older binary tunes are rejected; transfer blend calibration manually.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
  - Advance the flash data version to `20030` for the experimental ignition settings and appended independent consumer selectors in the tune layout. Older binary tunes are rejected and defaults restored. Use the firmware's matching generated TunerStudio INI and transfer tune values manually; both experimental ignition settings remain Legacy by default.
 
 ### Added
+ - Add separate per-cylinder Speed Density (MAP kPa/RPM) and Alpha-N (TPS/RPM) model fuel trims with shared axes and neutral defaults.
  - Add an SD + Alpha-N airmass blend authority table with selectable TPS or measured-MAP load axes.
  - Add opt-in full-engine-cycle RPM feedback for closed-loop idle air and ignition timing, with instantaneous fallback until a complete cycle is valid and a `rollingCycleRpm` diagnostic channel. Instantaneous feedback remains the default.
  - Add experimental opt-in ignition cycle-profile conversion and time-budget dwell planning on supported rising-only missing-tooth crank wheels with full cam sync. Time-budget planning requires individual coils, admits each target for one TDC occurrence, and retargets only within causal timing and physical dwell windows. Legacy timing remains the default and fallback; RPM and injection policies are unchanged.
@@ -67,6 +69,7 @@ or
 
 
 ### Changed
+ - On Core8, keep the 5 KiB main working stack and full SD/USB mass-storage support for the expanded cylinder-model calibration by reducing the Lua heap from 30,000 to 26,000 bytes.
  - Cylinder count is now derived automatically from the firing order instead of being a separate setting, so the two can no longer disagree.
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 

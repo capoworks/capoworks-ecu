@@ -13,6 +13,7 @@
 
 #include "trigger_central.h"
 #include "fuel_math.h"
+#include "cylinder_model_fuel_trim.h"
 #include "speed_density.h"
 #include "init.h"
 
@@ -210,6 +211,8 @@ void Engine::reset() {
 	airmassCalibration.ConfigurationVersion = -1;
 	airmassCalibration.AuthorityEndpoint = AirmassVeAnalyzeEndpoint::None;
 	airmassCalibration.AuthorityEndpointKnown = false;
+	cylinderTrimCalibration.reset();
+	resetCylinderModelFuelTrim(*this);
 	resetOwnedAirmassRuntimeState(*this);
 	engineState.airmassLoads = {};
 	engineState.airmassLoadsInvalidationEpoch++;

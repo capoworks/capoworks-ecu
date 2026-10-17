@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20031
+#define FLASH_DATA_VERSION 20032
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -106,7 +106,7 @@ struct_no_prefix persistent_config_s
 
 struct_no_prefix engine_configuration_s
 
-#define BLOCKING_FACTOR 1536
+#define BLOCKING_FACTOR 1600
 
 #define LUA_PWM_COUNT 8
 #define LUA_DIGITAL_INPUT_COUNT 8
@@ -1674,15 +1674,18 @@ struct cyl_trim_s
 	int8_t[TRIM_SIZE x TRIM_SIZE] autoscale table;;"", 0.2, 0, -25, 25, 1
 end_struct
 
+! Per-cylinder model fuel trims are 16x16 and belong to the SD or Alpha-N airmass family.
+! Independent of the TRIM_SIZE ignition trim tables above.
+#define CYLINDER_FUEL_TRIM_SIZE 16
+
+struct cylinder_model_fuel_trim_s
+	int8_t[CYLINDER_FUEL_TRIM_SIZE x CYLINDER_FUEL_TRIM_SIZE] autoscale table;;"%", 0.2, 0, -25, 25, 1
+end_struct
+
 ! All ign trim tables share axes
 uint16_t[TRIM_SIZE] ignTrimLoadBins;;"", 1, 0, 0, 1000, 0
 uint16_t[TRIM_SIZE] ignTrimRpmBins;;"rpm", 1, 0, 0, 20000, 0
 cyl_trim_s[12 iterate] ignTrims
-
-! All fuel trim tables share axes
-uint16_t[TRIM_SIZE] fuelTrimLoadBins;;"", 1, 0, 0, 1000, 0
-uint16_t[TRIM_SIZE] fuelTrimRpmBins;;"rpm", 1, 0, 0, 20000, 0
-cyl_trim_s[12 iterate] fuelTrims
 
 uint16_t[CRANKING_CURVE_SIZE] autoscale crankingFuelCoefE100;;"ratio", 0.01, 0, 0, 50, 2
 
@@ -1874,6 +1877,16 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 		table_cols num AIRMASS_BLEND_RPM_COUNT uint16_t airmassBlendRpmBins;;"RPM", 1, 0, 0, 18000, 0
 		table_values uint8_t airmassBlendTable;Alpha-N contribution to cylinder air mass. 0% uses SD only, 100% uses Alpha-N only.;"% Alpha-N", 1, 0, 0, 100, 0
 	end_table
+
+	! Per-cylinder model fuel trims: the only per-cylinder fuel trims. The former
+	! 4x4 residual fuel trims were removed, so this layout is not backward compatible.
+	! Each family shares one set of axes across all cylinders; SD and Alpha-N axes are independent.
+	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimLoadBins;;"kPa", 1, 0, 0, 1000, 0
+	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
+	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] sdCylinderFuelTrims
+	uint16_t[CYLINDER_FUEL_TRIM_SIZE] autoscale alphaNCylinderFuelTrimTpsBins;;"% TPS", {1/@@TPS_2_BYTE_PACKING_MULT@@}, 0, 0, 100, 2
+	uint16_t[CYLINDER_FUEL_TRIM_SIZE] alphaNCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
+	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] alphaNCylinderFuelTrims
 end_struct
 
 ! Pedal Position Sensor

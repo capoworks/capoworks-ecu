@@ -360,6 +360,10 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		return candidate;
 	}
 
+	const bool modelTrimRequired =
+			engineConfiguration->isInjectionEnabled && (!isCranking || engineConfiguration->useRunningMathForCranking);
+	AirmassEvaluation trimEvaluation;
+	bool hasTrimEvaluation = false;
 	AirmassResult airmass;
 	if (capture.Standalone) {
 		if (capture.Strategy != LM_SD_ALPHA_N && !isAirmassModelConfigurationValid(capture.Strategy)) {
@@ -380,6 +384,8 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			}
 
 			airmass = evaluation.Airmass.Result;
+			trimEvaluation = evaluation.Airmass;
+			hasTrimEvaluation = true;
 			candidate.Degraded = evaluation.Airmass.Degraded;
 			candidate.Fault = evaluation.Fault;
 			candidate.NormalizedCylinderFilling = evaluation.NormalizedFilling;
@@ -401,6 +407,10 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			}
 
 			airmass = evaluation.Result;
+			if (capture.Strategy == LM_SPEED_DENSITY || capture.Strategy == LM_ALPHA_N) {
+				trimEvaluation = evaluation;
+				hasTrimEvaluation = true;
+			}
 			candidate.Degraded = evaluation.Degraded;
 			candidate.Fault = evaluation.Degraded ? AirmassInjectionFault::Sensor : AirmassInjectionFault::None;
 		}
@@ -412,6 +422,18 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		}
 		airmass = model->getAirmass(rpm, true).value_or(AirmassResult{});
 		candidate.Fault = AirmassInjectionFault::None;
+	}
+
+	if (modelTrimRequired && hasTrimEvaluation) {
+		if (!prepareCylinderModelFuelTrim(*engine, capture.Inputs, trimEvaluation, candidate.CylinderFuelTrim)) {
+			candidate.Fault = AirmassInjectionFault::Configuration;
+			return candidate;
+		}
+		if (requireCurrent && !isFuelCaptureCurrent(capture)) {
+			candidate.Stale = true;
+			return candidate;
+		}
+		candidate.ApplyCylinderModelFuelTrim = true;
 	}
 
 	FuelComputer candidateFuelComputer = engine->fuelComputer;
@@ -559,8 +581,12 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		return candidate;
 	}
 
-	if (engine->module<DfcoController>()->cutFuel()) {
+	candidate.ModeledCycleFuelMass = cycleFuelMass;
+	const bool fuelCut = engine->module<DfcoController>()->cutFuel();
+	candidate.FuelCut = fuelCut;
+	if (fuelCut) {
 		cycleFuelMass = 0;
+		candidate.ModeledCycleFuelMass = 0;
 	}
 
 	if (publishFuelOutputs) {
@@ -581,7 +607,9 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		return candidate;
 	}
 
-	candidate.CycleInjectionMass = publishFuelOutputs ? cycleFuelMass + tpsFuelMass : 0;
+	candidate.AdditiveCycleFuelMass = publishFuelOutputs && !fuelCut ? tpsFuelMass : 0;
+	candidate.CycleInjectionMass =
+			publishFuelOutputs ? candidate.ModeledCycleFuelMass + candidate.AdditiveCycleFuelMass : 0;
 	if (!std::isfinite(candidate.CycleInjectionMass) || candidate.CycleInjectionMass < 0) {
 		candidate.Fault = AirmassInjectionFault::Result;
 		return candidate;
@@ -750,13 +778,14 @@ percent_t getInjectorDutyCycleStage2(float rpm) {
  */
 float getCycleInjectionMass(float rpm, bool isCranking) {
 	ScopePerf perf(PE::GetInjectionDuration);
-
 #if EFI_SHAFT_POSITION_INPUT
 	FuelAirmassCapture capture;
 	captureFuelAirmassInputs(rpm, engine->airmassInjectionState.publicationEpoch(), capture, false);
 	const auto candidate = calculateFuelPublication(rpm, isCranking, capture, false);
 	return candidate.Valid && !candidate.Stale ? candidate.CycleInjectionMass : 0;
 #else
+	UNUSED(rpm);
+	UNUSED(isCranking);
 	return 0;
 #endif
 }
@@ -854,15 +883,6 @@ float getStandardAirCharge() {
 	// Calculation of 100% VE air mass in g/cyl - 1 cylinder filling at 1.204/L
 	// 101.325kpa, 20C
 	return idealGasLaw(cylDisplacement, 101.325f, 273.15f + 20.0f);
-}
-
-float getCylinderFuelTrim(
-		size_t cylinderNumber, const PreparedTable3DInterpolation<TRIM_SIZE, TRIM_SIZE>& interpolation) {
-	auto trimPercent = interpolation.getValue(config->fuelTrims[cylinderNumber].table);
-
-	// Convert from percent +- to multiplier
-	// 5% -> 1.05
-	return (100 + trimPercent) / 100;
 }
 
 static Hysteresis stage2Hysteresis;
