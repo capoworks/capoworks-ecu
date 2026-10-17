@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "airmass_injection_state.h"
 #include "tunerstudio.h"
 #include "tunerstudio_io.h"
 
@@ -77,4 +78,62 @@ TEST(TunerstudioCommands, writeChunkEngineConfig) {
 	instance.handleWriteChunkCommand(&channel, 100, 1, &val);
 
 	EXPECT_EQ(configBytes[100], 50);
+}
+
+TEST(TunerstudioCommands, modeWriteClosesAdmissionAndStaleCalculation) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	::testing::NiceMock<MockTsChannel> channel;
+
+	engineConfiguration->fuelAlgorithm = LM_ALPHA_N;
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	engine->engineState.airmassCalculationValid = true;
+
+	auto& gate = engine->airmassInjectionState;
+	auto stale = gate.beginCalculation(LM_ALPHA_N, 1000, engine->getGlobalConfigurationVersion());
+	gate.completeCalculation(stale, true);
+	ASSERT_TRUE(gate.allowInjection());
+
+	stale = gate.beginCalculation(LM_ALPHA_N, 1000, engine->getGlobalConfigurationVersion());
+	gate.acceptCalculation();
+	ASSERT_TRUE(gate.isCalculationCurrent(stale));
+
+	const auto generation = engine->airmassCalibration.Generation;
+	const auto pending = gate.pendingCallbacks();
+	constexpr size_t modeOffset = offsetof(engine_configuration_s, fuelAlgorithm);
+	uint8_t newMode = static_cast<uint8_t>(LM_SPEED_DENSITY);
+	ASSERT_NE(reinterpret_cast<const uint8_t*>(engineConfiguration)[modeOffset], newMode);
+
+	TunerStudio instance;
+	instance.handleWriteChunkCommand(&channel, static_cast<uint16_t>(modeOffset), 1, &newMode);
+
+	EXPECT_EQ(engineConfiguration->fuelAlgorithm, LM_SPEED_DENSITY);
+	EXPECT_EQ(engine->airmassCalibration.Generation, generation + 1);
+	EXPECT_EQ(gate.pendingCallbacks(), pending);
+	EXPECT_FALSE(gate.isCalculationCurrent(stale));
+
+	gate.completeCalculation(stale, true);
+	EXPECT_FALSE(gate.allowInjection());
+
+	auto current = gate.beginCalculation(LM_SPEED_DENSITY, 1000, engine->getGlobalConfigurationVersion());
+	gate.completeCalculation(current, true);
+	EXPECT_TRUE(gate.allowInjection()) << "a fresh valid standalone publication recovers admission";
+}
+
+TEST(TunerstudioCommands, liveWriteInvalidatesCacheWithoutBurningVersion) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	::testing::NiceMock<MockTsChannel> channel;
+
+	const auto generation = engine->airmassCalibration.Generation;
+	const auto version = engine->getGlobalConfigurationVersion();
+	constexpr size_t modeOffset = offsetof(engine_configuration_s, fuelAlgorithm);
+	const auto mode = engineConfiguration->fuelAlgorithm;
+	uint8_t value = 50;
+
+	TunerStudio instance;
+	instance.handleWriteChunkCommand(&channel, static_cast<uint16_t>(modeOffset + 1), 1, &value);
+
+	EXPECT_EQ(reinterpret_cast<uint8_t*>(config)[modeOffset + 1], value);
+	EXPECT_EQ(engineConfiguration->fuelAlgorithm, mode);
+	EXPECT_EQ(engine->airmassCalibration.Generation, generation + 1);
+	EXPECT_EQ(engine->getGlobalConfigurationVersion(), version);
 }

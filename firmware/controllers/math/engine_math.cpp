@@ -185,6 +185,8 @@ void setTimingRpmBin(float from, float to) {
  * this method sets algorithm and ignition table scale
  */
 void setAlgorithm(engine_load_mode_e algo) {
+	chibios_rt::CriticalSectionLocker csl;
+	engine->airmassInjectionState.onConfigurationWrite(algo, algo != engineConfiguration->fuelAlgorithm);
 	engineConfiguration->fuelAlgorithm = algo;
 }
 

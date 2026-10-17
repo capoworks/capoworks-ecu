@@ -74,6 +74,11 @@ void startInjection(InjectorContext ctx);
 void endInjection(InjectorContext ctx);
 void endInjectionStage2(InjectorContext ctx);
 
+// Only these scheduler-facing wrappers own callback accounting.
+void scheduledStartInjection(InjectorContext ctx);
+void scheduledEndInjection(InjectorContext ctx);
+void scheduledEndInjectionStage2(InjectorContext ctx);
+
 /**
  * This class knows about when to inject fuel
  */

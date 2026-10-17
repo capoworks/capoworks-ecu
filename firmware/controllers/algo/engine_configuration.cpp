@@ -22,6 +22,7 @@
 
 #include "pch.h"
 
+#include "airmass.h"
 #include "speed_density.h"
 #include "flash_main.h"
 
@@ -132,6 +133,10 @@ __attribute__((weak)) void boardOnConfigurationChange(engine_configuration_s* /*
  * this method is NOT currently invoked on ECU start - actual user input has to happen!
  */
 void incrementGlobalConfigurationVersion() {
+	engine->airmassInjectionState.onConfigurationWrite(engineConfiguration->fuelAlgorithm, false);
+	if (!validateAirmassConfiguration()) {
+		return;
+	}
 	engine->globalConfigurationVersion++;
 
 	applyNewHardwareSettings();
@@ -565,6 +570,7 @@ static void setDefaultEngineConfiguration() {
 #endif
 
 void loadConfiguration() {
+	engine->airmassInjectionState.onConfigurationWrite(engineConfiguration->fuelAlgorithm, false);
 	// Clear the active configuration so that registered output pins (etc) detect the change on startup and init
 	// properly
 	prepareVoidConfiguration(&activeConfiguration);
@@ -590,6 +596,7 @@ void loadConfiguration() {
 }
 
 void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e engineType) {
+	engine->airmassInjectionState.onConfigurationWrite(engineConfiguration->fuelAlgorithm, false);
 	enginePins.reset(); // that's mostly important for functional tests
 	/**
 	 * Let's apply global defaults first

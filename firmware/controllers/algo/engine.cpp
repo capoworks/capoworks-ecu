@@ -191,6 +191,10 @@ int Engine::getGlobalConfigurationVersion() const {
 }
 
 void Engine::reset() {
+	++airmassCalibration.Generation;
+	airmassCalibration.Known = 0;
+	airmassCalibration.ConfigurationVersion = -1;
+	airmassInjectionState.onEngineStop();
 	/**
 	 * it's important for wrapAngle() that engineCycle field never has zero
 	 */
@@ -223,6 +227,7 @@ void Engine::OnTriggerSynchronizationLost() {
 	efiPrintf("engine stopped");
 
 	rpmCalculator.setStopSpinning();
+	airmassInjectionState.onEngineStop();
 
 	triggerCentral.triggerState.resetState();
 	triggerCentral.instantRpm.resetInstantRpm();

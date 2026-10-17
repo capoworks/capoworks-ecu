@@ -70,6 +70,10 @@ TESTS_SRC_CPP = \
 	tests/test_torque_model.cpp \
 	tests/test_traction_control.cpp \
 	tests/test_airmass_dispatcher.cpp \
+	tests/ignition_injection/test_dedicated_airmass_tables.cpp \
+	tests/ignition_injection/test_airmass_evaluation.cpp \
+	tests/ignition_injection/test_airmass_injection_gate.cpp \
+	tests/ignition_injection/test_airmass_fuel_publication.cpp \
 	tests/test_fuel_map.cpp \
 	tests/test_gear_detector.cpp \
 	tests/ignition_injection/test_fuel_wall_wetting.cpp \
