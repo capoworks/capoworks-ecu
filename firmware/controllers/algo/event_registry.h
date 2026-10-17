@@ -57,6 +57,7 @@ public:
 	// No pointer to a mutable context is ever handed to the executor.
 	uint32_t generation = 0;
 	uint32_t chargeGeneration = 0;
+	uint32_t fireGeneration = 0;
 	uint16_t outputMaskSnapshot = 0;
 	uint8_t sparksRemaining = 0;
 	IgnitionOccurrenceState state = IgnitionOccurrenceState::Closed;
@@ -72,6 +73,17 @@ public:
 	uint32_t hardGuardCount = 0;
 	uint32_t missedChargeCount = 0;
 	uint32_t contentionCount = 0;
+	uint32_t plannedTdcCycle = 0;
+	uint32_t expiredTargetCount = 0;
+	float plannedSparkAngle = 0;
+	bool plannedCycleValid = false;
+	bool plannedByTime = false;
+	// A pre-arm candidate is distinct from the last consumed TDC occurrence.
+	uint32_t candidateTdcCycle = 0;
+	float candidateSparkAngle = 0; // unwrapped relative to candidate TDC's cycle
+	float requestedSparkAngle = 0; // live command at the most recent decision
+	bool candidateValid = false;
+	uint8_t retargetStatus = 0;
 
 	scheduling_s dwellStartTimer;
 	AngleBasedEvent sparkEvent;
@@ -106,6 +118,9 @@ public:
 	 */
 	IgnitionEvent elements[MAX_CYLINDER_COUNT];
 	bool isReady = false;
+	uint32_t plannerCycle = 0;
+	float plannerLastPhase = 0;
+	bool plannerPhaseValid = false;
 };
 
 IgnitionEventList* getIgnitionEvents();

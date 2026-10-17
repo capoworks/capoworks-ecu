@@ -40,3 +40,5 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx);
 // lifecycle operation; already charging outputs retain their scheduled LOW.
 void cancelPendingIgnition();
 void stopIgnition();
+
+void revisePendingIgnition(const EnginePhaseInfo& phase);
