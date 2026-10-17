@@ -964,7 +964,7 @@ bit isCylinderCleanupLatching,"Service / Workshop","Roadside";Roadside restores 
 
 	uint16_t engineChartSize;;"count", 1, 0, 0, 300, 0
 
-
+	brain_input_pin_e hellaOpsTInput;Hella OPS+T combined oil pressure and temperature sensor input. Existing oil pressure and temperature providers retain priority for their registered channel.
 
 	float turboSpeedSensorMultiplier;;"mult", 1, 0, 0, 7000, 3
 
