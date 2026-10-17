@@ -120,6 +120,7 @@ TESTS_SRC_CPP = \
 	tests/actuators/test_dc_motor.cpp \
 	tests/actuators/test_dc_reconfiguration.cpp \
 	tests/actuators/test_etb.cpp \
+	tests/actuators/test_flash_actuator_safety.cpp \
 	tests/actuators/test_etb_integrated.cpp \
 	tests/actuators/test_fan_control.cpp \
 	tests/actuators/test_fuel_pump.cpp \

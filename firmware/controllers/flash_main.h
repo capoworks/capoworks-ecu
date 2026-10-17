@@ -18,6 +18,8 @@ void initFlash();
  * running so we postpone the write until the engine is stopped. Direct writes
  * overlapping active flash I/O are queued, and reads are rejected while busy.
  * Each copy is erased, programmed, and verified before the next copy is touched.
+ * Blocking writes inhibit configured ETB/DC outputs until fresh feedback and a
+ * new valid control cycle permit recovery.
  */
 void writeToFlashNow();
 void setNeedToWriteConfiguration();

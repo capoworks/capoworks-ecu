@@ -24,6 +24,10 @@ void TwoPinDcMotor::configure(IPwm& enable, IPwm& dir1, IPwm& dir2, bool isInver
 
 void TwoPinDcMotor::enable() {
 	chibios_rt::CriticalSectionLocker csl;
+	if (m_flashInhibited) {
+		return;
+	}
+
 	if (m_disable) {
 		m_disable->setValue(false);
 	}
@@ -41,6 +45,16 @@ void TwoPinDcMotor::disable(const char* msg) {
 
 	// Also set the duty to zero
 	set(0);
+}
+
+void TwoPinDcMotor::setFlashInhibited(bool inhibited) {
+	chibios_rt::CriticalSectionLocker csl;
+	m_flashInhibited = inhibited;
+
+	if (inhibited) {
+		stopImmediately();
+		m_msg = "flash";
+	}
 }
 
 void TwoPinDcMotor::stopImmediately() {
@@ -79,6 +93,10 @@ float TwoPinDcMotor::get() const {
  */
 bool TwoPinDcMotor::set(float duty) {
 	chibios_rt::CriticalSectionLocker csl;
+	if (m_flashInhibited) {
+		return false;
+	}
+
 	m_value = duty;
 
 	// For low voltage, voltageRatio will be >1 to boost duty so that motor current stays the same
