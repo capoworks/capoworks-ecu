@@ -4,7 +4,9 @@
 
 #if HAL_USE_USB_MSD
 void initUsbMsd();
+#if EFI_FILE_LOGGING
 void attachMsdSdCard(BaseBlockDevice* blkdev);
+#endif
 
 // The read-only FAT image containing the TunerStudio ini, or nullptr if this build doesn't embed one.
 BaseBlockDevice* getIniBlockDevice();
