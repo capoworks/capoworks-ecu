@@ -9,8 +9,6 @@
 #include "spark_logic.h"
 
 using ::testing::_;
-using ::testing::InSequence;
-using ::testing::StrictMock;
 
 TEST(ignition, twoCoils) {
 	EngineTestHelper eth(engine_type_e::FRANKENSO_BMW_M73_F);
@@ -79,8 +77,8 @@ TEST(ignition, trailingSpark) {
 	EXPECT_EQ(enginePins.coils[0].getLogicValue(), true);
 	EXPECT_EQ(enginePins.trailingCoils[0].getLogicValue(), false);
 
-	// Should be a TDC callback + spark firing
-	EXPECT_EQ(engine->scheduler.size(), 2);
+	// TDC callback, spark firing, and independent physical dwell guard.
+	EXPECT_EQ(engine->scheduler.size(), 3);
 
 	// execute all actions
 	eth.executeActions();
@@ -146,68 +144,26 @@ TEST(ignition, CylinderTimingTrim) {
 }
 
 TEST(ignition, oddCylinderWastedSpark) {
-	StrictMock<MockExecutor> mockExec;
-
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
-	engine->scheduler.setMockExecutor(&mockExec);
 	setCylinderCount(1);
 	engineConfiguration->firingOrder = FO_1;
 	engineConfiguration->ignitionMode = IM_WASTED_SPARK;
-
-	efitick_t nowNt1 = 1000000;
-	efitick_t nowNt2 = 2222222;
-
 	engine->rpmCalculator.oneDegreeUs = 100;
-
-	action_s firstCharge;
-	action_s firstFire;
-
-	{
-		InSequence is;
-
-		// Should schedule one dwell+fire pair:
-		// Dwell 5 deg from now
-		float nt1deg = USF2NT(engine->rpmCalculator.oneDegreeUs);
-		efitick_t startTime = nowNt1 + nt1deg * 5;
-		EXPECT_CALL(mockExec, schedule(testing::NotNull(), _, startTime, _)).WillOnce(testing::SaveArg<3>(&firstCharge));
-		// Spark 15 deg from now
-		efitick_t endTime = startTime + nt1deg * 10;
-		EXPECT_CALL(mockExec, schedule(testing::NotNull(), _, endTime, _)).WillOnce(testing::SaveArg<3>(&firstFire));
-	}
-	EXPECT_CALL(mockExec, cancel(_)).Times(testing::AnyNumber());
-
 	engine->ignitionState.sparkDwell = 1;
-
-	// dwell should start at 15 degrees ATDC and firing at 25 deg ATDC
 	engine->ignitionState.dwellAngle = 10;
 	engine->cylinders[0].setIgnitionTimingBtdc(-25);
 	engine->engineState.useOddFireWastedSpark = true;
 	engineConfiguration->minimumIgnitionTiming = -25;
-
-	// expect to schedule the on-phase dwell and spark (not the wasted spark copy)
-	onTriggerEventSparkLogic({nowNt1, 10, 30, 10, 30});
-
-	ASSERT_TRUE(firstCharge);
-	ASSERT_TRUE(firstFire);
-	firstCharge.execute();
-	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
-	eth.moveTimeForwardUs(1000);
-	firstFire.execute();
-	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
-
-	{
-		InSequence is;
-
-		// Should schedule second dwell+fire pair, the out of phase copy
-		// Dwell 5 deg from now
-		float nt1deg = USF2NT(engine->rpmCalculator.oneDegreeUs);
-		efitick_t startTime = nowNt2 + nt1deg * 5;
-		EXPECT_CALL(mockExec, schedule(testing::NotNull(), _, startTime, _));
-		// Spark 15 deg from now
-		efitick_t endTime = startTime + nt1deg * 10;
-		EXPECT_CALL(mockExec, schedule(testing::NotNull(), _, endTime, _));
+	// Drain actual physical occurrences between 0 and 360 degree opportunities.
+	// A mock that never executes the first LOW must not permit record reuse.
+	for (float offset : {0.0f, 360.0f}) {
+		onTriggerEventSparkLogic({getTimeNowNt(), 10 + offset, 30 + offset, 10 + offset, 30 + offset});
+		eth.moveTimeForwardAndInvokeEventsUs(499);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		eth.moveTimeForwardAndInvokeEventsUs(1);
+		EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+		eth.moveTimeForwardAndInvokeEventsUs(1000);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_EQ(0, engine->scheduler.size());
 	}
-
-	// expect to schedule second events, the out-of-phase dwell and spark (the wasted spark copy)
-	onTriggerEventSparkLogic({nowNt2, 360 + 10, 360 + 30, 360 + 10, 360 + 30});
 }

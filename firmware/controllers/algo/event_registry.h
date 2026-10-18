@@ -59,9 +59,14 @@ public:
 	uint32_t trailingGeneration = 0;
 	float trailingDwell = 0;
 	int8_t trailingCylinder = 0;
+	int8_t occurrenceCylinder = 0;
 	bool trailingPending = false;
 	// Distinguishes a trailing HIGH that has not happened yet from one whose LOW is owed.
 	bool trailingCharging = false;
+	bool trailingEnabled = false;
+	uint32_t hardGuardCount = 0;
+	uint32_t missedChargeCount = 0;
+	uint32_t contentionCount = 0;
 
 	scheduling_s dwellStartTimer;
 	AngleBasedEvent sparkEvent;

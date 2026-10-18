@@ -33,7 +33,7 @@ public:
 	bool isInitialized() const;
 
 	bool getAndSet(int logicValue);
-	TEST_VIRTUAL void setValue(int logicValue);
+	virtual void setValue(int logicValue);
 	void toggle();
 	bool getLogicValue() const;
 
