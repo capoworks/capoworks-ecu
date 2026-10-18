@@ -15,7 +15,10 @@ void initializeIgnitionActions();
 // Passed by value through the one-word timer action. Mutable scheduling fields
 // live in IgnitionEvent; an extracted old callback cannot acquire a new occurrence.
 union IgnitionContext {
-	constexpr IgnitionContext() : _pad(nullptr) { eventIndex = 0xF; }
+	constexpr IgnitionContext()
+		: _pad(nullptr) {
+		eventIndex = 0xF;
+	}
 	struct {
 		uint32_t eventIndex : 4;
 		uint32_t generation : 27;

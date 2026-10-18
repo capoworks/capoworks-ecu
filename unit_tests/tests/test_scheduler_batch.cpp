@@ -240,6 +240,5 @@ TEST(SchedulerBatch, ValidatorRejectsInvalidBoundsAndOverflowingHorizons) {
 
 	efitick_t nearMaximum = efitick_t{INT64_MAX - horizon};
 	ScheduledAction maximumAtHorizon[] = {{INT64_MAX, countCallback}};
-	EXPECT_FALSE(
-			isScheduleBatchValid(maximumAtHorizon, efi::size(maximumAtHorizon), nearMaximum));
+	EXPECT_FALSE(isScheduleBatchValid(maximumAtHorizon, efi::size(maximumAtHorizon), nearMaximum));
 }

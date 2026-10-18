@@ -33,7 +33,7 @@ static bool isPrimeInjectionPulseSkipped() {
 
 	// Skip if cylinder cleanup is active
 	return engineConfiguration->isCylinderCleanupEnabled &&
-		(Sensor::getOrZero(SensorType::DriverThrottleIntent) > CLEANUP_MODE_TPS);
+		   (Sensor::getOrZero(SensorType::DriverThrottleIntent) > CLEANUP_MODE_TPS);
 }
 
 void PrimeController::onIgnitionStateChanged(bool ignitionOn) {
