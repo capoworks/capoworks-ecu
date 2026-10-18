@@ -486,6 +486,13 @@ void updateTunerStudioState() {
 	tsOutputChannels->orderingErrorCounter = engine->triggerCentral.triggerState.orderingErrorCounter;
 #endif // EFI_SHAFT_POSITION_INPUT
 
+#if EFI_SHAFT_POSITION_INPUT
+	tsOutputChannels->rollingCycleRpm =
+			engineConfiguration->idleTimingUseRollingRpm ? engine->rpmCalculator.getRollingCycleRpm().rpm : 0;
+#else  // EFI_SHAFT_POSITION_INPUT
+	tsOutputChannels->rollingCycleRpm = 0;
+#endif // EFI_SHAFT_POSITION_INPUT
+
 #if EFI_ENGINE_CONTROL
 	tsOutputChannels->injectorDutyCycle = getInjectorDutyCycle(rpm);
 	tsOutputChannels->injectorDutyCycleStage2 = getInjectorDutyCycleStage2(rpm);

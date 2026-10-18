@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20026
+#define FLASH_DATA_VERSION 20027
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -1491,6 +1491,9 @@ pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
 
 	torque_limiter_cfg[TORQUE_LIMITER_COUNT iterate] torqueLimiters;
 
+	! Appended engine fields expand engine_configuration_s and shift later persistent-table offsets; FLASH_DATA_VERSION requires a tune transfer between schemas.
+	bit idleTimingUseRollingRpm,"Rolling cycle","Instantaneous";Use a full engine-cycle RPM window for closed-loop idle air and ignition timing to reject cyclic speed ripple.\nInstantaneous feedback remains the default. Until one complete cycle is valid, idle air uses instantaneous feedback and idle timing correction is zero.\nDoes not affect idle phase detection, open-loop air or other RPM consumers. PID gains may need retuning.
+
 ! end of engine_configuration_s
 end_struct
 
@@ -1843,6 +1846,7 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 		table_cols num ALPHA_N_RPM_COUNT uint16_t alphaNRpmBins;;"RPM", 1, 0, 0, 18000, 0
 		table_values uint16_t autoscale alphaNTable;Alpha-N cylinder filling at the reference pressure and selected temperature.;"%", 0.1, 0, 0, 999, 1
 	end_table
+
 end_struct
 
 ! Pedal Position Sensor
