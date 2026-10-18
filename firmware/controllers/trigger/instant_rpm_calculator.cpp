@@ -10,6 +10,10 @@ void InstantRpmCalculator::movePreSynchTimestamps() {
 	auto triggerSize = getTriggerCentral()->triggerShape.getLength();
 
 	size_t eventsToCopy = std::min(spinningEventIndex, triggerSize);
+	if (eventsToCopy) {
+		// Relocating shared timestamps starts a new trusted history epoch.
+		ignitionProfile.reset();
+	}
 
 	size_t firstSrc;
 	size_t firstDst;
@@ -103,6 +107,13 @@ void InstantRpmCalculator::updateInstantRpm(
 	uint32_t nowNt32 = phaseInfo.timestamp;
 
 	assertIsInBounds(index, timeOfLastEvent, "calc timeOfLastEvent");
+
+	if (engineConfiguration->ignitionCycleProfile && !getTriggerCentral()->directSelfStimulation &&
+		getTriggerCentral()->triggerState.hasSynchronizedPhase()) {
+		ignitionProfile.update(timeOfLastEvent, index, phaseInfo);
+	} else {
+		ignitionProfile.reset();
+	}
 
 	// Record the time of this event so we can calculate RPM from it later
 	timeOfLastEvent[index] = nowNt32;

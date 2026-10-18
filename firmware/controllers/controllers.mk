@@ -32,6 +32,7 @@ CONTROLLERS_SRC_CPP = \
 	$(CONTROLLERS_DIR)/engine_cycle/high_pressure_fuel_pump.cpp \
 	$(CONTROLLERS_DIR)/engine_cycle/rpm_calculator.cpp \
 	$(CONTROLLERS_DIR)/engine_cycle/spark_logic.cpp \
+	$(CONTROLLERS_DIR)/trigger/ignition_cycle_profile.cpp \
 	$(CONTROLLERS_DIR)/engine_cycle/knock_controller.cpp \
 	$(CONTROLLERS_DIR)/engine_cycle/main_trigger_callback.cpp \
 	$(CONTROLLERS_DIR)/engine_cycle/prime_injection.cpp \

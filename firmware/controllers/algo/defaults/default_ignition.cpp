@@ -68,6 +68,7 @@ static void buildTimingMap(float advanceMax) {
 void setDefaultIgnition() {
 	// Ignition base settings
 	engineConfiguration->isIgnitionEnabled = true;
+	engineConfiguration->ignitionCycleProfile = false;
 
 	engineConfiguration->timingMode = TM_DYNAMIC;
 	engineConfiguration->fixedModeTiming = 50;

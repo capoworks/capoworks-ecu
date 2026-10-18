@@ -1,5 +1,10 @@
 #pragma once
 
+enum class AngleTimingPolicy : uint8_t {
+	Legacy,
+	Ignition
+};
+
 struct TriggerPhase {};
 struct EnginePhase {};
 

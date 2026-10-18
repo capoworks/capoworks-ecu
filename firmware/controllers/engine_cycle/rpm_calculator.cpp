@@ -514,6 +514,28 @@ void tdcMarkCallback(uint32_t trgEventIndex, efitick_t edgeTimestamp) {
  * The callback would be executed once after the duration of time which
  * it takes the crankshaft to rotate to the specified angle.
  */
+efitick_t scheduleByAngleInPhase(
+		scheduling_s* timer, const EnginePhaseInfo& phase, angle_t angle, action_s action, AngleTimingPolicy policy) {
+	if (policy == AngleTimingPolicy::Ignition && engineConfiguration->ignitionCycleProfile) {
+		if (auto delay = getTriggerCentral()->instantRpm.ignitionProfile.getDelayNt(phase, angle)) {
+#if EFI_UNIT_TEST
+			if (engine->onIgnitionTiming) {
+				engine->onIgnitionTiming(true);
+			}
+#endif
+			efitick_t time = phase.timestamp + efidur_t{static_cast<int32_t>(delay.Value)};
+			engine->scheduler.schedule("ignition angle", timer, time, action);
+			return time;
+		}
+	}
+#if EFI_UNIT_TEST
+	if (policy == AngleTimingPolicy::Ignition && engine->onIgnitionTiming) {
+		engine->onIgnitionTiming(false);
+	}
+#endif
+	return scheduleByAngle(timer, phase.timestamp, angle, action);
+}
+
 efitick_t scheduleByAngle(scheduling_s* timer, efitick_t edgeTimestamp, angle_t angle, action_s action) {
 	float delayUs = engine->rpmCalculator.oneDegreeUs * angle;
 
