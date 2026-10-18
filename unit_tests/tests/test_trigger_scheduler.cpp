@@ -42,6 +42,9 @@ public:
 	}
 
 	void cancel(scheduling_s*) override {}
+	bool scheduleBatch(const ScheduledAction*, size_t) override {
+		return false;
+	}
 };
 
 // Use the real timer queue and callbacks, including nested registration. Like
