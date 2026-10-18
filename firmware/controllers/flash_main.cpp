@@ -20,6 +20,7 @@
 #include "flash_int.h"
 #include "crc_accelerator.h"
 #include "configuration_storage.h"
+#include "electronic_throttle.h"
 
 #if EFI_TUNER_STUDIO
 #include "tunerstudio.h"
@@ -90,21 +91,34 @@ static bool shouldWriteConfiguration() {
 }
 
 void writeToFlashIfPending() {
-	// with a flash write thread, the schedule happens directly from
-	// setNeedToWriteConfiguration, so there's nothing to do here
-	if (allowFlashWhileRunning() || !shouldWriteConfiguration()) {
-		// Allow sensor timeouts again now that we're done (and a little time has passed)
-		Sensor::inhibitTimeouts(false);
-		return;
+	// A failed attempt stays visible as pending, but requires a fresh request.
+	if (!allowFlashWhileRunning()) {
+		writeConfiguration(true);
 	}
-
-	// Prevent sensor timeouts while flashing
-	Sensor::inhibitTimeouts(true);
-	writeConfiguration(true);
-	// we do not want to allow sensor timeouts right away, we re-enable next time method is invoked
 }
 
 bool burnWithoutFlash = false;
+
+class BlockingFlashGuard {
+public:
+	BlockingFlashGuard()
+		: m_blocking(!allowFlashWhileRunning()) {
+		if (m_blocking) {
+			Sensor::inhibitTimeouts(true);
+			beginBlockingFlash();
+		}
+	}
+
+	~BlockingFlashGuard() {
+		if (m_blocking) {
+			endBlockingFlash();
+			Sensor::inhibitTimeouts(false);
+		}
+	}
+
+private:
+	const bool m_blocking;
+};
 
 void writeToFlashNow() {
 	writeConfiguration(false);
@@ -134,7 +148,10 @@ static void writeConfiguration(bool requestedOnly) {
 		persistentState.value = flashStateCrc(persistentState);
 
 #if EFI_STORAGE_INT_FLASH == TRUE
-		result = writeConfigurationCopies(getFlashAddrFirstCopy(), getFlashAddrSecondCopy(), persistentState);
+		{
+			BlockingFlashGuard guard;
+			result = writeConfigurationCopies(getFlashAddrFirstCopy(), getFlashAddrSecondCopy(), persistentState);
+		}
 #else
 		result = {ConfigurationWritePhase::Layout, 0, FLASH_RETURN_NO_PERMISSION, 0};
 #endif

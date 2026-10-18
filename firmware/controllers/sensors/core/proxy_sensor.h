@@ -22,6 +22,10 @@ public:
 		m_proxiedSensor = proxiedSensor;
 	}
 
+	bool hasUpdatedAfter(efitick_t timestamp) const override {
+		return Sensor::hasUpdatedAfter(m_proxiedSensor, timestamp);
+	}
+
 	void showInfo(const char* sensorName) const override;
 
 private:
