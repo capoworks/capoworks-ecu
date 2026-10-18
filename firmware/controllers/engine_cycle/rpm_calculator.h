@@ -211,4 +211,7 @@ operation_mode_e lookupOperationMode();
 
 #define getRevolutionCounter() (engine->rpmCalculator.getRevolutionCounterM())
 
+efitick_t scheduleByAngleInPhase(
+		scheduling_s* timer, const EnginePhaseInfo& phase, angle_t angle, action_s action, AngleTimingPolicy policy);
+
 efitick_t scheduleByAngle(scheduling_s* timer, efitick_t edgeTimestamp, angle_t angle, action_s action);

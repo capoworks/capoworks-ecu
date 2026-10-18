@@ -37,6 +37,7 @@ or
 
 ### Added
  - Add opt-in full-engine-cycle RPM feedback for closed-loop idle air and ignition timing, with instantaneous fallback until a complete cycle is valid and a `rollingCycleRpm` diagnostic channel. Instantaneous feedback remains the default.
+ - Add an experimental opt-in ignition cycle profile for final charge and firing angle conversion on supported rising-only missing-tooth crank wheels with full cam sync. Legacy timing remains the default and fallback; RPM and dwell start angle planning are unchanged.
  - Support for the Hella OPS+T (6PR 010 378-207) combined digital oil pressure and temperature sensor
  - SD card logs are now organized into `YYYY/MM/DD` folders when the real-time clock is set. If the clock is not set, logs are still written to the root of the card with a sequential name.
  - Add an opt-in "Service / Workshop" flood-clear mode that keeps fuel cut through the cranking-to-running transition until the accelerator is released. Roadside remains the default and restores fuel at running RPM; cranking priming now follows driver throttle intent and its flood-clear help reflects the 90% threshold.

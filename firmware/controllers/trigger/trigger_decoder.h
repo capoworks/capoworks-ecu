@@ -190,11 +190,7 @@ public:
 	PrimaryTriggerDecoder(const char* name);
 	void resetState() override;
 
-	void resetHasFullSync() {
-		// If this trigger doesn't need disambiguation, we already have phase sync
-		m_hasSynchronizedPhase = !m_needsDisambiguation;
-		m_phaseAdjustment = 0;
-	}
+	void resetHasFullSync();
 
 	angle_t syncEnginePhase(int divider, int remainder, angle_t engineCycle);
 

@@ -3,9 +3,10 @@
 #include "event_queue.h"
 #include "spark_logic.h"
 
-void TriggerScheduler::schedule(AngleBasedEvent* event, EngPhase angle, action_s action) {
+void TriggerScheduler::schedule(AngleBasedEvent* event, EngPhase angle, action_s action, AngleTimingPolicy policy) {
 	chibios_rt::CriticalSectionLocker csl;
 	event->fallbackIsCurrent = false;
+	event->timingPolicy = policy;
 	event->setAngle(angle);
 
 	schedule(event, action);
@@ -18,9 +19,14 @@ void TriggerScheduler::schedule(AngleBasedEvent* event, EngPhase angle, action_s
  *         false if event was put into queue for scheduling at a later tooth
  */
 bool TriggerScheduler::scheduleOrQueue(
-		AngleBasedEvent* event, EngPhase angle, action_s action, const EnginePhaseInfo& phase) {
+		AngleBasedEvent* event,
+		EngPhase angle,
+		action_s action,
+		const EnginePhaseInfo& phase,
+		AngleTimingPolicy policy) {
 	chibios_rt::CriticalSectionLocker csl;
 	event->fallbackIsCurrent = false;
+	event->timingPolicy = policy;
 	event->setAngle(angle);
 
 	if (event->shouldSchedule(phase)) {
@@ -32,7 +38,7 @@ bool TriggerScheduler::scheduleOrQueue(
 		}
 
 		// if we're due now, just schedule the event
-		scheduleByAngle(&event->scheduling, phase.timestamp, event->getAngleFromNow(phase), action);
+		scheduleByAngleInPhase(&event->scheduling, phase, event->getAngleFromNow(phase), action, event->timingPolicy);
 
 		return true;
 	} else {
@@ -173,7 +179,8 @@ void TriggerScheduler::onEnginePhase(float rpm, const EnginePhaseInfo& phase) {
 		// Keep promotion atomic with engine stop and cancellation on another thread.
 		// Replace a possible overdwell timer with the actual event time.
 		engine->scheduler.cancel(&current->scheduling);
-		scheduleByAngle(&current->scheduling, phase.timestamp, current->getAngleFromNow(phase), current->action);
+		scheduleByAngleInPhase(
+				&current->scheduling, phase, current->getAngleFromNow(phase), current->action, current->timingPolicy);
 	}
 }
 

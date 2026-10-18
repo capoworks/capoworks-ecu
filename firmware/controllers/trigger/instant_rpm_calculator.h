@@ -4,6 +4,7 @@
 
 #pragma once
 #include "trigger_structure.h"
+#include "ignition_cycle_profile.h"
 
 class InstantRpmCalculator {
 public:
@@ -26,7 +27,10 @@ public:
 
 	void movePreSynchTimestamps();
 
+	IgnitionCycleProfile ignitionProfile;
+
 	void resetInstantRpm() {
+		ignitionProfile.reset();
 		setArrayValues(timeOfLastEvent, 0);
 		spinningEventIndex = 0;
 		m_instantRpm = 0;
