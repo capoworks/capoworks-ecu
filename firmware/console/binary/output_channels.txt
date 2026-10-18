@@ -188,8 +188,12 @@ struct_no_prefix output_channels_s
 	uint8_t currentIgnitionMode;@@GAUGE_NAME_IGNITION_MODE@@
 	uint8_t currentInjectionMode;@@GAUGE_NAME_INJECTION_MODE@@
 	uint8_t idleStepperTargetPosition;Idle: Stepper target position;"", 1, 0, 0, 0, 0
+	! Use the existing one-byte alignment padding at offset 259.
+	uint8_t veAnalyzeIsCranking;VE Analyze: Cranking;"", 1, 0, 0, 1, 0
 
 	uint16_t autoscale coilDutyCycle;@@GAUGE_NAME_DWELL_DUTY@@;"%",{1/@@PACK_MULT_PERCENT@@}, 0, 0, 100, 1
+	! Use the existing two-byte alignment padding at offset 262. Saturate at the packed field maximum.
+	uint16_t autoscale veAnalyzeTimeSinceCut;VE Analyze: Time since fuel/spark cut or DFCO;"s", 0.01, 0, 0, 655.35, 2
 
 ! integration magic: TS requires exact 'seconds' name
 	uint32_t seconds;@@GAUGE_NAME_UPTIME@@;"sec", 1, 0, 0, 0, 0
