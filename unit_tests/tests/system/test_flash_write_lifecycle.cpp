@@ -99,7 +99,8 @@ protected:
 		lastWriteResult = {ConfigurationWritePhase::Complete, 0, FLASH_RETURN_SUCCESS, 0};
 		burnWithoutFlash = false;
 
-		persistentState = {};
+		// The CRC covers the full object representation, including padding.
+		efi::clear(persistentState);
 		persistentState.size = sizeof(persistentState);
 		persistentState.version = FLASH_DATA_VERSION;
 		persistentState.value =
