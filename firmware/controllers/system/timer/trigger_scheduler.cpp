@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "event_queue.h"
+#include "spark_logic.h"
 
 void TriggerScheduler::schedule(AngleBasedEvent* event, EngPhase angle, action_s action) {
 	chibios_rt::CriticalSectionLocker csl;
@@ -116,6 +117,7 @@ void TriggerScheduler::clear(Queue& queue) {
 
 void TriggerScheduler::flush() {
 	chibios_rt::CriticalSectionLocker csl;
+	cancelPendingIgnition();
 	// Reset membership before events can be reused. Preserve armed timers and their fallback association.
 	clear(m_waiting);
 	clear(m_due);
