@@ -259,12 +259,18 @@ TEST(misc, testRpmCalculator) {
 
 		EXPECT_EQ(ev0->action.getCallback(), (void*)turnSparkPinHigh) << "Call@0";
 		EXPECT_EQ(start + 944, ev0->momentX) << "ev 0";
-		EXPECT_EQ(1, (uintptr_t)ev0->action.getArgument()) << "coil 0";
+		IgnitionContext chargeCtx = bit_cast<IgnitionContext>(ev0->action.getArgument());
+		EXPECT_EQ(0, chargeCtx.eventIndex) << "charge event index";
+		EXPECT_EQ(ilist->elements[0].chargeGeneration, chargeCtx.generation) << "charge generation";
+		EXPECT_EQ(1, chargeCtx.outputsMask()) << "coil 0";
 
 		scheduling_s* ev1 = engine->scheduler.getForUnitTest(1);
 		EXPECT_EQ(ev1->action.getCallback(), (void*)fireSparkAndPrepareNextSchedule) << "Call@1";
 		EXPECT_EQ(start + 1444, ev1->momentX) << "ev 1";
-		EXPECT_EQ(1, (uintptr_t)ev1->action.getArgument()) << "coil 1";
+		IgnitionContext fireCtx = bit_cast<IgnitionContext>(ev1->action.getArgument());
+		EXPECT_EQ(0, fireCtx.eventIndex) << "fire event index";
+		EXPECT_EQ(ilist->elements[0].generation, fireCtx.generation) << "fire generation";
+		EXPECT_EQ(1, fireCtx.outputsMask()) << "coil 1";
 	}
 
 	engine->scheduler.clear();

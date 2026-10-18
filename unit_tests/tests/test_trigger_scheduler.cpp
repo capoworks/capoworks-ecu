@@ -44,6 +44,23 @@ public:
 	void cancel(scheduling_s*) override {}
 };
 
+// Use the real timer queue and callbacks, including nested registration. Like
+// SingleTimerExecutor, drain expired actions on registration unless already draining.
+class InlineExecutor : public TestExecutor {
+public:
+	void schedule(const char* msg, scheduling_s* scheduling, efitick_t time, action_s action) override {
+		TestExecutor::schedule(msg, scheduling, time, action);
+		if (!executing) {
+			executing = true;
+			executeAll(getTimeNowUs());
+			executing = false;
+		}
+	}
+
+private:
+	bool executing = false;
+};
+
 } // namespace
 
 TEST(TriggerScheduler, engineStopEmptiesQueueButKeepsArmedTimer) {
@@ -146,8 +163,9 @@ TEST(TriggerScheduler, oldOverdwellPreservesRequeuedSparkAndDischargesCoil) {
 	int newCount = 0;
 	IgnitionContext oldContext;
 	oldContext.eventIndex = 0;
-	oldContext.outputsMask = 1;
 	oldContext.isOverdwellProtect = true;
+	ignition.outputMaskSnapshot = 1;
+	ignition.state = IgnitionOccurrenceState::Charging;
 
 	scheduler.schedule(&event, EngPhase{123}, {countAction, &newCount});
 	event.fallbackIsCurrent = true;
@@ -235,6 +253,124 @@ TEST(TriggerScheduler, ignitionRegistersFallbackForEachNewCycle) {
 	}
 }
 
+TEST(TriggerScheduler, rapidRestartDoesNotChargeAfterOldOverdwellWithoutProtection) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->firingOrder = FO_1;
+	engineConfiguration->minimumIgnitionTiming = -25;
+	auto prepare = [] {
+		engine->rpmCalculator.setRpmValue(1666.6667f);
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	};
+	prepare();
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1300);
+	engine->OnTriggerSynchronizationLost();
+	prepare();
+	// Reacquisition before the old fallback: the next charge would start at
+	// 2.3 ms, after the old fallback at 2 ms. No more teeth arrive afterwards.
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	eth.moveTimeForwardAndInvokeEventsUs(200);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(300);
+	eth.moveTimeForwardAndInvokeEventsUs(5000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->module<TriggerScheduler>()->getQueueSizeForUnitTest());
+	EXPECT_EQ(0, engine->scheduler.size());
+
+	// The next opportunity after the old timer drains must still work normally.
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->module<TriggerScheduler>()->getQueueSizeForUnitTest());
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(TriggerScheduler, restartWithSmallerCoilMaskPreservesPreviousDischarge) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(4);
+	engineConfiguration->ignitionMode = IM_WASTED_SPARK;
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	for (auto& cylinder : engine->cylinders) {
+		cylinder.setIgnitionTimingBtdc(-25);
+	}
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	const auto oldMask = engine->ignitionEvents.elements[0].calculateIgnitionOutputMask();
+	ASSERT_NE(0, oldMask & (oldMask - 1)); // A wasted pair, not just one output.
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	forEachSetBit(oldMask, [](size_t i) { EXPECT_TRUE(enginePins.coils[i].getLogicValue()); });
+	engine->OnTriggerSynchronizationLost();
+	engineConfiguration->ignitionMode = IM_ONE_COIL;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	// The new spark is on this tooth and would replace the old pair's timer.
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	EXPECT_EQ(1, engine->ignitionEvents.elements[0].calculateIgnitionOutputMask());
+	eth.moveTimeForwardAndInvokeEventsUs(3000);
+	forEachSetBit(oldMask, [](size_t i) { EXPECT_FALSE(enginePins.coils[i].getLogicValue()); });
+	EXPECT_EQ(0, engine->scheduler.size());
+	EXPECT_EQ(0, engine->module<TriggerScheduler>()->getQueueSizeForUnitTest());
+}
+
+TEST(TriggerScheduler, overlappingCyclePreservesMultisparkAndResumesAfterDrain) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->firingOrder = FO_1;
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	engine->engineState.multispark.count = 1;
+	engine->engineState.multispark.delay = US2NT(500);
+	engine->engineState.multispark.dwell = US2NT(1000);
+	int charges = 0;
+	int discharges = 0;
+	engine->onIgnitionEvent = [&](IgnitionContext ctx, bool charging) {
+		EXPECT_FALSE(ctx.isOverdwellProtect);
+		(charging ? charges : discharges)++;
+	};
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(300);
+	const auto counterBefore = engine->engineState.sparkCounter;
+	auto* charge = engine->scheduler.getForUnitTest(0);
+	auto* discharge = engine->scheduler.getForUnitTest(1);
+	const auto chargeTime = charge->momentX;
+	const auto dischargeTime = discharge->momentX;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	EXPECT_EQ(counterBefore, engine->engineState.sparkCounter);
+	EXPECT_EQ(2, engine->scheduler.size());
+	EXPECT_EQ(chargeTime, charge->momentX);
+	EXPECT_EQ(dischargeTime, discharge->momentX);
+	eth.moveTimeForwardAndInvokeEventsUs(200);
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(2, charges);
+	EXPECT_EQ(2, discharges);
+	EXPECT_EQ(0, engine->scheduler.size());
+	engine->engineState.multispark.count = 0;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_EQ(3, charges);
+	EXPECT_EQ(3, discharges);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
 TEST(TriggerScheduler, overdwellRemovesPendingSpark) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	auto* triggerScheduler = &*engine->module<TriggerScheduler>();
@@ -247,6 +383,7 @@ TEST(TriggerScheduler, overdwellRemovesPendingSpark) {
 	IgnitionContext ctx;
 	ctx.eventIndex = 0;
 	ctx.isOverdwellProtect = true;
+	engine->ignitionEvents.elements[0].state = IgnitionOccurrenceState::Charging;
 	event.fallbackIsCurrent = true;
 	engine->ignitionState.dwellAngle = NAN; // Stop after discharging the coil.
 	fireSparkAndPrepareNextSchedule(ctx);
@@ -411,6 +548,8 @@ TEST(TriggerScheduler, queueOperationsMatchReferenceAcrossRepeatedReuse) {
 	std::vector<int> expected;
 	uint32_t state = 0x12345678;
 	int count = 0;
+	int expectedCount = 0;
+	engine->rpmCalculator.oneDegreeUs = 100;
 	for (int step = 0; step < 2000; step++) {
 		state = state * 1664525 + 1013904223;
 		int index = (state >> 16) % 16;
@@ -418,7 +557,7 @@ TEST(TriggerScheduler, queueOperationsMatchReferenceAcrossRepeatedReuse) {
 		switch ((state >> 24) % 4) {
 			case 0:
 				if (found == expected.end()) {
-					scheduler.schedule(&events[index], EngPhase{125}, {countAction, &count});
+					scheduler.schedule(&events[index], EngPhase{index % 2 ? 105.f : 125.f}, {countAction, &count});
 					expected.push_back(index);
 				}
 				break;
@@ -432,9 +571,31 @@ TEST(TriggerScheduler, queueOperationsMatchReferenceAcrossRepeatedReuse) {
 				scheduler.flush();
 				expected.clear();
 				break;
-			case 3:
-				scheduler.onEnginePhase(1000, phaseAtCurrentTooth());
+			case 3: {
+				auto phase = phaseAtCurrentTooth();
+				const bool laterTooth = state & 1;
+				if (laterTooth) {
+					phase.currentTrgPhase = TrgPhase{120};
+					phase.nextTrgPhase = TrgPhase{130};
+				}
+				scheduler.onEnginePhase(1000, phase);
+				expected.erase(
+						std::remove_if(
+								expected.begin(),
+								expected.end(),
+								[&](int i) {
+									if (bool(i % 2) != laterTooth) {
+										++expectedCount;
+										return true;
+									}
+									return false;
+								}),
+						expected.end());
+				eth.moveTimeForwardAndInvokeEventsUs(1000);
+				EXPECT_EQ(expectedCount, count) << step;
+				EXPECT_EQ(0, engine->scheduler.size()) << step;
 				break;
+			}
 		}
 		ASSERT_TRUE(scheduler.validateQueuesForUnitTest()) << step;
 		ASSERT_EQ(expected.size(), scheduler.getQueueSizeForUnitTest()) << step;
@@ -448,4 +609,624 @@ TEST(TriggerScheduler, queueOperationsMatchReferenceAcrossRepeatedReuse) {
 					events[i].queueMembership);
 		}
 	}
+	EXPECT_GT(expectedCount, 0);
+}
+
+TEST(TriggerScheduler, inlineCallbackReusesDueEventAndRequeuesItself) {
+	InlineExecutor executor;
+	AngleBasedEvent first;
+	AngleBasedEvent victim;
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	auto& scheduler = *engine->module<TriggerScheduler>();
+	engine->rpmCalculator.oneDegreeUs = 100;
+	struct Context {
+		TriggerScheduler* scheduler;
+		AngleBasedEvent* first;
+		AngleBasedEvent* victim;
+		int newCount = 0;
+		int selfCount = 0;
+		int inlineCount = 0;
+	} ctx{&scheduler, &first, &victim};
+	int staleCount = 0;
+	engine->scheduler.setMockExecutor(&executor);
+	scheduler.schedule(
+			&first,
+			EngPhase{100},
+			{+[](Context* c) {
+				 ++c->inlineCount;
+				 EXPECT_EQ(TriggerQueueMembership::Due, c->victim->queueMembership);
+				 EXPECT_TRUE(c->scheduler->scheduleOrQueue(
+						 c->victim, EngPhase{105}, {countAction, &c->newCount}, phaseAtCurrentTooth()));
+				 c->scheduler->schedule(c->first, EngPhase{125}, {countAction, &c->selfCount});
+			 },
+			 &ctx});
+	scheduler.schedule(&victim, EngPhase{106}, {countAction, &staleCount});
+	scheduler.onEnginePhase(1000, phaseAtCurrentTooth());
+	EXPECT_EQ(1, ctx.inlineCount);
+	EXPECT_EQ(1, scheduler.getQueueSizeForUnitTest());
+	EXPECT_EQ(&first, scheduler.getElementAtIndexForUnitTest(0));
+	EXPECT_TRUE(scheduler.validateQueuesForUnitTest());
+	eth.moveTimeForwardUs(1000);
+	executor.executeAll(getTimeNowUs());
+	EXPECT_EQ(1, ctx.newCount);
+	EXPECT_EQ(0, staleCount);
+	EXPECT_EQ(0, ctx.selfCount);
+
+	auto phase = phaseAtCurrentTooth();
+	phase.currentTrgPhase = TrgPhase{120};
+	phase.nextTrgPhase = TrgPhase{130};
+	scheduler.onEnginePhase(1000, phase);
+	eth.moveTimeForwardUs(1000);
+	executor.executeAll(getTimeNowUs());
+	EXPECT_EQ(1, ctx.selfCount);
+	EXPECT_EQ(0, scheduler.getQueueSizeForUnitTest());
+	EXPECT_EQ(0, executor.size());
+	EXPECT_TRUE(scheduler.validateQueuesForUnitTest());
+	EXPECT_EQ(0, eth.getWarningCounter());
+	engine->scheduler.setMockExecutor(nullptr);
+}
+
+TEST(TriggerScheduler, inlineSynchronizationLossDropsDueAndWaitingButPreservesSafetyTimer) {
+	InlineExecutor executor;
+	AngleBasedEvent events[3];
+	scheduling_s safetyTimer;
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	auto& scheduler = *engine->module<TriggerScheduler>();
+	engine->rpmCalculator.oneDegreeUs = 100;
+	int staleCount = 0;
+	int safetyCount = 0;
+	engine->scheduler.setMockExecutor(&executor);
+	engine->scheduler.schedule("safety", &safetyTimer, getTimeNowNt() + US2NT(1000), {countAction, &safetyCount});
+	scheduler.schedule(&events[0], EngPhase{100}, {+[](void*) { engine->OnTriggerSynchronizationLost(); }});
+	scheduler.schedule(&events[1], EngPhase{106}, {countAction, &staleCount});
+	scheduler.schedule(&events[2], EngPhase{125}, {countAction, &staleCount});
+	scheduler.onEnginePhase(1000, phaseAtCurrentTooth());
+	EXPECT_EQ(0, scheduler.getQueueSizeForUnitTest());
+	EXPECT_TRUE(scheduler.validateQueuesForUnitTest());
+	EXPECT_EQ(1, executor.size());
+	eth.moveTimeForwardUs(2000);
+	executor.executeAll(getTimeNowUs());
+	EXPECT_EQ(0, staleCount);
+	EXPECT_EQ(1, safetyCount);
+	EXPECT_EQ(0, executor.size());
+	engine->scheduler.setMockExecutor(nullptr);
+}
+
+TEST(IgnitionOccurrence, fireBeforePendingChargeInvalidatesExtractedCallback) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	enginePins.coils[0].setLow();
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto& event = engine->ignitionEvents.elements[0];
+	auto oldCharge = event.dwellStartTimer.action;
+	auto oldFire = event.sparkEvent.scheduling.action;
+	ASSERT_TRUE(oldCharge);
+	ASSERT_TRUE(oldFire);
+	oldFire.execute();
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	EXPECT_FALSE(event.dwellStartTimer.action);
+	oldCharge.execute();
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	const auto newGeneration = event.generation;
+	oldCharge.execute();
+	oldFire.execute();
+	EXPECT_EQ(newGeneration, event.generation);
+	EXPECT_EQ(IgnitionOccurrenceState::ChargePending, event.state);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+}
+
+TEST(IgnitionOccurrence, duplicateChargeDoesNotRenewDwell) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	enginePins.coils[0].setLow();
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto charge = engine->ignitionEvents.elements[0].dwellStartTimer.action;
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	eth.moveTimeForwardAndInvokeEventsUs(900);
+	charge.execute();
+	eth.moveTimeForwardAndInvokeEventsUs(100);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionOccurrence, staleCallbacksCannotMutateNewerOccurrence) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	enginePins.coils[0].setLow();
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto& event = engine->ignitionEvents.elements[0];
+	auto oldCharge = event.dwellStartTimer.action;
+	auto oldFire = event.sparkEvent.scheduling.action;
+	const auto originalFireTime = event.sparkEvent.scheduling.momentX;
+	ASSERT_TRUE(oldCharge);
+	ASSERT_TRUE(oldFire);
+
+	// Charge for 500 us, then ask the ordinary fire callback to fire early.
+	// The executor clears the scheduling record before invoking the callback.
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_EQ(IgnitionOccurrenceState::Charging, event.state);
+	engine->scheduler.cancel(&event.sparkEvent.scheduling);
+	oldFire.execute();
+	auto oldUnderdwell = event.sparkEvent.scheduling.action;
+	ASSERT_TRUE(oldUnderdwell);
+	ASSERT_EQ(1, engine->scheduler.size());
+	ASSERT_EQ(&event.sparkEvent.scheduling, engine->scheduler.getHead());
+	ASSERT_LT(event.sparkEvent.scheduling.momentX, originalFireTime);
+
+	// Let the retry discharge and close the old occurrence, then arm a new one.
+	eth.moveTimeForwardAndInvokeEventsUs(900);
+	ASSERT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	const auto oldGeneration = event.generation;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	const auto newGeneration = event.generation;
+	ASSERT_NE(newGeneration, oldGeneration);
+
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_EQ(IgnitionOccurrenceState::Charging, event.state);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+
+	oldCharge.execute();
+	oldFire.execute();
+	oldUnderdwell.execute();
+	EXPECT_EQ(newGeneration, event.generation);
+	EXPECT_EQ(IgnitionOccurrenceState::Charging, event.state);
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionOccurrence, CutBetweenArmAndChargeCannotRevivePendingHigh) {
+	for (int cut : {0, 1, 2, 3}) {
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+		enginePins.coils[0].setLow();
+		int mainChargeEvents = 0;
+		engine->onIgnitionEvent = [&](IgnitionContext, bool charging) {
+			if (charging) {
+				mainChargeEvents++;
+			}
+		};
+		onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+		auto stale = engine->ignitionEvents.elements[0].dwellStartTimer.action;
+		if (cut == 0) {
+			engineConfiguration->isIgnitionEnabled = false;
+		}
+		if (cut == 1) {
+			getLimpManager()->fatalError();
+			turnAllPinsOff();
+		}
+		if (cut == 2) {
+			engine->OnTriggerSynchronizationLost();
+		}
+		if (cut == 3) {
+			engine->module<TriggerScheduler>()->flush();
+		}
+		eth.moveTimeForwardAndInvokeEventsUs(2000);
+		stale.execute();
+		EXPECT_EQ(0, mainChargeEvents);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_EQ(0, engine->scheduler.size());
+		EXPECT_EQ(IgnitionOccurrenceState::Closed, engine->ignitionEvents.elements[0].state);
+	}
+}
+
+TEST(IgnitionOccurrence, flushPreservesChargingOccurrenceForOwedLow) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	auto& event = engine->ignitionEvents.elements[0];
+
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_EQ(IgnitionOccurrenceState::Charging, event.state);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+
+	engine->module<TriggerScheduler>()->flush();
+	EXPECT_EQ(IgnitionOccurrenceState::Charging, event.state);
+	ASSERT_EQ(1, engine->scheduler.size());
+
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionOccurrence, CutWhileChargingPreservesLowButSuppressesMultispark) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	engine->engineState.multispark.count = 2;
+	engine->engineState.multispark.delay = US2NT(500);
+	engine->engineState.multispark.dwell = US2NT(1000);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	engineConfiguration->isIgnitionEnabled = false;
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionTrailing, pendingMultisparkHandoffCutDischargesTrailingHigh) {
+	for (bool liveCut : {false, true}) {
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engineConfiguration->enableTrailingSparks = true;
+		engine->engineState.trailingSparkAngle = 10;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+		engine->engineState.multispark.count = 1;
+		engine->engineState.multispark.delay = US2NT(500);
+		engine->engineState.multispark.dwell = US2NT(500);
+
+		int ignitionCallbacks = 0;
+		engine->onIgnitionEvent = [&](IgnitionContext, bool) { ignitionCallbacks++; };
+
+		onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+		auto& event = engine->ignitionEvents.elements[0];
+		eth.moveTimeForwardAndInvokeEventsUs(500);
+		ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+		auto copiedTrailingCharge = event.trailingSparkCharge.action;
+		ASSERT_TRUE(copiedTrailingCharge);
+
+		eth.moveTimeForwardAndInvokeEventsUs(1000);
+		ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+		engine->module<TriggerScheduler>()->onEnginePhase(
+				1000, {getTimeNowNt(), 20, 30, 20, 30});
+		eth.moveTimeForwardAndInvokeEventsUs(500);
+
+		ASSERT_EQ(IgnitionOccurrenceState::ChargePending, event.state);
+		ASSERT_FALSE(enginePins.coils[0].getLogicValue());
+		ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+		ASSERT_TRUE(event.trailingPending);
+		ASSERT_TRUE(event.trailingCharging);
+		ASSERT_EQ(2, ignitionCallbacks);
+		EXPECT_FALSE(event.trailingSparkFire.action);
+
+		auto copiedMainCharge = event.dwellStartTimer.action;
+		auto copiedMainFire = event.sparkEvent.scheduling.action;
+		ASSERT_TRUE(copiedMainCharge);
+		ASSERT_TRUE(copiedMainFire);
+		ignitionCallbacks = 0;
+
+		if (liveCut) {
+			engineConfiguration->isIgnitionEnabled = false;
+			eth.moveTimeForwardAndInvokeEventsUs(500);
+		} else {
+			engine->module<TriggerScheduler>()->flush();
+		}
+
+		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+		EXPECT_FALSE(event.trailingPending);
+		EXPECT_FALSE(event.trailingCharging);
+		EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+		EXPECT_EQ(0, ignitionCallbacks);
+		EXPECT_EQ(0, engine->scheduler.size());
+
+		engineConfiguration->isIgnitionEnabled = true;
+		copiedTrailingCharge.execute();
+		copiedMainCharge.execute();
+		copiedMainFire.execute();
+
+		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_FALSE(event.trailingPending);
+		EXPECT_FALSE(event.trailingCharging);
+		EXPECT_EQ(0, ignitionCallbacks);
+	}
+}
+
+TEST(IgnitionTrailing, copiedCallbacksAreGenerationBoundAndKeepDwellSnapshot) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engineConfiguration->enableTrailingSparks = true;
+	engine->engineState.trailingSparkAngle = 10;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	engine->engineState.multispark.count = 1;
+	engine->engineState.multispark.delay = US2NT(500);
+	engine->engineState.multispark.dwell = US2NT(500);
+
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	auto& event = engine->ignitionEvents.elements[0];
+	EXPECT_FLOAT_EQ(1, event.trailingDwell);
+	EXPECT_EQ(0, event.trailingCylinder);
+
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	ASSERT_TRUE(event.trailingPending);
+	ASSERT_FALSE(event.trailingCharging);
+	const auto firstTrailingGeneration = event.trailingGeneration;
+	auto copiedTrailingCharge = event.trailingSparkCharge.action;
+	ASSERT_TRUE(copiedTrailingCharge);
+
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+	ASSERT_TRUE(event.trailingCharging);
+
+	// A copied charge must not renew the high or clear the pending LOW.
+	copiedTrailingCharge.execute();
+	EXPECT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_TRUE(event.trailingPending);
+
+	engine->module<TriggerScheduler>()->onEnginePhase(1000, {getTimeNowNt(), 20, 30, 20, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_FALSE(enginePins.coils[0].getLogicValue());
+
+	ASSERT_TRUE(event.trailingPending);
+	EXPECT_FLOAT_EQ(1, event.trailingDwell);
+	EXPECT_FLOAT_EQ(0.5f, event.occurrenceDwell);
+	auto copiedTrailingFire = event.trailingSparkFire.action;
+	ASSERT_TRUE(copiedTrailingFire);
+
+	const auto counterBeforeRestart = engine->engineState.sparkCounter;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	EXPECT_EQ(counterBeforeRestart, engine->engineState.sparkCounter);
+
+	event.cylinderNumber = 1;
+	enginePins.trailingCoils[1].setHigh();
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_TRUE(enginePins.trailingCoils[1].getLogicValue());
+	enginePins.trailingCoils[1].setLow();
+	event.cylinderNumber = 0;
+	EXPECT_FALSE(event.trailingPending);
+	EXPECT_FALSE(event.trailingCharging);
+
+	// Arm a new trailing lifecycle and prove old copied callbacks cannot touch it.
+	engine->engineState.multispark.count = 0;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	ASSERT_TRUE(event.trailingPending);
+	const auto secondTrailingGeneration = event.trailingGeneration;
+	ASSERT_NE(firstTrailingGeneration, secondTrailingGeneration);
+
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+	copiedTrailingCharge.execute();
+	copiedTrailingFire.execute();
+	EXPECT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_EQ(secondTrailingGeneration, event.trailingGeneration);
+	EXPECT_TRUE(event.trailingPending);
+
+	engine->module<TriggerScheduler>()->onEnginePhase(1000, {getTimeNowNt(), 20, 30, 20, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_FALSE(event.trailingPending);
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionTrailing, liveCutBeforeChargeRejectsCopiedHigh) {
+	for (int cut : {0, 1}) {
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engineConfiguration->enableTrailingSparks = true;
+		engine->engineState.trailingSparkAngle = 10;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+
+		onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+		auto& event = engine->ignitionEvents.elements[0];
+		eth.moveTimeForwardAndInvokeEventsUs(500);
+		ASSERT_TRUE(event.trailingPending);
+		auto copiedTrailingCharge = event.trailingSparkCharge.action;
+		ASSERT_TRUE(copiedTrailingCharge);
+
+		if (cut == 0) {
+			engineConfiguration->isIgnitionEnabled = false;
+		} else {
+			engineConfiguration->enableTrailingSparks = false;
+		}
+		copiedTrailingCharge.execute();
+
+		EXPECT_FALSE(event.trailingPending);
+		EXPECT_FALSE(event.trailingCharging);
+		EXPECT_FALSE(event.trailingSparkCharge.action);
+		EXPECT_FALSE(event.trailingSparkFire.action);
+		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+
+		// The main coil was already charging, so its LOW remains owed.
+		eth.moveTimeForwardAndInvokeEventsUs(1500);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_EQ(0, engine->scheduler.size());
+	}
+}
+
+TEST(IgnitionTrailing, syncLossDropsPendingHighButKeepsChargingLow) {
+	{
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engineConfiguration->enableTrailingSparks = true;
+		engine->engineState.trailingSparkAngle = 10;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+
+		onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+		auto& event = engine->ignitionEvents.elements[0];
+		eth.moveTimeForwardAndInvokeEventsUs(500);
+		ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+		ASSERT_TRUE(event.trailingPending);
+		auto copiedTrailingCharge = event.trailingSparkCharge.action;
+		ASSERT_TRUE(copiedTrailingCharge);
+
+		engine->OnTriggerSynchronizationLost();
+		EXPECT_FALSE(event.trailingPending);
+		EXPECT_FALSE(event.trailingSparkCharge.action);
+		EXPECT_FALSE(event.trailingSparkFire.action);
+		copiedTrailingCharge.execute();
+		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+
+		// The main occurrence was already charging, so sync loss retains its LOW.
+		ASSERT_EQ(IgnitionOccurrenceState::Charging, event.state);
+		eth.moveTimeForwardAndInvokeEventsUs(1500);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_EQ(0, engine->scheduler.size());
+	}
+
+	{
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engineConfiguration->enableTrailingSparks = true;
+		engine->engineState.trailingSparkAngle = 10;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+
+		onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+		auto& event = engine->ignitionEvents.elements[0];
+		eth.moveTimeForwardAndInvokeEventsUs(500);
+		eth.moveTimeForwardAndInvokeEventsUs(1000);
+		ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+		ASSERT_TRUE(event.trailingPending);
+		ASSERT_TRUE(event.trailingCharging);
+		auto copiedTrailingCharge = event.trailingSparkCharge.action;
+		ASSERT_FALSE(copiedTrailingCharge);
+
+		engine->OnTriggerSynchronizationLost();
+		EXPECT_TRUE(event.trailingPending);
+		EXPECT_TRUE(event.trailingCharging);
+		EXPECT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+
+		// The main fallback still fires and discharges the already-charged trailing coil.
+		eth.moveTimeForwardAndInvokeEventsUs(500);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+		EXPECT_FALSE(event.trailingPending);
+		EXPECT_FALSE(event.trailingCharging);
+		EXPECT_EQ(0, engine->scheduler.size());
+	}
+}
+
+TEST(IgnitionOccurrence, GenerationWrapRejectsPreviousPendingAction) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	auto& event = engine->ignitionEvents.elements[0];
+	event.generation = 0x7fffffe;
+	event.chargeGeneration = 0x7fffffe;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto oldCharge = event.dwellStartTimer.action;
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	ASSERT_EQ(1u, event.generation);
+	ASSERT_EQ(1u, event.chargeGeneration);
+	oldCharge.execute();
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+}
+
+TEST(IgnitionOccurrence, SameTickChargeAndFireOrdersAreSafe) {
+	for (bool chargeFirst : {false, true}) {
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+		enginePins.coils[0].setLow();
+		onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+		auto& event = engine->ignitionEvents.elements[0];
+		auto charge = event.dwellStartTimer.action;
+		auto fire = event.sparkEvent.scheduling.action;
+		engine->scheduler.cancel(&event.dwellStartTimer);
+		engine->scheduler.cancel(&event.sparkEvent.scheduling);
+		if (chargeFirst) {
+			charge.execute();
+			EXPECT_TRUE(enginePins.coils[0].getLogicValue()) << "charge should raise the coil";
+			fire.execute();
+			EXPECT_TRUE(enginePins.coils[0].getLogicValue()) << "underdwell retry should retain HIGH";
+			EXPECT_EQ(1, engine->scheduler.size()) << "underdwell retry should retain the pending LOW";
+		} else {
+			fire.execute();
+			EXPECT_FALSE(enginePins.coils[0].getLogicValue()) << "fire-first should leave the coil LOW";
+			charge.execute();
+			EXPECT_FALSE(enginePins.coils[0].getLogicValue()) << "stale charge must not raise the coil";
+		}
+		eth.moveTimeForwardAndInvokeEventsUs(900);
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_EQ(0, engine->scheduler.size());
+	}
+}
+
+TEST(IgnitionOccurrence, DwellUpdateAfterArmKeepsSnapshot) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto& event = engine->ignitionEvents.elements[0];
+	const auto armedMask = event.outputMaskSnapshot;
+	engine->ignitionState.sparkDwell = 9;
+	initializeIgnitionActions();
+	EXPECT_FLOAT_EQ(1, event.occurrenceDwell);
+	EXPECT_EQ(armedMask, event.outputMaskSnapshot);
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
 }
