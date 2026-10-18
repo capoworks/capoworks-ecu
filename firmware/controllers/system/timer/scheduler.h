@@ -79,6 +79,23 @@ struct scheduling_s {
 };
 #pragma pack(pop)
 
+// A small group of independently owned events that must be admitted atomically.
+struct ScheduledAction {
+	efitick_t time;
+	action_s action;
+};
+
+constexpr size_t MaxScheduleBatchSize = 3;
+// Same future horizon as the hardware executor.
+constexpr int MaximumScheduleDelayUs = 10000000;
+
+/**
+ * Events must have non-null actions and nondecreasing timestamps. Equal timestamps
+ * retain the order supplied by the caller. The future horizon is checked without
+ * overflowing signed or unsigned timestamp arithmetic.
+ */
+bool isScheduleBatchValid(const ScheduledAction* events, size_t count, efitick_t now);
+
 struct Scheduler {
 	/**
 	 * @brief Schedule an action to be executed in the future.
@@ -99,6 +116,16 @@ struct Scheduler {
 	 * @param scheduling The scheduling_s to cancel.
 	 */
 	virtual void cancel(scheduling_s* scheduling) = 0;
+
+	/**
+	 * @brief Atomically schedule a bounded group of actions.
+	 *
+	 * Either every event is admitted and its callback becomes visible, or none is.
+	 * Already-due callbacks may execute before this method returns true. Equal
+	 * timestamps execute in the order supplied. Caller bookkeeping must already be
+	 * in place because callbacks may run before the call returns.
+	 */
+	virtual bool scheduleBatch(const ScheduledAction* events, size_t count) = 0;
 };
 
 Scheduler* getScheduler();

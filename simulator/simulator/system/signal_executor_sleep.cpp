@@ -26,6 +26,7 @@
 
 #include "scheduler.h"
 #include "main_trigger_callback.h"
+#include <new>
 
 #if EFI_SIGNAL_EXECUTOR_SLEEP
 
@@ -35,9 +36,63 @@ struct CallbackContext {
 };
 
 static void doScheduleForLater(scheduling_s* scheduling, int delayUs, action_s action);
+static void timerCallback(CallbackContext* ctx);
 
 void SleepExecutor::schedule(const char* msg, scheduling_s* scheduling, efitick_t timeNt, action_s action) {
 	doScheduleForLater(scheduling, NT2US(timeNt) - getTimeNowUs(), action);
+}
+
+bool SleepExecutor::scheduleBatch(const ScheduledAction* events, size_t count) {
+	chibios_rt::CriticalSectionLocker csl;
+	efitick_t now = getTimeNowNt();
+	if (!isScheduleBatchValid(events, count, now)) {
+		return false;
+	}
+
+	CallbackContext* contexts[MaxScheduleBatchSize] = {};
+	for (size_t i = 0; i < count; i++) {
+		contexts[i] = new (std::nothrow) CallbackContext;
+		if (contexts[i]) {
+			contexts[i]->scheduling = new (std::nothrow) scheduling_s;
+		}
+
+		if (!contexts[i] || !contexts[i]->scheduling) {
+			for (size_t j = 0; j <= i; j++) {
+				if (contexts[j]) {
+					delete contexts[j]->scheduling;
+					delete contexts[j];
+				}
+			}
+			return false;
+		}
+
+		contexts[i]->shouldFree = true;
+		chVTObjectInit(&contexts[i]->scheduling->timer);
+		contexts[i]->scheduling->action = events[i].action;
+	}
+
+	// Publish every future timer before invoking any action that is already due.
+	// ChibiOS inserts equal deadlines before existing timers, so arm the future
+	// suffix in reverse to preserve the caller's order for tied timestamps.
+	for (size_t i = count; i > 0; i--) {
+		size_t index = i - 1;
+		if (events[index].time > now) {
+			int delaySt = MY_US2ST(NT2US(events[index].time - now));
+			if (delaySt > 0) {
+				chVTSetI(&contexts[index]->scheduling->timer, delaySt, (vtfunc_t)timerCallback,
+						contexts[index]);
+				contexts[index] = nullptr;
+			}
+		}
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		if (contexts[i]) {
+			timerCallback(contexts[i]);
+		}
+	}
+
+	return true;
 }
 
 static void timerCallback(CallbackContext* ctx) {
