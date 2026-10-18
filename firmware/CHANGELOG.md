@@ -64,6 +64,7 @@ or
 
 ### Fixed
  - Configuration flash operations are now serialized, so concurrent saves and reads cannot overwrite each other, and a failed write is not retried continuously without a new request.
+ - Calibration burns now verify erase, programmed bytes, header, and CRC before replacing the remaining valid copy; a failed write stops immediately and reports how many copies were verified.
  - Bound every continuous ignition output pulse with an independent 1.5x nominal dwell guard. Physical ownership and pulse age survive callback promotion and repeated HIGH, competing occurrences cannot take over an energized coil, and the guard still forces LOW if the ignition occurrence was invalidated. Invalid dwell cannot energize a main, trailing or raw ignition output.
  - Preserve a pending ignition discharge before reusing the same event after rapid synchronization loss/restart or trigger configuration changes. Skip the overlapping charge so it cannot lose its overdwell protection.
  - Close ignition occurrences atomically and reject obsolete ordinary, underdwell, fire and charge callbacks. Snapshot each occurrence's outputs and dwell, give multispark pulses distinct generations, and recheck ignition authorization before charging or starting another pulse.

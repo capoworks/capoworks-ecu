@@ -19,7 +19,7 @@
 
 #include "flash_int.h"
 #include "crc_accelerator.h"
-#include "configuration_write_state.h"
+#include "configuration_storage.h"
 
 #if EFI_TUNER_STUDIO
 #include "tunerstudio.h"
@@ -28,6 +28,7 @@
 #include "runtime_state.h"
 
 static ConfigurationWriteState configurationWriteState;
+static ConfigurationWriteResult lastWriteResult{ConfigurationWritePhase::Complete, 0, FLASH_RETURN_SUCCESS, 0};
 
 /**
  * https://sourceforge.net/p/rusefi/tickets/335/
@@ -40,12 +41,13 @@ static uint32_t flashStateCrc(const persistent_config_container_s& state) {
 	return singleCrc(&state.persistentConfiguration, sizeof(persistent_config_s));
 }
 
-static bool writeConfiguration(bool requestedOnly);
+static void writeConfiguration(bool requestedOnly);
 
 #if EFI_FLASH_WRITE_THREAD
 chibios_rt::BinarySemaphore flashWriteSemaphore(/*taken =*/true);
 
-static THD_WORKING_AREA(flashWriteStack, UTILITY_THREAD_STACK_SIZE);
+// CRC readback uses a chunk buffer; allow room for the driver and diagnostics.
+static THD_WORKING_AREA(flashWriteStack, 2 * UTILITY_THREAD_STACK_SIZE);
 
 static void flashWriteThread(void*) {
 	chRegSetThreadName("flash writer");
@@ -54,7 +56,7 @@ static void flashWriteThread(void*) {
 		// Wait for a request to come in
 		flashWriteSemaphore.wait();
 
-		// Do the actual flash write operation
+		// Claim a pending request atomically; a direct write may have consumed it.
 		writeConfiguration(true);
 	}
 }
@@ -102,36 +104,13 @@ void writeToFlashIfPending() {
 	// we do not want to allow sensor timeouts right away, we re-enable next time method is invoked
 }
 
-// Erase and write a copy of the configuration at the specified address
-template <typename TStorage>
-int eraseAndFlashCopy(flashaddr_t storageAddress, const TStorage& data) {
-	// error already reported, return
-	if (!storageAddress) {
-		return FLASH_RETURN_SUCCESS;
-	}
-
-	auto err = intFlashErase(storageAddress, sizeof(TStorage));
-	if (FLASH_RETURN_SUCCESS != err) {
-		firmwareError("Failed to erase flash at 0x%08x: %d", storageAddress, err);
-		return err;
-	}
-
-	err = intFlashWrite(storageAddress, reinterpret_cast<const char*>(&data), sizeof(TStorage));
-	if (FLASH_RETURN_SUCCESS != err) {
-		firmwareError("Failed to write flash at 0x%08x: %d", storageAddress, err);
-		return err;
-	}
-
-	return err;
-}
-
 bool burnWithoutFlash = false;
 
 void writeToFlashNow() {
 	writeConfiguration(false);
 }
 
-static bool writeConfiguration(bool requestedOnly) {
+static void writeConfiguration(bool requestedOnly) {
 	{
 		chibios_rt::CriticalSectionLocker lock;
 		if (!configurationWriteState.begin(requestedOnly)) {
@@ -139,16 +118,14 @@ static bool writeConfiguration(bool requestedOnly) {
 			if (!requestedOnly) {
 				configurationWriteState.request();
 			}
-			return false;
+			return;
 		}
 	}
 
 	engine->configBurnTimer.reset();
-	bool isSuccess = false;
+	ConfigurationWriteResult result{ConfigurationWritePhase::Complete, 0, FLASH_RETURN_SUCCESS, 0};
 
-	if (burnWithoutFlash) {
-		isSuccess = true;
-	} else {
+	if (!burnWithoutFlash) {
 		efiPrintf("Writing pending configuration...");
 
 		// Set up the container
@@ -157,111 +134,64 @@ static bool writeConfiguration(bool requestedOnly) {
 		persistentState.value = flashStateCrc(persistentState);
 
 #if EFI_STORAGE_INT_FLASH == TRUE
-		// Flash two copies
-		int result1 = eraseAndFlashCopy(getFlashAddrFirstCopy(), persistentState);
-		int result2 = FLASH_RETURN_SUCCESS;
-		/* Only if second copy is supported */
-		if (getFlashAddrSecondCopy()) {
-			result2 = eraseAndFlashCopy(getFlashAddrSecondCopy(), persistentState);
-		}
-
-		// handle success/failure
-		isSuccess = (result1 == FLASH_RETURN_SUCCESS) && (result2 == FLASH_RETURN_SUCCESS);
+		result = writeConfigurationCopies(getFlashAddrFirstCopy(), getFlashAddrSecondCopy(), persistentState);
+#else
+		result = {ConfigurationWritePhase::Layout, 0, FLASH_RETURN_NO_PERMISSION, 0};
 #endif
-
-		if (isSuccess) {
-			efiPrintf("FLASH_SUCCESS");
-		} else {
-			efiPrintf("Flashing failed");
-		}
-
 		resetMaxValues();
 	}
 
 	{
 		chibios_rt::CriticalSectionLocker lock;
-		configurationWriteState.complete(isSuccess);
+		lastWriteResult = result;
+		configurationWriteState.complete(result.success());
+	}
+
+	if (!burnWithoutFlash) {
+		if (result.success()) {
+			efiPrintf("FLASH_SUCCESS");
+		} else {
+			// Publish completion before reporting an error: production firmwareError can return.
+			firmwareError(
+					"Configuration flash failed: phase %d address 0x%08x error %d verified %u",
+					static_cast<int>(result.phase),
+					result.address,
+					result.error,
+					result.verifiedCopies);
+		}
 	}
 
 	// A request may have arrived while flash I/O was active.
 	if (shouldWriteConfiguration()) {
 		wakeFlashWriter();
 	}
+}
 
-	return isSuccess;
+static void printFlashStatus() {
+	ConfigurationWriteResult result;
+	bool pending;
+	bool writing;
+	bool reading;
+	{
+		chibios_rt::CriticalSectionLocker lock;
+		result = lastWriteResult;
+		pending = configurationWriteState.pending();
+		writing = configurationWriteState.writing();
+		reading = configurationWriteState.reading();
+	}
+	efiPrintf(
+			"flash_status pending=%d writing=%d reading=%d phase=%d address=0x%08x error=%d verified=%u",
+			pending,
+			writing,
+			reading,
+			static_cast<int>(result.phase),
+			result.address,
+			result.error,
+			result.verifiedCopies);
 }
 
 static void doResetConfiguration() {
 	resetConfigurationExt(engineConfiguration->engineType);
-}
-
-enum class FlashState {
-	Ok,
-	CrcFailed,
-	IncompatibleVersion,
-	// all is well, but we're on a fresh chip with blank memory
-	BlankChip,
-};
-
-/**
- * Read single copy of rusEFI configuration from flash
- */
-static FlashState readOneConfigurationCopy(flashaddr_t address) {
-	efiPrintf("readFromFlash %x", address);
-
-	// error already reported, return
-	if (!address) {
-		return FlashState::BlankChip;
-	}
-
-	intFlashRead(address, (char*)&persistentState, sizeof(persistentState));
-
-	auto flashCrc = flashStateCrc(persistentState);
-
-	if (flashCrc != persistentState.value) {
-		// If the stored crc is all 1s, that probably means the flash is actually blank, not that the crc failed.
-		if (persistentState.value == ((decltype(persistentState.value))-1)) {
-			return FlashState::BlankChip;
-		} else {
-			return FlashState::CrcFailed;
-		}
-	} else if (persistentState.version != FLASH_DATA_VERSION || persistentState.size != sizeof(persistentState)) {
-		return FlashState::IncompatibleVersion;
-	} else {
-		return FlashState::Ok;
-	}
-}
-
-/**
- * this method could and should be executed before we have any
- * connectivity so no console output here
- *
- * in this method we read first copy of configuration in flash. if that first copy has CRC or other issues we read
- * second copy.
- */
-static FlashState readConfiguration() {
-#if EFI_STORAGE_INT_FLASH == TRUE
-	auto firstCopyAddr = getFlashAddrFirstCopy();
-	auto secondyCopyAddr = getFlashAddrSecondCopy();
-
-	FlashState firstCopy = readOneConfigurationCopy(firstCopyAddr);
-
-	if (firstCopy == FlashState::Ok) {
-		// First copy looks OK, don't even need to check second copy.
-		return firstCopy;
-	}
-
-	/* no second copy? */
-	if (getFlashAddrSecondCopy() == 0x0) {
-		return firstCopy;
-	}
-
-	efiPrintf("Reading second configuration copy");
-	return readOneConfigurationCopy(secondyCopyAddr);
-#endif
-
-	// In case of neither of those cases, return that things went OK?
-	return FlashState::Ok;
 }
 
 void readFromFlash() {
@@ -275,24 +205,29 @@ void readFromFlash() {
 		return;
 	}
 
-	FlashState result = readConfiguration();
+#if EFI_STORAGE_INT_FLASH == TRUE
+	auto result = readConfigurationCopies(getFlashAddrFirstCopy(), getFlashAddrSecondCopy(), persistentState);
+#else
+	auto result = ConfigurationFlashState::Ok;
+#endif
 
 	switch (result) {
-		case FlashState::CrcFailed:
+		case ConfigurationFlashState::ReadFailed:
+		case ConfigurationFlashState::CrcFailed:
 			warning(ObdCode::CUSTOM_ERR_FLASH_CRC_FAILED, "flash CRC failed");
 			efiPrintf("Need to reset flash to default due to CRC mismatch");
 			[[fallthrough]];
-		case FlashState::BlankChip:
+		case ConfigurationFlashState::BlankChip:
 			resetConfigurationExt(engine_type_e::DEFAULT_ENGINE_TYPE);
 			break;
-		case FlashState::IncompatibleVersion:
+		case ConfigurationFlashState::IncompatibleVersion:
 			// Preserve engine type from old config
 			efiPrintf(
 					"Resetting due to version mismatch but preserving engine type [%d]",
 					(int)engineConfiguration->engineType);
 			resetConfigurationExt(engineConfiguration->engineType);
 			break;
-		case FlashState::Ok:
+		case ConfigurationFlashState::Ok:
 			// At this point we know that CRC and version number is what we expect. Safe to assume it's a valid
 			// configuration.
 			applyNonPersistentConfiguration();
@@ -315,6 +250,7 @@ void readFromFlash() {
 
 void initFlash() {
 	addConsoleAction("readconfig", readFromFlash);
+	addConsoleAction("flash_status", printFlashStatus);
 	/**
 	 * This would write NOW (you should not be doing this while connected to real engine)
 	 */
