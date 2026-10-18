@@ -353,6 +353,9 @@ public:
 	EngineState engineState;
 	AirmassInjectionState airmassInjectionState;
 	AirmassCalibrationCache airmassCalibration;
+	// Per-calculation model fuel trim publication and its calibration scan cache.
+	CylinderModelFuelTrimState cylinderModelFuelTrim;
+	CylinderTrimCalibrationCache cylinderTrimCalibration;
 
 	/**
 	 * idle blip is a development tool: alternator PID research for instance have benefited from a repetitive change of

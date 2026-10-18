@@ -125,7 +125,7 @@ protected:
 	}
 };
 
-static CCM_OPTIONAL UsbRxPumpThread rxPump;
+static CCM_OPTIONAL_BACKGROUND UsbRxPumpThread rxPump;
 
 struct UsbThread : public TunerstudioThread {
 	UsbThread()
@@ -137,7 +137,7 @@ struct UsbThread : public TunerstudioThread {
 	}
 };
 
-static CCM_OPTIONAL UsbThread usbConsole;
+static CCM_OPTIONAL_BACKGROUND UsbThread usbConsole;
 
 // Called from usbcfg.cpp on USB_EVENT_CONFIGURED (replaces sduConfigureHookI).
 void usbDirectConfiguredHookI(USBDriver*) {

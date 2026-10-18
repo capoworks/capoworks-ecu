@@ -139,6 +139,12 @@ AirmassEvaluation AlphaNAirmass::evaluateAirmass(
 	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
 	if (!evaluation.Valid) {
 		evaluation.Result.CylinderAirmass = 0;
+	} else {
+		// Alpha-N trim evidence uses the captured normalized TPS regardless of
+		// whether the selected pressure policy also multiplies by MAP.
+		evaluation.TrimAlphaNActive = true;
+		evaluation.TrimAlphaNWeightedMass = airmass;
+		evaluation.TrimAlphaNTps = tps.Value;
 	}
 	if (postState) {
 		publishAirmassDiagnostics(resultDiagnostics);
@@ -182,6 +188,10 @@ AirmassEvaluation AlphaNAirmass::evaluateRawAirmass(
 	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
 	if (!evaluation.Valid) {
 		evaluation.Result.CylinderAirmass = 0;
+	} else {
+		evaluation.TrimAlphaNActive = true;
+		evaluation.TrimAlphaNWeightedMass = airmass;
+		evaluation.TrimAlphaNTps = tps.Value;
 	}
 	return evaluation;
 }

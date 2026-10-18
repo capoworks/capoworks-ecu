@@ -42,7 +42,7 @@ USBDriver* usb_driver = &USBD2;
 // Block buffer for INI ramdisk LUN
 static NO_CACHE uint8_t blkbufIni[dma_buffers::MsdBlockSize];
 
-static CCM_OPTIONAL MassStorageController msd(usb_driver);
+static CCM_OPTIONAL_BACKGROUND MassStorageController msd(usb_driver);
 
 static const scsi_inquiry_response_t iniDriveInquiry = {
 		0x00,								 /* direct access block device     */

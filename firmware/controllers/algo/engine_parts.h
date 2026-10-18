@@ -58,3 +58,51 @@ struct multispark_state {
 	efidur_t dwell;
 	uint8_t count = 0;
 };
+
+// Dual-family per-cylinder model fuel trim publication. Owned by Engine so
+// fixtures and address reuse cannot observe another engine's factors.
+struct CylinderModelFuelTrimState {
+	float Factor[MAX_CYLINDER_COUNT];
+	uint8_t Branches;
+	bool PublicationValid;
+
+	CylinderModelFuelTrimState() {
+		reset();
+	}
+
+	void reset() {
+		for (size_t i = 0; i < MAX_CYLINDER_COUNT; i++) {
+			Factor[i] = 1;
+		}
+		Branches = 0;
+		PublicationValid = true;
+	}
+};
+
+// Scan cache for the two model-trim families. Validity is tied to the captured
+// airmass calibration generation, configuration version and cylinder count.
+struct CylinderTrimCalibrationCache {
+	uint32_t Generation;
+	int ConfigurationVersion;
+	size_t CylinderCount;
+	uint16_t Known;
+	uint16_t Valid;
+#if EFI_UNIT_TEST
+	uint32_t Scans;
+#endif
+
+	CylinderTrimCalibrationCache() {
+		reset();
+	}
+
+	void reset() {
+		Generation = 0xFFFFFFFFu;
+		ConfigurationVersion = -1;
+		CylinderCount = 0;
+		Known = 0;
+		Valid = 0;
+#if EFI_UNIT_TEST
+		Scans = 0;
+#endif
+	}
+};

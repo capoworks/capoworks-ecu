@@ -16,6 +16,16 @@ struct AirmassEvaluation {
 	AirmassResult Result;
 	bool Valid = false;
 	bool Degraded = false;
+
+	// Full-precision evidence for the dual-family per-cylinder model fuel trim.
+	// These values come from the same immutable evaluation as Result and never
+	// read packed output channels or live sensors.
+	bool TrimSdActive = false;
+	bool TrimAlphaNActive = false;
+	float TrimSdWeightedMass = 0;
+	float TrimAlphaNWeightedMass = 0;
+	float TrimSdLoadKpa = 0;
+	float TrimAlphaNTps = 0;
 };
 
 struct MapEvaluation {
