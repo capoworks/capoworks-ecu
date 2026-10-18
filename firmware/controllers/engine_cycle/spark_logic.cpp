@@ -8,6 +8,7 @@
 #include "pch.h"
 
 #include "spark_logic.h"
+#include "ignition_retarget.h"
 
 #include "event_queue.h"
 
@@ -207,8 +208,16 @@ static IgnitionContext chargeContext(IgnitionContext ctx, const IgnitionEvent& e
 	return ctx;
 }
 
+static void nextFireGeneration(IgnitionEvent& event) {
+	event.fireGeneration = (event.fireGeneration + 1) & 0x7ffffff;
+	if (!event.fireGeneration) {
+		event.fireGeneration = 1;
+	}
+}
+
 static IgnitionContext beginOccurrence(IgnitionEvent& event) {
 	nextChargeGeneration(event);
+	nextFireGeneration(event);
 	event.generation = (event.generation + 1) & 0x7ffffff;
 	if (!event.generation) {
 		event.generation = 1;
@@ -231,6 +240,7 @@ static void closeOccurrence(IgnitionEvent& event) {
 	// Invalidate BEFORE cancellation: an executor may already have copied action.
 	const auto priorState = event.state;
 	event.state = IgnitionOccurrenceState::Closed;
+	event.candidateValid = false;
 
 	if (priorState == IgnitionOccurrenceState::ChargePending) {
 		// A multispark handoff can leave the trailing coil HIGH while the next main
@@ -249,6 +259,27 @@ static void closeOccurrence(IgnitionEvent& event) {
 	engine->module<TriggerScheduler>()->cancel(&event.sparkEvent);
 	engine->scheduler.cancel(&event.sparkEvent.scheduling);
 	event.sparkEvent.fallbackIsCurrent = false;
+}
+
+static void fireRetargetedSpark(IgnitionContext ctx) {
+	chibios_rt::CriticalSectionLocker csl;
+	if (ctx.eventIndex >= MAX_CYLINDER_COUNT) {
+		return;
+	}
+	auto& event = engine->ignitionEvents.elements[ctx.eventIndex];
+	if (event.state == IgnitionOccurrenceState::Closed || ctx.generation != event.fireGeneration) {
+		return;
+	}
+	ctx.generation = event.generation;
+	fireSparkAndPrepareNextSchedule(ctx);
+}
+
+static action_s firingAction(IgnitionEvent& event, IgnitionContext ctx) {
+	if (event.plannedByTime && event.candidateValid) {
+		ctx.generation = event.fireGeneration;
+		return {fireRetargetedSpark, ctx};
+	}
+	return {fireSparkAndPrepareNextSchedule, ctx};
 }
 
 void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
@@ -282,8 +313,7 @@ void fireSparkAndPrepareNextSchedule(IgnitionContext ctx) {
 	if (!ctx.isOverdwellProtect && anyCharged && nowNt < hardDeadline && nowNt < minimumFire) {
 		event.sparksRemaining = 0;
 		const auto retry = std::min(hardDeadline, std::max<efitick_t>(minimumFire, nowNt + US2NT(10)));
-		engine->scheduler.schedule(
-				"minimum dwell", &event.sparkEvent.scheduling, retry, {fireSparkAndPrepareNextSchedule, ctx});
+		engine->scheduler.schedule("minimum dwell", &event.sparkEvent.scheduling, retry, firingAction(event, ctx));
 		return;
 	}
 
@@ -428,7 +458,8 @@ static void scheduleSparkEvent(
 		float dwellMs,
 		EngPhase dwellAngle,
 		EngPhase sparkAngle,
-		const EnginePhaseInfo& phase) {
+		const EnginePhaseInfo& phase,
+		expected<float> chargeDelayNt = unexpected) {
 	chibios_rt::CriticalSectionLocker csl;
 	if (event.state != IgnitionOccurrenceState::Closed || event.trailingPending || event.sparkEvent.scheduling.action) {
 		// A previous charge still owns this timer, possibly across sync loss or
@@ -455,6 +486,8 @@ static void scheduleSparkEvent(
 	event.trailingCylinder = event.cylinderNumber;
 	event.sparksRemaining = limitedSpark ? 0 : engine->engineState.multispark.count;
 
+	efitick_t chargeTime = phase.timestamp;
+
 	/**
 	 * The start of charge is always within the current trigger event range, so just plain time-based scheduling
 	 */
@@ -464,12 +497,21 @@ static void scheduleSparkEvent(
 		 * This way we make sure that coil dwell started while spark was enabled would fire and not burn
 		 * the coil.
 		 */
-		scheduleByAngleInPhase(
-				&event.dwellStartTimer,
-				phase,
-				angleOffset,
-				{&turnSparkPinHigh, chargeContext(ctx, event)},
-				AngleTimingPolicy::Ignition);
+		if (chargeDelayNt) {
+			chargeTime = phase.timestamp + static_cast<uint32_t>(chargeDelayNt.Value);
+			engine->scheduler.schedule(
+					"time budget dwell",
+					&event.dwellStartTimer,
+					chargeTime,
+					{turnSparkPinHigh, chargeContext(ctx, event)});
+		} else {
+			chargeTime = scheduleByAngleInPhase(
+					&event.dwellStartTimer,
+					phase,
+					angleOffset,
+					{&turnSparkPinHigh, chargeContext(ctx, event)},
+					AngleTimingPolicy::Ignition);
+		}
 	}
 
 	/**
@@ -479,10 +521,15 @@ static void scheduleSparkEvent(
 	efiAssertVoid(ObdCode::CUSTOM_ERR_6591, !std::isnan(sparkAngle.angle), "findAngle#4");
 	assertAngleRange(sparkAngle.angle, "findAngle#a5", ObdCode::CUSTOM_ERR_6549);
 
-	// Registration of the occurrence is protected by the same lock.
+	// Registration of the charge, spark and fallback is protected by the same lock.
+	if (!isCurrent(ctx, event)) {
+		return;
+	}
 	bool scheduled = engine->module<TriggerScheduler>()->scheduleOrQueue(
-			&event.sparkEvent, sparkAngle, {fireSparkAndPrepareNextSchedule, ctx}, phase, AngleTimingPolicy::Ignition);
+			&event.sparkEvent, sparkAngle, firingAction(event, ctx), phase, AngleTimingPolicy::Ignition);
+
 	(void)scheduled;
+	(void)chargeTime;
 }
 
 // A sync/configuration reset must never let an old pending HIGH occur later.
@@ -495,8 +542,11 @@ void cancelPendingIgnition() {
 		return;
 	}
 #endif // EFI_UNIT_TEST
+	engine->ignitionEvents.plannerPhaseValid = false;
 
 	for (auto& event : engine->ignitionEvents.elements) {
+		event.plannedCycleValid = false;
+		event.candidateValid = false;
 		if (event.state == IgnitionOccurrenceState::ChargePending) {
 			closeOccurrence(event);
 		}
@@ -577,6 +627,205 @@ static void prepareIgnitionSchedule() {
 	initializeIgnitionActions();
 }
 
+static bool timeBudgetSupported() {
+	return engineConfiguration->ignitionTimeBudget && getCurrentIgnitionMode() == IM_INDIVIDUAL_COILS &&
+		   getTriggerCentral()->triggerState.hasSynchronizedPhase() && !getTriggerCentral()->directSelfStimulation &&
+		   getTriggerCentral()->instantRpm.ignitionProfile.toothCount() > 0;
+}
+
+static expected<float> ignitionEta(const EnginePhaseInfo& phase, float distance) {
+	if (!std::isfinite(distance) || distance < 0 || distance > 180) {
+		return unexpected;
+	}
+	auto eta = getTriggerCentral()->instantRpm.ignitionProfile.getTimeToAngleNt(phase, distance);
+	if (eta) {
+		return eta;
+	}
+	const float fallback = USF2NT(engine->rpmCalculator.oneDegreeUs) * distance;
+	return std::isfinite(fallback) && fallback >= 0 ? expected<float>(fallback) : unexpected;
+}
+
+// This is a planning/service reserve, not a proven interrupt-latency bound.
+static constexpr float ignitionServiceReserveNt = USF2NT(100);
+
+static uint32_t plannerCycleAt(const EnginePhaseInfo& phase) {
+	const auto& list = engine->ignitionEvents;
+	return list.plannerCycle + (list.plannerPhaseValid && phase.currentEngPhase.angle < list.plannerLastPhase);
+}
+
+static float candidateDistance(const IgnitionEvent& event, const EnginePhaseInfo& phase) {
+	const int32_t cycles = static_cast<int32_t>(event.candidateTdcCycle - plannerCycleAt(phase));
+	return cycles * 720.0f + event.candidateSparkAngle - phase.currentEngPhase.angle;
+}
+
+static expected<float> ignitionAngleForTime(const EnginePhaseInfo& phase, float ticks) {
+	auto angle = getTriggerCentral()->instantRpm.ignitionProfile.getAngleForTimeNt(phase, ticks);
+	if (angle) {
+		return angle;
+	}
+	const float rate = USF2NT(engine->rpmCalculator.oneDegreeUs);
+	const float fallback = ticks / rate;
+	return std::isfinite(fallback) && rate > 0 && fallback >= 0 && fallback <= 180 ? expected<float>(fallback)
+																				   : unexpected;
+}
+
+static void observeRetarget(
+		IgnitionEvent& event,
+		float requested,
+		float applied,
+		float earliest,
+		float latest,
+		IgnitionRetargetStatus status) {
+	event.requestedSparkAngle = requested;
+	event.retargetStatus = static_cast<uint8_t>(status);
+	(void)applied;
+	(void)earliest;
+	(void)latest;
+#if EFI_UNIT_TEST
+	if (engine->onIgnitionRetarget) {
+		engine->onIgnitionRetarget(event.cylinderIndex, requested, applied, earliest, latest, static_cast<int>(status));
+	}
+#endif
+}
+
+// Update a candidate for the SAME TDC. Nothing is cancelled here: if computation
+// consumed the available reserve, an armed plan remains executable unchanged.
+static bool updateCandidate(IgnitionEvent& event, const EnginePhaseInfo& phase, float dwellMs) {
+	const float requested =
+			engine->cylinders[event.cylinderNumber].getSparkAngle(-engine->module<KnockController>()->getKnockRetard());
+	const float previous = candidateDistance(event, phase);
+	const float wanted = previous + requested - event.candidateSparkAngle;
+	const bool changed = std::abs(requested - event.requestedSparkAngle) > .0001f;
+	const bool charging = event.state == IgnitionOccurrenceState::Charging;
+	const float minimum = MSF2NT(.8f * dwellMs);
+	// This path corrects a NEW command. Do not impose a new registration
+	// reserve or change the original admission/minimum-dwell behavior merely
+	// because a tooth changed the estimated time to an unchanged target.
+	if (!changed) {
+		return false;
+	}
+	const auto now = getTimeNowNt();
+	float earliestNt = static_cast<float>((now - phase.timestamp)) + ignitionServiceReserveNt;
+	float latestNt = INFINITY;
+	if (charging) {
+		IgnitionContext owner;
+		owner.eventIndex = event.cylinderIndex;
+		owner.generation = event.generation;
+		bool anyOwned = false;
+		forEachSetBit(event.outputMaskSnapshot, [&](size_t idx) {
+			const auto& pin = enginePins.coils[idx];
+			if (pin.ownedBy(owner.owner())) {
+				anyOwned = true;
+				earliestNt = std::max(earliestNt, static_cast<float>((pin.firstHigh() - phase.timestamp)) + minimum);
+				latestNt = std::min(
+						latestNt,
+						static_cast<float>((pin.hardDeadline() - phase.timestamp)) - ignitionServiceReserveNt);
+			}
+		});
+		if (!anyOwned) {
+			observeRetarget(
+					event, requested, event.candidateSparkAngle, previous, previous, IgnitionRetargetStatus::Rejected);
+			return false;
+		}
+	} else {
+		earliestNt += minimum;
+	}
+	auto earliest = ignitionAngleForTime(phase, earliestNt + 1); // round toward feasibility
+	float latest = 180;
+	if (charging) {
+		auto end = ignitionAngleForTime(phase, std::max(0.0f, latestNt - 1));
+		if (end) {
+			latest = end.Value;
+		} else {
+			auto horizon = ignitionEta(phase, 180);
+			if (!horizon || horizon.Value > latestNt) {
+				earliest = unexpected;
+			}
+		}
+	}
+	const float origin = event.candidateSparkAngle - previous;
+	if (!earliest || earliestNt > latestNt || !std::isfinite(wanted)) {
+		observeRetarget(
+				event,
+				requested,
+				event.candidateSparkAngle,
+				previous + origin,
+				previous + origin,
+				IgnitionRetargetStatus::Rejected);
+		return false;
+	}
+	const float tdc = engine->cylinders[event.cylinderNumber].getAngleOffset();
+	earliest.Value = std::max(earliest.Value, tdc - engineConfiguration->maximumIgnitionTiming - origin);
+	latest = std::min(latest, tdc - engineConfiguration->minimumIgnitionTiming - origin);
+	auto decision = selectIgnitionTarget(
+			previous, wanted, earliest.Value, latest, event.state != IgnitionOccurrenceState::Closed);
+	auto eta = ignitionEta(phase, decision.distance);
+	// Recheck the real clock near commit, not just the ISR's captured timestamp.
+	const float elapsed = static_cast<float>((getTimeNowNt() - phase.timestamp));
+	if (!eta || eta.Value < elapsed + (charging ? 0 : minimum) || eta.Value > latestNt) {
+		decision = {previous, IgnitionRetargetStatus::Rejected};
+	}
+	observeRetarget(
+			event, requested, decision.distance + origin, earliest.Value + origin, latest + origin, decision.status);
+	if (decision.status == IgnitionRetargetStatus::Rejected || decision.status == IgnitionRetargetStatus::Unchanged) {
+		return false;
+	}
+	event.candidateSparkAngle = decision.distance + origin;
+	return true;
+}
+
+void revisePendingIgnition(const EnginePhaseInfo& phase) {
+	if (!timeBudgetSupported()) {
+		return;
+	}
+	chibios_rt::CriticalSectionLocker csl;
+	for (auto& event : engine->ignitionEvents.elements) {
+		if (!event.plannedByTime || !event.candidateValid || event.state == IgnitionOccurrenceState::Closed ||
+			event.wasSparkLimited) {
+			continue;
+		}
+		if (!newIgnitionChargeAllowed()) {
+			// An existing charge keeps its current LOW and independent physical guard.
+			if (event.state == IgnitionOccurrenceState::ChargePending) {
+				closeOccurrence(event);
+			}
+			continue;
+		}
+		const bool retargeted = updateCandidate(event, phase, event.occurrenceDwell);
+		IgnitionContext ctx;
+		ctx.eventIndex = event.cylinderIndex;
+		ctx.generation = event.generation;
+		auto eta = event.state == IgnitionOccurrenceState::ChargePending
+						 ? ignitionEta(phase, candidateDistance(event, phase))
+						 : expected<float>(unexpected);
+		if (eta) {
+			// Invalidate an extracted old HIGH before registering any replacement
+			// LOW: registration itself may execute another due action inline.
+			nextChargeGeneration(event);
+			engine->scheduler.cancel(&event.dwellStartTimer);
+		}
+		if (retargeted) {
+			float target = event.candidateSparkAngle;
+			wrapAngle(target, "retarget spark", ObdCode::CUSTOM_ERR_6550);
+			event.plannedSparkAngle = target;
+			nextFireGeneration(event);
+			engine->module<TriggerScheduler>()->cancel(&event.sparkEvent);
+			engine->scheduler.cancel(&event.sparkEvent.scheduling);
+			engine->module<TriggerScheduler>()->scheduleOrQueue(
+					&event.sparkEvent, {target}, firingAction(event, ctx), phase, AngleTimingPolicy::Ignition);
+		}
+		if (!eta || !isCurrent(ctx, event) || event.state != IgnitionOccurrenceState::ChargePending) {
+			continue;
+		}
+		const float delay = std::max(0.0f, eta.Value - MSF2NT(event.occurrenceDwell));
+		engine->scheduler.schedule(
+				"revised dwell",
+				&event.dwellStartTimer,
+				phase.timestamp + static_cast<uint32_t>(delay),
+				{turnSparkPinHigh, chargeContext(ctx, event)});
+	}
+}
+
 void onTriggerEventSparkLogic(const EnginePhaseInfo& phase) {
 	ScopePerf perf(PE::OnTriggerEventSparkLogic);
 
@@ -608,10 +857,125 @@ void onTriggerEventSparkLogic(const EnginePhaseInfo& phase) {
 	bool enableOddCylinderWastedSpark =
 			engine->engineState.useOddFireWastedSpark && getCurrentIgnitionMode() == IM_WASTED_SPARK;
 
+	const bool useBudget = timeBudgetSupported();
+	auto& list = engine->ignitionEvents;
+	if (useBudget) {
+		if (list.plannerPhaseValid && phase.currentEngPhase.angle < list.plannerLastPhase) {
+			list.plannerCycle++;
+		}
+		list.plannerLastPhase = phase.currentEngPhase.angle;
+		list.plannerPhaseValid = true;
+	}
+
 	if (engine->ignitionEvents.isReady) {
 		for (size_t i = 0; i < engine->engineState.cylinderCount; i++) {
 			auto& event = engine->ignitionEvents.elements[i];
 
+			if (useBudget) {
+				chibios_rt::CriticalSectionLocker csl;
+				if (event.state != IgnitionOccurrenceState::Closed || event.trailingPending) {
+					continue;
+				}
+				if (!event.candidateValid) {
+					// Seed a future target only. A later command cannot wrap this
+					// retained candidate into a different TDC occurrence.
+					const float rawTarget = engine->cylinders[event.cylinderNumber].getSparkAngle(
+							-engine->module<KnockController>()->getKnockRetard());
+					if (!std::isfinite(rawTarget)) {
+						continue;
+					}
+					float target = rawTarget;
+					wrapAngle(target, "budget target", ObdCode::CUSTOM_ERR_6550);
+					float distance = target - phase.currentEngPhase.angle;
+					uint32_t occurrence = list.plannerCycle;
+					if (distance < 0) {
+						distance += 720;
+						occurrence++;
+					}
+					if (rawTarget < 0) {
+						occurrence++;
+					}
+					if (rawTarget >= 720) {
+						occurrence--;
+					}
+					if (distance > 540) {
+						const uint32_t expired = occurrence - 1;
+						if (!event.plannedCycleValid || event.plannedTdcCycle != expired) {
+							event.expiredTargetCount++;
+							event.plannedTdcCycle = expired;
+							event.plannedCycleValid = true;
+						}
+						continue;
+					}
+					if (distance > 180 || (event.plannedCycleValid && event.plannedTdcCycle == occurrence)) {
+						continue;
+					}
+					event.candidateTdcCycle = occurrence;
+					event.candidateSparkAngle = rawTarget;
+					event.requestedSparkAngle = rawTarget;
+					event.retargetStatus = static_cast<uint8_t>(IgnitionRetargetStatus::Unchanged);
+					event.candidateValid = true;
+				}
+				if (candidateDistance(event, phase) < -180) {
+					event.expiredTargetCount++;
+					event.plannedTdcCycle = event.candidateTdcCycle;
+					event.plannedCycleValid = true;
+					event.candidateValid = false;
+					continue;
+				}
+				const bool corrected = updateCandidate(event, phase, dwellMs);
+				auto eta = ignitionEta(phase, candidateDistance(event, phase));
+				float span = phase.nextEngPhase - phase.currentEngPhase;
+				if (span < 0) {
+					span += 720;
+				}
+				auto interval = ignitionEta(phase, span);
+				if (!eta || !interval) {
+					if (candidateDistance(event, phase) < 0) {
+						event.expiredTargetCount++;
+						event.plannedTdcCycle = event.candidateTdcCycle;
+						event.plannedCycleValid = true;
+						event.candidateValid = false;
+					}
+					continue;
+				}
+				const float delay = std::max(0.0f, eta.Value - MSF2NT(dwellMs));
+				if (delay >= interval.Value) {
+					continue;
+				}
+				const float tdc = engine->cylinders[event.cylinderNumber].getAngleOffset();
+				const float elapsed = static_cast<float>(getTimeNowNt() - phase.timestamp);
+				if ((corrected && eta.Value < elapsed + MSF2NT(.8f * dwellMs)) ||
+					event.candidateSparkAngle < tdc - engineConfiguration->maximumIgnitionTiming ||
+					event.candidateSparkAngle > tdc - engineConfiguration->minimumIgnitionTiming) {
+					// There is no safe candidate inside the configured timing range.
+					// Consume this TDC without energizing; a later command cannot revive it.
+					event.expiredTargetCount++;
+					event.plannedTdcCycle = event.candidateTdcCycle;
+					event.plannedCycleValid = true;
+					event.candidateValid = false;
+					continue;
+				}
+				event.plannedTdcCycle = event.candidateTdcCycle;
+				event.plannedCycleValid = true;
+				event.plannedByTime = true;
+				float target = event.candidateSparkAngle;
+				wrapAngle(target, "candidate spark", ObdCode::CUSTOM_ERR_6550);
+				event.plannedSparkAngle = target;
+				bool skip = limitedSpark;
+#if EFI_LAUNCH_CONTROL
+				skip |= engine->softSparkLimiter.shouldSkip() || engine->torqueReductionSparkLimiter.shouldSkip();
+#endif
+#if EFI_ANTILAG_SYSTEM && EFI_LAUNCH_CONTROL
+				skip |= engine->ALSsoftSparkLimiter.shouldSkip();
+#endif
+				scheduleSparkEvent(skip, event, dwellMs, phase.currentEngPhase, {target}, phase, delay);
+				continue;
+			}
+			event.plannedByTime = false;
+			if (event.state == IgnitionOccurrenceState::Closed) {
+				event.candidateValid = false;
+			}
 			angle_t dwellAngle = event.dwellAngle;
 
 			angle_t sparkAngleAdjust = 0;
