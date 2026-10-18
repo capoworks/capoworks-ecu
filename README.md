@@ -1,58 +1,61 @@
 <div align="center">
 
-<b>GPL open-source ECU</b>
+<img src="https://avatars.githubusercontent.com/u/325562820?v=4" alt="Capoworks logo" width="160">
 
-[![Release](https://img.shields.io/github/v/release/FOME-Tech/fome-fw?style=flat)](https://github.com/FOME-Tech/fome-fw/releases/latest) ![Last Commit](https://img.shields.io/github/last-commit/FOME-Tech/fome-fw?style=flat)
-[![Unit Tests](https://img.shields.io/github/actions/workflow/status/FOME-Tech/fome-fw/build-unit-tests.yaml?label=Unit%20Tests&branch=master)](https://github.com/FOME-Tech/fome-fw/actions/workflows/build-unit-tests.yaml)
-![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/FOME-Tech/fome-fw/latest?color=blueviolet&label=Commits%20Since%20Release)
-[![FOME Discord](https://img.shields.io/discord/1060875162892898324?label=Discord&logo=Discord)](https://discord.gg/EEg2fbhQD4)
+![Last Commit](https://img.shields.io/github/last-commit/capoworks/capoworks-ecu?style=flat)
+[![Capoworks Checks](https://img.shields.io/github/actions/workflow/status/capoworks/capoworks-ecu/capoworks-checks.yaml?branch=master&label=Capoworks%20Checks)](https://github.com/capoworks/capoworks-ecu/actions/workflows/capoworks-checks.yaml?query=branch%3Amaster)
 
 </div>
 
-# [FOME: Free Open Motorsports ECU](https://www.fome.tech/)
+# Capoworks ECU
 
-Welcome to FOME, a project intended to provide OEM quality open source engine controls and [free software](https://www.fsf.org/about/what-is-free-software) with a focus on user-friendly design, stability and ease of use. 
+Capoworks ECU is an independent open-source engine-control firmware project focused on new features, experimental control strategies, and application-specific development.
 
-FOME intends to narrow the gap between the features and functions seen on modern OEM engine control systems and that expected from stand-alone engine control systems. At the same time FOME intends to improve the ease of working with these systems and help provide access to the learning resources needed to understand and tune engines effectively.
+The firmware provides a platform for testing alternative fuel models, ignition scheduling, signal processing, and hardware integration. Experimental features are documented with their operating requirements, limitations, and validation status so developers and tuners can evaluate them deliberately.
 
-FOME came about from a desire to enhance the user experience of rusEFI that was shared by a number of members of that project; over time it became apparent that the best way to achieve this goal was to begin working on a fork. Thus at the start of 2023 FOME was founded.
+**[Wiki and Documentation](https://capoworks.github.io/capoworks-ecu-docs/) · [Source](https://github.com/capoworks/capoworks-ecu) · [Issues](https://github.com/capoworks/capoworks-ecu/issues) · [Actions](https://github.com/capoworks/capoworks-ecu/actions)**
 
-The founding members would like to express gratitude towards rusEFI for its ground breaking work and the innovation it has brought to the ECU market.
+## Firmware Highlights
 
-At present FOME shares a large amount of its core with the rusEFI project and most rusEFI boards are compatible with the FOME software; this is likely something that will continue to diverge over time, meaning full compatibility with older RE hardware cannot be guaranteed.
+- **Blended fuel strategy:** independently calibrated Speed Density and Alpha-N air-mass models. At 0% authority the result uses Speed Density; at 100% authority it uses Alpha-N. Intermediate authority blends the calculated air masses.
+- Separate **16×16 per-cylinder trim maps** for Speed Density and Alpha-N.
+- Independent load-coordinate selection for control functions and protections.
+- Opt-in rolling idle-RPM feedback for idle-air and idle ignition correction.
+- Two ignition strategy selectors default to **Legacy**; **Cycle Profile** and **Time Budget** are opt-in alternatives.
 
-# User Documentation
+Cycle Profile and Time Budget depend on trigger geometry, cam synchronization, and ignition configuration. Check the wiki prerequisites before enabling either strategy.
 
-Online and offline (PDF) versions of the user manual available here: https://wiki.fome.tech/
+## Documentation
 
-# What Do We Have Here?
- * [Firmware](/firmware) - Source code for open source engine control unit for stm32 chips
- * [FOME console](/java_console) - ECU debugging/development software
- * [Simulator](/simulator) - Windows or Linux version of firmware allows exploration without any hardware
- * [Unit Tests](/unit_tests) - Unit tests of firmware
- * [Misc tools](/java_tools) - Misc development utilities
- * [misc/Jenkins](/misc/jenkins) - Continuous integration scripts
+- [Blended fuel algorithm](https://capoworks.github.io/capoworks-ecu-docs/Fuel/Fuel-Algorithms/Blended/)
+- [Air-mass models and migration](https://capoworks.github.io/capoworks-ecu-docs/Fuel/Fuel-Algorithms/Airmass-Models-and-Migration/)
+- [VE Analyze](https://capoworks.github.io/capoworks-ecu-docs/Fuel/Fuel-Settings/VE-Analyze/)
+- [Core8 build tools](https://capoworks.github.io/capoworks-ecu-docs/Software/Core8-Build-Tools/)
 
-# External Links
+VE Analyze can calibrate a Speed Density or Alpha-N model in a Blended configuration only when authority is uniformly 0% or 100% throughout the qualified session.
 
- * [Wiki](https://wiki.fome.tech/)
- * [Forum](https://www.fome.tech/forum)
- * [Discord](https://discord.gg/EEg2fbhQD4)
- * [Facebook](https://www.facebook.com/fome.tech)
-<!--
- * [YouTube](https://www.youtube.com/)
--->
+## Compatibility
 
-# Contributors
+**Current tune format: 20032.** Binary tunes from older formats are reset rather than automatically migrated. Create a tune with the matching INI, then manually transfer the relevant values, maps, and axes according to the [migration guide](https://capoworks.github.io/capoworks-ecu-docs/Fuel/Fuel-Algorithms/Airmass-Models-and-Migration/). Back up configurations before upgrading.
 
-This project exists thanks to all the people who contribute their time, expertise, and testing.
+## Repository Layout
 
-If you'd like to get involved, see [contributing](CONTRIBUTING.md).
+- [firmware/](firmware/) — engine-control firmware and board configurations
+- [java_console/](java_console/) — ECU tuning and debugging console
+- [simulator/](simulator/) — firmware simulation on Windows or Linux
+- [unit_tests/](unit_tests/) — firmware unit tests
+- [java_tools/](java_tools/) — development utilities
 
 ## Development
 
-Refer to [firmware/DEVELOPER.md](firmware/DEVELOPER.md) for details on building FOME firmware.
+Build instructions and development guidance are in [firmware/DEVELOPER.md](firmware/DEVELOPER.md).
 
-# Release Notes
+## License
 
-See [the changelog](firmware/CHANGELOG.md), or [by release](https://github.com/FOME-Tech/fome-fw/releases).
+The project license and terms are in [LICENSE](LICENSE). Firmware and bundled third-party components retain their respective copyright notices, license terms, and third-party licence notices; review them before redistribution.
+
+## Credits
+
+Capoworks derives from [FOME-Tech/fome-fw](https://github.com/FOME-Tech/fome-fw), which derives from [rusEFI/rusefi](https://github.com/rusefi/rusefi). We thank the authors, contributors, and communities of both projects for the engineering, knowledge, and tools that made this work possible.
+
+Capoworks is independent and is not officially endorsed or supported by FOME or rusEFI. Documentation credits and source acknowledgements are maintained at [Credits and Sources](https://capoworks.github.io/capoworks-ecu-docs/credits-and-sources/).
