@@ -140,6 +140,8 @@ EngineTestHelper::~EngineTestHelper() {
 	}
 
 	// Cleanup
+	// Fixture cleanup uses the real queue; strict mock assertions stay in the test body.
+	engine.scheduler.setMockExecutor(nullptr);
 	enginePins.reset();
 	enginePins.unregisterPins();
 	Sensor::resetRegistry();

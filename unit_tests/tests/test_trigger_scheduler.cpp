@@ -154,47 +154,24 @@ TEST(TriggerScheduler, cancelOnEmptyQueueIsSafe) {
 	EXPECT_EQ(0, engine->module<TriggerScheduler>()->getQueueSizeForUnitTest());
 }
 
-TEST(TriggerScheduler, oldOverdwellPreservesRequeuedSparkAndDischargesCoil) {
+TEST(TriggerScheduler, obsoleteCallbackCannotDischargeNewOwner) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
-	auto& scheduler = *engine->module<TriggerScheduler>();
-	auto& ignition = engine->ignitionEvents.elements[0];
-	auto& event = ignition.sparkEvent;
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
 	engine->rpmCalculator.oneDegreeUs = 100;
-	int newCount = 0;
-	IgnitionContext oldContext;
-	oldContext.eventIndex = 0;
-	oldContext.isOverdwellProtect = true;
-	ignition.outputMaskSnapshot = 1;
-	ignition.state = IgnitionOccurrenceState::Charging;
-
-	scheduler.schedule(&event, EngPhase{123}, {countAction, &newCount});
-	event.fallbackIsCurrent = true;
-	engine->scheduler.schedule(
-			"old overdwell",
-			&event.scheduling,
-			getTimeNowNt() + US2NT(2000),
-			{fireSparkAndPrepareNextSchedule, oldContext});
-	enginePins.coils[0].setHigh();
-
-	scheduler.flush();
-	EXPECT_FALSE(scheduler.scheduleOrQueue(&event, EngPhase{125}, {countAction, &newCount}, phaseAtCurrentTooth()));
-	engine->ignitionState.sparkDwell = 2;
+	engine->ignitionState.sparkDwell = 1;
 	engine->ignitionState.dwellAngle = 10;
-	ignition.dwellAngle = 42;
-	eth.moveTimeForwardAndInvokeEventsUs(2000);
-	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
-	EXPECT_EQ(1, scheduler.getQueueSizeForUnitTest());
-	EXPECT_EQ(42, ignition.dwellAngle);
-	EXPECT_EQ(0, newCount);
-
-	auto phase = phaseAtCurrentTooth();
-	phase.currentTrgPhase = TrgPhase{120};
-	phase.nextTrgPhase = TrgPhase{130};
-	scheduler.onEnginePhase(1000, phase);
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto oldFire = engine->ignitionEvents.elements[0].sparkEvent.scheduling.action;
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	oldFire.execute();
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
 	eth.moveTimeForwardAndInvokeEventsUs(1000);
-	EXPECT_EQ(1, newCount);
-	EXPECT_EQ(0, scheduler.getQueueSizeForUnitTest());
-	EXPECT_EQ(0, engine->scheduler.size());
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
 }
 
 TEST(TriggerScheduler, mixedQueuePromotesDueEventsAndPreservesWaitingOrder) {
@@ -229,7 +206,7 @@ TEST(TriggerScheduler, mixedQueuePromotesDueEventsAndPreservesWaitingOrder) {
 	}
 }
 
-TEST(TriggerScheduler, ignitionRegistersFallbackForEachNewCycle) {
+TEST(TriggerScheduler, ignitionRegistersPhysicalGuardForEachNewCycle) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	setCylinderCount(1);
 	engineConfiguration->firingOrder = FO_1;
@@ -240,7 +217,7 @@ TEST(TriggerScheduler, ignitionRegistersFallbackForEachNewCycle) {
 	engine->cylinders[0].setIgnitionTimingBtdc(-25);
 	auto& scheduler = *engine->module<TriggerScheduler>();
 
-	// Dwell at 15 degrees, spark at 25: firing waits for a later tooth.
+	// Dwell at 15 degrees, spark at 25: the physical guard drains each occurrence.
 	for (int cycle = 0; cycle < 2; cycle++) {
 		onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
 		ASSERT_EQ(1, scheduler.getQueueSizeForUnitTest());
@@ -272,8 +249,8 @@ TEST(TriggerScheduler, rapidRestartDoesNotChargeAfterOldOverdwellWithoutProtecti
 	eth.moveTimeForwardAndInvokeEventsUs(1300);
 	engine->OnTriggerSynchronizationLost();
 	prepare();
-	// Reacquisition before the old fallback: the next charge would start at
-	// 2.3 ms, after the old fallback at 2 ms. No more teeth arrive afterwards.
+	// Reacquisition before the old hard guard: the next charge would start at
+	// 2.3 ms, after the old guard at 2 ms. No more teeth arrive afterwards.
 	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
 	eth.moveTimeForwardAndInvokeEventsUs(200);
 	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
@@ -763,13 +740,18 @@ TEST(IgnitionOccurrence, staleCallbacksCannotMutateNewerOccurrence) {
 	// The executor clears the scheduling record before invoking the callback.
 	eth.moveTimeForwardAndInvokeEventsUs(500);
 	ASSERT_EQ(IgnitionOccurrenceState::Charging, event.state);
+	const auto physicalDeadline = enginePins.coils[0].hardDeadline();
 	engine->scheduler.cancel(&event.sparkEvent.scheduling);
 	oldFire.execute();
 	auto oldUnderdwell = event.sparkEvent.scheduling.action;
 	ASSERT_TRUE(oldUnderdwell);
-	ASSERT_EQ(1, engine->scheduler.size());
+	ASSERT_EQ(2, engine->scheduler.size());
 	ASSERT_EQ(&event.sparkEvent.scheduling, engine->scheduler.getHead());
 	ASSERT_LT(event.sparkEvent.scheduling.momentX, originalFireTime);
+	auto* physicalGuard = engine->scheduler.getForUnitTest(1);
+	ASSERT_NE(nullptr, physicalGuard);
+	EXPECT_EQ(NT2US(physicalDeadline), physicalGuard->momentX);
+	EXPECT_LT(event.sparkEvent.scheduling.momentX, physicalGuard->momentX);
 
 	// Let the retry discharge and close the old occurrence, then arm a new one.
 	eth.moveTimeForwardAndInvokeEventsUs(900);
@@ -904,12 +886,13 @@ TEST(IgnitionTrailing, pendingMultisparkHandoffCutDischargesTrailingHigh) {
 		ASSERT_TRUE(enginePins.coils[0].getLogicValue());
 		auto copiedTrailingCharge = event.trailingSparkCharge.action;
 		ASSERT_TRUE(copiedTrailingCharge);
+		const auto initialMainDeadline = enginePins.coils[0].hardDeadline();
 
-		eth.moveTimeForwardAndInvokeEventsUs(1000);
-		ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+		eth.moveTimeForwardAndInvokeEventsUs(500);
 		engine->module<TriggerScheduler>()->onEnginePhase(
 				1000, {getTimeNowNt(), 20, 30, 20, 30});
 		eth.moveTimeForwardAndInvokeEventsUs(500);
+		ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
 
 		ASSERT_EQ(IgnitionOccurrenceState::ChargePending, event.state);
 		ASSERT_FALSE(enginePins.coils[0].getLogicValue());
@@ -917,6 +900,12 @@ TEST(IgnitionTrailing, pendingMultisparkHandoffCutDischargesTrailingHigh) {
 		ASSERT_TRUE(event.trailingPending);
 		ASSERT_TRUE(event.trailingCharging);
 		ASSERT_EQ(2, ignitionCallbacks);
+		ASSERT_LT(getTimeNowNt(), initialMainDeadline);
+		const auto trailingDeadline = enginePins.trailingCoils[0].hardDeadline();
+		ASSERT_EQ(
+				enginePins.trailingCoils[0].firstHigh() + static_cast<uint32_t>(MSF2NT(1.5f)),
+				trailingDeadline);
+		EXPECT_LT(event.dwellStartTimer.momentX, NT2US(trailingDeadline));
 		EXPECT_FALSE(event.trailingSparkFire.action);
 
 		auto copiedMainCharge = event.dwellStartTimer.action;
@@ -940,15 +929,18 @@ TEST(IgnitionTrailing, pendingMultisparkHandoffCutDischargesTrailingHigh) {
 		EXPECT_EQ(0, engine->scheduler.size());
 
 		engineConfiguration->isIgnitionEnabled = true;
+		constexpr uint32_t newerOwner = 0x123456;
+		ASSERT_TRUE(enginePins.trailingCoils[0].charge(newerOwner, 1, {}));
 		copiedTrailingCharge.execute();
 		copiedMainCharge.execute();
 		copiedMainFire.execute();
 
-		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+		EXPECT_TRUE(enginePins.trailingCoils[0].ownedBy(newerOwner));
 		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
 		EXPECT_FALSE(event.trailingPending);
 		EXPECT_FALSE(event.trailingCharging);
 		EXPECT_EQ(0, ignitionCallbacks);
+		enginePins.trailingCoils[0].setLow();
 	}
 }
 
@@ -978,21 +970,32 @@ TEST(IgnitionTrailing, copiedCallbacksAreGenerationBoundAndKeepDwellSnapshot) {
 	const auto firstTrailingGeneration = event.trailingGeneration;
 	auto copiedTrailingCharge = event.trailingSparkCharge.action;
 	ASSERT_TRUE(copiedTrailingCharge);
+	const auto initialMainDeadline = enginePins.coils[0].hardDeadline();
 
-	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	engine->module<TriggerScheduler>()->onEnginePhase(
+			1000, {getTimeNowNt(), 20, 30, 20, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
 	ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
 	ASSERT_TRUE(event.trailingCharging);
+	ASSERT_FALSE(enginePins.coils[0].getLogicValue());
+	ASSERT_EQ(IgnitionOccurrenceState::ChargePending, event.state);
+	ASSERT_LT(getTimeNowNt(), initialMainDeadline);
+	const auto firstTrailingDeadline = enginePins.trailingCoils[0].hardDeadline();
+	ASSERT_EQ(
+			enginePins.trailingCoils[0].firstHigh() + static_cast<uint32_t>(MSF2NT(1.5f)),
+			firstTrailingDeadline);
+	EXPECT_LT(event.dwellStartTimer.momentX, NT2US(firstTrailingDeadline));
 
 	// A copied charge must not renew the high or clear the pending LOW.
 	copiedTrailingCharge.execute();
 	EXPECT_TRUE(enginePins.trailingCoils[0].getLogicValue());
 	EXPECT_TRUE(event.trailingPending);
+	EXPECT_EQ(firstTrailingDeadline, enginePins.trailingCoils[0].hardDeadline());
 
-	engine->module<TriggerScheduler>()->onEnginePhase(1000, {getTimeNowNt(), 20, 30, 20, 30});
-	eth.moveTimeForwardAndInvokeEventsUs(500);
-	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
 	eth.moveTimeForwardAndInvokeEventsUs(500);
 	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	ASSERT_EQ(IgnitionOccurrenceState::Charging, event.state);
 	eth.moveTimeForwardAndInvokeEventsUs(500);
 	ASSERT_FALSE(enginePins.coils[0].getLogicValue());
 
@@ -1038,6 +1041,98 @@ TEST(IgnitionTrailing, copiedCallbacksAreGenerationBoundAndKeepDwellSnapshot) {
 	eth.moveTimeForwardAndInvokeEventsUs(1000);
 	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
 	EXPECT_FALSE(event.trailingPending);
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionReset, pendingOccurrenceCannotReenergizeAfterProductionReset) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engineConfiguration->enableTrailingSparks = true;
+	engine->engineState.trailingSparkAngle = 10;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto& event = engine->ignitionEvents.elements[0];
+	ASSERT_EQ(IgnitionOccurrenceState::ChargePending, event.state);
+	auto copiedCharge = event.dwellStartTimer.action;
+	auto copiedFire = event.sparkEvent.scheduling.action;
+	ASSERT_TRUE(copiedCharge);
+	ASSERT_TRUE(copiedFire);
+	ASSERT_GT(engine->scheduler.size(), 0);
+
+	resetConfigurationExt(engineConfiguration->engineType);
+
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	EXPECT_FALSE(event.trailingPending);
+	EXPECT_FALSE(event.trailingCharging);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+	EXPECT_EQ(0, engine->module<TriggerScheduler>()->getQueueSizeForUnitTest());
+
+	copiedCharge.execute();
+	copiedFire.execute();
+
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionReset, chargingOccurrenceCannotReenergizeAfterProductionReset) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engineConfiguration->enableTrailingSparks = true;
+	engine->engineState.trailingSparkAngle = 5;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	auto& event = engine->ignitionEvents.elements[0];
+	auto copiedMainCharge = event.dwellStartTimer.action;
+	ASSERT_TRUE(copiedMainCharge);
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	auto copiedMainFire = event.sparkEvent.scheduling.action;
+	auto copiedTrailingCharge = event.trailingSparkCharge.action;
+	ASSERT_TRUE(copiedMainFire);
+	ASSERT_TRUE(copiedTrailingCharge);
+
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+	ASSERT_TRUE(event.trailingPending);
+	ASSERT_TRUE(event.trailingCharging);
+	ASSERT_GT(engine->scheduler.size(), 0);
+
+	resetConfigurationExt(engineConfiguration->engineType);
+
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	EXPECT_FALSE(event.trailingPending);
+	EXPECT_FALSE(event.trailingCharging);
+	EXPECT_FALSE(event.dwellStartTimer.action);
+	EXPECT_FALSE(event.sparkEvent.scheduling.action);
+	EXPECT_FALSE(event.trailingSparkCharge.action);
+	EXPECT_FALSE(event.trailingSparkFire.action);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_EQ(0, engine->scheduler.size());
+	EXPECT_EQ(0, engine->module<TriggerScheduler>()->getQueueSizeForUnitTest());
+
+	copiedMainCharge.execute();
+	copiedMainFire.execute();
+	copiedTrailingCharge.execute();
+
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, event.state);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
 	EXPECT_EQ(0, engine->scheduler.size());
 }
 
@@ -1140,7 +1235,7 @@ TEST(IgnitionTrailing, syncLossDropsPendingHighButKeepsChargingLow) {
 		EXPECT_TRUE(event.trailingCharging);
 		EXPECT_TRUE(enginePins.trailingCoils[0].getLogicValue());
 
-		// The main fallback still fires and discharges the already-charged trailing coil.
+		// The main hard guard still fires and discharges the already-charged trailing coil.
 		eth.moveTimeForwardAndInvokeEventsUs(500);
 		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
 		EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
@@ -1196,7 +1291,15 @@ TEST(IgnitionOccurrence, SameTickChargeAndFireOrdersAreSafe) {
 			EXPECT_TRUE(enginePins.coils[0].getLogicValue()) << "charge should raise the coil";
 			fire.execute();
 			EXPECT_TRUE(enginePins.coils[0].getLogicValue()) << "underdwell retry should retain HIGH";
-			EXPECT_EQ(1, engine->scheduler.size()) << "underdwell retry should retain the pending LOW";
+			EXPECT_EQ(2, engine->scheduler.size());
+			const auto physicalDeadline = enginePins.coils[0].hardDeadline();
+			auto* underdwell = engine->scheduler.getForUnitTest(0);
+			auto* physicalGuard = engine->scheduler.getForUnitTest(1);
+			ASSERT_NE(nullptr, underdwell);
+			ASSERT_NE(nullptr, physicalGuard);
+			EXPECT_EQ(&event.sparkEvent.scheduling, underdwell);
+			EXPECT_EQ(NT2US(physicalDeadline), physicalGuard->momentX);
+			EXPECT_LT(underdwell->momentX, physicalGuard->momentX);
 		} else {
 			fire.execute();
 			EXPECT_FALSE(enginePins.coils[0].getLogicValue()) << "fire-first should leave the coil LOW";
@@ -1209,7 +1312,7 @@ TEST(IgnitionOccurrence, SameTickChargeAndFireOrdersAreSafe) {
 	}
 }
 
-TEST(IgnitionOccurrence, DwellUpdateAfterArmKeepsSnapshot) {
+TEST(IgnitionOccurrence, DwellUpdateAfterArmKeepsMinimumAndCap) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	setCylinderCount(1);
 	engineConfiguration->minimumIgnitionTiming = -25;
@@ -1226,7 +1329,195 @@ TEST(IgnitionOccurrence, DwellUpdateAfterArmKeepsSnapshot) {
 	EXPECT_EQ(armedMask, event.outputMaskSnapshot);
 	eth.moveTimeForwardAndInvokeEventsUs(500);
 	ASSERT_TRUE(enginePins.coils[0].getLogicValue());
+	EXPECT_EQ(US2NT(1500).count(), enginePins.coils[0].hardDeadline() - enginePins.coils[0].firstHigh());
 	eth.moveTimeForwardAndInvokeEventsUs(1000);
 	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
 	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionPhysicalGuard, promotionAndRepeatedHighRetainHardDeadline) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 20, 10, 20});
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	auto& pin = enginePins.coils[0];
+	ASSERT_TRUE(pin.getLogicValue());
+	const auto first = pin.firstHigh();
+	const auto deadline = pin.hardDeadline();
+
+	// A greatly slowed next tooth promotes the normal spark beyond the hard cap.
+	engine->rpmCalculator.oneDegreeUs = 1000;
+	engine->module<TriggerScheduler>()->onEnginePhase(1000, {getTimeNowNt(), 20, 30, 20, 30});
+	pin.setHigh();
+	EXPECT_EQ(first, pin.firstHigh());
+	EXPECT_EQ(deadline, pin.hardDeadline());
+
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_FALSE(pin.getLogicValue());
+	EXPECT_EQ(1u, engine->ignitionEvents.elements[0].hardGuardCount);
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionPhysicalGuard, firstOwnerWinsAndExternalLowReleasesOwnership) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	auto& pin = enginePins.coils[0];
+	int guards = 0;
+	ASSERT_TRUE(pin.charge(1, 2, {countAction, &guards}));
+	const auto first = pin.firstHigh();
+	const auto deadline = pin.hardDeadline();
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(pin.charge(2, 9, {countAction, &guards}));
+	EXPECT_TRUE(pin.charge(1, 9, {countAction, &guards}));
+	EXPECT_EQ(first, pin.firstHigh());
+	EXPECT_EQ(deadline, pin.hardDeadline());
+	pin.discharge(2);
+	EXPECT_TRUE(pin.getLogicValue());
+	pin.setLow();
+	EXPECT_EQ(0, engine->scheduler.size());
+	EXPECT_TRUE(pin.charge(2, 2, {countAction, &guards}));
+	pin.discharge(1);
+	EXPECT_TRUE(pin.getLogicValue());
+	pin.discharge(2);
+	EXPECT_FALSE(pin.getLogicValue());
+	EXPECT_EQ(0, guards);
+}
+
+TEST(IgnitionPhysicalGuard, closedOccurrenceStillForcesLowAndOldEpochIsInert) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	auto& event = engine->ignitionEvents.elements[0];
+	event.generation = 1;
+	event.state = IgnitionOccurrenceState::Closed;
+	IgnitionContext ctx;
+	ctx.eventIndex = 0;
+	ctx.generation = 1;
+	ctx.isOverdwellProtect = true;
+	auto& pin = enginePins.coils[0];
+	ASSERT_TRUE(pin.charge(ctx.owner(), 1, {fireSparkAndPrepareNextSchedule, ctx}));
+	auto oldGuard = engine->scheduler.getForUnitTest(0)->action;
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_FALSE(pin.getLogicValue());
+
+	ASSERT_TRUE(pin.charge(ctx.owner() + 16, 1, {}));
+	oldGuard.execute();
+	EXPECT_TRUE(pin.getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1500);
+	EXPECT_FALSE(pin.getLogicValue());
+}
+
+TEST(IgnitionPhysicalGuard, pairedOutputsUseOwnAgeAndEarliestCapWins) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	auto& event = engine->ignitionEvents.elements[0];
+	event.generation = 1;
+	event.state = IgnitionOccurrenceState::Charging;
+	event.outputMaskSnapshot = 3;
+	event.occurrenceDwell = 2;
+	IgnitionContext ctx;
+	ctx.eventIndex = 0;
+	ctx.generation = 1;
+	auto guard = ctx;
+	guard.isOverdwellProtect = true;
+	ASSERT_TRUE(enginePins.coils[0].charge(ctx.owner(), 1, {fireSparkAndPrepareNextSchedule, guard}));
+	eth.moveTimeForwardAndInvokeEventsUs(800);
+	ASSERT_TRUE(enginePins.coils[1].charge(ctx.owner(), 2, {fireSparkAndPrepareNextSchedule, guard}));
+	eth.moveTimeForwardAndInvokeEventsUs(200);
+	fireSparkAndPrepareNextSchedule(ctx);
+	EXPECT_TRUE(enginePins.coils[0].getLogicValue());
+	EXPECT_TRUE(enginePins.coils[1].getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_FALSE(enginePins.coils[1].getLogicValue());
+	EXPECT_EQ(1u, event.hardGuardCount);
+}
+
+TEST(IgnitionPhysicalGuard, basePointerLowAndHighStartNewPhysicalEpoch) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->ignitionState.sparkDwell = 1;
+	auto& pin = enginePins.coils[0];
+	OutputPin* base = &pin;
+	ASSERT_TRUE(pin.charge(1, 1, {}));
+	const auto oldFirst = pin.firstHigh();
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	base->setValue(false);
+	EXPECT_FALSE(pin.ownedBy(1));
+	base->setValue(true);
+	EXPECT_GT(pin.firstHigh(), oldFirst);
+	eth.moveTimeForwardAndInvokeEventsUs(1499);
+	EXPECT_TRUE(pin.getLogicValue());
+	eth.moveTimeForwardAndInvokeEventsUs(1);
+	EXPECT_FALSE(pin.getLogicValue());
+}
+
+TEST(IgnitionPhysicalGuard, invalidDwellAndFatalErrorNeverEnergize) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	for (float dwell : {0.0f, -1.0f, NAN, INFINITY, 0.000001f, 1001.0f}) {
+		EXPECT_FALSE(enginePins.coils[0].charge(1, dwell, {}));
+		EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+		EXPECT_EQ(0, engine->scheduler.size());
+	}
+
+	const bool priorFirmwareError = hasFirmwareErrorFlag;
+	hasFirmwareErrorFlag = true;
+	turnAllPinsOff();
+	enginePins.coils[0].setValue(true);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+	EXPECT_FALSE(enginePins.coils[0].charge(1, 1, {}));
+	hasFirmwareErrorFlag = priorFirmwareError;
+}
+
+TEST(IgnitionPhysicalGuard, stopAndDeInitInvalidatePhysicalOwner) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	auto& pin = enginePins.coils[0];
+	ASSERT_TRUE(pin.charge(1, 2, {}));
+	EXPECT_TRUE(pin.stop());
+	EXPECT_FALSE(pin.ownedBy(1));
+	EXPECT_EQ(0, engine->scheduler.size());
+
+	ASSERT_TRUE(pin.charge(2, 2, {}));
+	pin.deInit();
+	EXPECT_FALSE(pin.ownedBy(2));
+	EXPECT_EQ(0, engine->scheduler.size());
+}
+
+TEST(IgnitionPhysicalGuard, rawHighWithoutEngineIsRejected) {
+	{
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		enginePins.coils[0].setLow();
+	}
+
+	enginePins.coils[0].setValue(true);
+	EXPECT_FALSE(enginePins.coils[0].getLogicValue());
+}
+
+TEST(IgnitionPhysicalGuard, multisparkCannotChangeTrailingSnapshot) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engineConfiguration->enableTrailingSparks = true;
+	engine->engineState.trailingSparkAngle = 5;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+	engine->engineState.multispark.count = 1;
+	engine->engineState.multispark.delay = US2NT(500);
+	engine->engineState.multispark.dwell = US2NT(200);
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
+	const auto deadline = enginePins.trailingCoils[0].hardDeadline();
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	const auto& event = engine->ignitionEvents.elements[0];
+	EXPECT_FLOAT_EQ(1, event.trailingDwell);
+	EXPECT_FLOAT_EQ(0.2f, event.occurrenceDwell);
+	EXPECT_EQ(deadline, enginePins.trailingCoils[0].hardDeadline());
+	eth.moveTimeForwardAndInvokeEventsUs(500);
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
+	EXPECT_FALSE(event.trailingPending);
+	eth.moveTimeForwardAndInvokeEventsUs(1000);
+	EXPECT_FALSE(enginePins.trailingCoils[0].getLogicValue());
 }
