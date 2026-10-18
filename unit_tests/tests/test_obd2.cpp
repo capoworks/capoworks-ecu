@@ -1,5 +1,6 @@
 #include "pch.h"
 
+#include "airmass_loads.h"
 #include "can.h"
 #include "obd2.h"
 #include "can_msg_tx.h"
@@ -54,6 +55,49 @@ void reqPid(uint8_t pid) {
 	frame.data8[2] = pid;
 
 	obdOnCanPacketRx(frame, CanBusIndex::Bus0);
+}
+
+namespace {
+bool publishPhysicalFuelLoad() {
+	engineConfiguration->fuelAlgorithm = LM_SPEED_DENSITY;
+	engineConfiguration->displacement = 2.4f;
+	setCylinderCount(4);
+
+	const auto token = engine->airmassInjectionState.beginCalculation(
+			LM_SPEED_DENSITY, 2000, engine->getGlobalConfigurationVersion());
+	AirmassInputs inputs;
+	inputs.HasPublicationContext = true;
+	inputs.PublicationEpoch = token;
+	inputs.ConfigurationVersion = engine->getGlobalConfigurationVersion();
+	inputs.CalibrationGeneration = engine->airmassCalibration.Generation;
+	inputs.ActiveStrategy = LM_SPEED_DENSITY;
+	inputs.Displacement = engineConfiguration->displacement;
+	inputs.CylinderCount = engine->engineState.cylinderCount;
+	inputs.Rpm = 2000;
+	inputs.MeasuredMap = 92.375f;
+	inputs.NativeMap.Map = 71.25f;
+	inputs.NativeMap.Valid = true;
+	inputs.Tps = 23.5f;
+	inputs.Pedal = 41.5f;
+	inputs.TpsToleranceMin = -10;
+	inputs.TpsToleranceMax = 110;
+
+	const auto candidate = prepareAirmassConsumerLoads(inputs, 0.3f);
+	chibios_rt::CriticalSectionLocker csl;
+	auto admission = engine->airmassInjectionState.locked(csl);
+	return publishAirmassConsumerLoads(candidate, admission);
+}
+} // namespace
+
+TEST_F(Obd2, PhysicalEngineLoadUsesSnapshotAndUnavailableIsZero) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	ASSERT_TRUE(publishPhysicalFuelLoad());
+	EXPECT_CALL(handler, onTx(0x7E8, 8, 3, 0x41, PID_ENGINE_LOAD, 182, 0, 0, 0, 0));
+	reqPid(PID_ENGINE_LOAD);
+
+	invalidateAirmassConsumerLoads();
+	EXPECT_CALL(handler, onTx(0x7E8, 8, 3, 0x41, PID_ENGINE_LOAD, 0, 0, 0, 0, 0));
+	reqPid(PID_ENGINE_LOAD);
 }
 
 TEST_F(Obd2, PidOneByte) {

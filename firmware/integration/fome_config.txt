@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20029
+#define FLASH_DATA_VERSION 20030
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -106,7 +106,7 @@ struct_no_prefix persistent_config_s
 
 struct_no_prefix engine_configuration_s
 
-#define BLOCKING_FACTOR 1408
+#define BLOCKING_FACTOR 1536
 
 #define LUA_PWM_COUNT 8
 #define LUA_DIGITAL_INPUT_COUNT 8
@@ -1065,7 +1065,7 @@ int16_t tps2Max;;"ADC", 1, 0, 0, 1023, 0
 
 	can_baudrate_e can2BaudRate;
 
-	#define load_override_e_enum "None", "MAP", "TPS", "Acc Pedal", "Cyl Filling %"
+	#define load_override_e_enum "Model default", "Measured MAP", "TPS", "Acc Pedal", "Cyl Filling %", "Effective MAP", "INVALID", "INVALID"
 	custom load_override_e 1 bits, U08, @OFFSET@, [0:2], @@load_override_e_enum@@
 	load_override_e afrOverrideMode;Override the Y axis (load) value used for the AFR table.\nAdvanced users only: If you aren't sure you need this, you probably don't need this.
 
@@ -1849,6 +1849,18 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 		table_values uint16_t autoscale alphaNTable;Alpha-N cylinder filling at the reference pressure and selected temperature.;"%", 0.1, 0, 0, 999, 1
 	end_table
 
+	! Independent consumer coordinates are appended after all existing calibration storage.
+	load_override_e injectionPhaseLoadSource;Injection phase table coordinate.
+	load_override_e[MAX_CYLINDER_COUNT iterate] ignitionTrimLoadSource;Independent cylinder ignition trim coordinate.
+	load_override_e stftLoadSource;Coordinate and units for STFT load region thresholds.
+	load_override_e stagingLoadSource;Independent injector staging table coordinate.
+	load_override_e lambdaDeviationLoadSource;Independent allowed lambda deviation table coordinate.
+	load_override_e lambdaMonitorLoadSource;Coordinate and units for lambda protection load thresholds.
+	load_override_e trailingSparkLoadSource;Independent trailing spark table coordinate.
+	load_override_e ignitionIatLoadSource;Independent IAT ignition correction coordinate.
+	load_override_e knockRetardLoadSource;Independent maximum knock retard coordinate.
+	load_override_e[MAX_CYLINDER_COUNT iterate] knockGainLoadSource;Independent cylinder knock gain coordinate.
+	load_override_e hpfpTargetLoadSource;HPFP pressure target table coordinate. Table output and pressure feedback remain kPa.
 end_struct
 
 ! Pedal Position Sensor

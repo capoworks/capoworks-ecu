@@ -28,6 +28,8 @@ void setFlatInjectorLag(float value);
 floatms_t getCrankshaftRevolutionTimeMs(float rpm);
 floatms_t getEngineCycleDuration(float rpm);
 
+// Selected native/published model loads. Revised physical models return NAN
+// until a current consumer snapshot is available.
 float getFuelingLoad();
 float getIgnitionLoad();
 

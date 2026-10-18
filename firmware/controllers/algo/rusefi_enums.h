@@ -557,6 +557,8 @@ typedef enum __attribute__((__packed__)) {
 	AFR_Tps = 2,
 	AFR_AccPedal = 3,
 	AFR_CylFilling = 4,
+	AFR_EffectiveMAP = 5,
+	AFR_Invalid = 6,
 } load_override_e;
 
 enum class AirmassTemperatureSource : uint8_t {

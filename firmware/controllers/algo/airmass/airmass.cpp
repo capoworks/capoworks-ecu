@@ -3,6 +3,7 @@
 #include "airmass.h"
 #include "gppwm_channel.h"
 #include "idle_thread.h"
+#include "speed_density_base.h"
 
 AirmassVeModelBase::AirmassVeModelBase(const ValueProvider3D* veTable, engine_load_mode_e model)
 	: m_veTable(veTable)
@@ -209,6 +210,159 @@ expected<float> normalizeAirmassPercent(const AirmassInputs& inputs, expected<fl
 	return clampF(0, sensor.Value, 100);
 }
 
+namespace {
+bool isMapCoordinateValid(float map) {
+	return std::isfinite(map) && map >= 0 && map <= 1000;
+}
+
+bool isMapCoordinateValid(const expected<float>& map) {
+	return map.Valid && isMapCoordinateValid(map.Value);
+}
+
+bool isMapCoordinateValid(const MapEvaluation& map) {
+	return map.Valid && isMapCoordinateValid(map.Map);
+}
+
+AirmassLoad resolveNativeModelLoad(const AirmassInputs& inputs) {
+	AirmassLoad result;
+	switch (inputs.ActiveStrategy) {
+		case LM_SPEED_DENSITY:
+			result.Value = inputs.NativeMap.Map;
+			result.Source = AirmassLoadSource::EffectiveMap;
+			result.Unit = AirmassLoadUnit::Kpa;
+			result.Valid = isMapCoordinateValid(inputs.NativeMap);
+			result.UsesEstimate = inputs.NativeMap.UsesEstimate;
+			return result;
+		case LM_ALPHA_N: {
+			const auto tps = normalizeAirmassPercent(inputs, inputs.Tps);
+			result.Source = AirmassLoadSource::Tps;
+			result.Valid = tps.Valid;
+			if (tps) {
+				result.Value = tps.Value;
+			}
+			return result;
+		}
+		case LM_REAL_MAF:
+			result.Source = AirmassLoadSource::CylinderFilling;
+			result.Valid =
+					inputs.NativeLoad.Valid && std::isfinite(inputs.NativeLoad.Value) && inputs.NativeLoad.Value >= 0;
+			if (result.Valid) {
+				result.Value = inputs.NativeLoad.Value;
+			}
+			return result;
+		default:
+			return result;
+	}
+}
+
+AirmassLoad resolveCylinderFilling(const AirmassInputs& inputs, mass_t finalMass) {
+	AirmassLoad result;
+	result.Source = AirmassLoadSource::CylinderFilling;
+	if (!std::isfinite(finalMass) || finalMass < 0 || !std::isfinite(inputs.Displacement) || inputs.Displacement <= 0 ||
+		!std::isfinite(inputs.CylinderCount) || inputs.CylinderCount <= 0) {
+		return result;
+	}
+
+	const float standardCharge = idealGasLaw(inputs.Displacement / inputs.CylinderCount, 101.325f, 293.15f);
+	if (!std::isfinite(standardCharge) || standardCharge <= 0) {
+		return result;
+	}
+
+	result.Value = 100 * finalMass / standardCharge;
+	result.Valid = std::isfinite(result.Value) && result.Value >= 0;
+	return result;
+}
+
+AirmassLoad applyConsumerFallback(AirmassLoad result, bool massValid) {
+	if (result.Valid || !massValid) {
+		return result;
+	}
+
+	switch (result.Source) {
+		case AirmassLoadSource::EffectiveMap:
+		case AirmassLoadSource::MeasuredMap:
+			result.Value = 200;
+			break;
+		case AirmassLoadSource::Tps:
+		case AirmassLoadSource::Pedal:
+			result.Value = 100;
+			break;
+		default:
+			return result;
+	}
+
+	result.Valid = true;
+	result.UsesEstimate = false;
+	return result;
+}
+} // namespace
+
+AirmassLoad resolveAirmassLoad(const AirmassInputs& inputs, mass_t finalMass, load_override_e selector) {
+	AirmassLoad result;
+	switch (selector) {
+		case AFR_None:
+			return resolveNativeModelLoad(inputs);
+		case AFR_EffectiveMAP:
+			result.Value = inputs.NativeMap.Map;
+			result.Source = AirmassLoadSource::EffectiveMap;
+			result.Unit = AirmassLoadUnit::Kpa;
+			result.Valid = isMapCoordinateValid(inputs.NativeMap);
+			result.UsesEstimate = inputs.NativeMap.UsesEstimate;
+			return result;
+		case AFR_MAP:
+			result.Source = AirmassLoadSource::MeasuredMap;
+			result.Unit = AirmassLoadUnit::Kpa;
+			result.Valid = isMapCoordinateValid(inputs.MeasuredMap);
+			if (result.Valid) {
+				result.Value = inputs.MeasuredMap.Value;
+			}
+			return result;
+		case AFR_Tps: {
+			const auto tps = normalizeAirmassPercent(inputs, inputs.Tps);
+			result.Source = AirmassLoadSource::Tps;
+			result.Valid = tps.Valid;
+			if (tps) {
+				result.Value = tps.Value;
+			}
+			return result;
+		}
+		case AFR_AccPedal: {
+			const auto pedal = normalizeAirmassPercent(inputs, inputs.Pedal);
+			result.Source = AirmassLoadSource::Pedal;
+			result.Valid = pedal.Valid;
+			if (pedal) {
+				result.Value = pedal.Value;
+			}
+			return result;
+		}
+		case AFR_CylFilling:
+			return resolveCylinderFilling(inputs, finalMass);
+		default:
+			return result;
+	}
+}
+
+AirmassLoad resolveAirmassConsumerLoad(const AirmassInputs& inputs, mass_t finalMass, load_override_e selector) {
+	return applyConsumerFallback(
+			resolveAirmassLoad(inputs, finalMass, selector), std::isfinite(finalMass) && finalMass >= 0);
+}
+
+AirmassResolvedLoads::AirmassResolvedLoads(const AirmassInputs& inputs, mass_t finalMass)
+	: m_massValid(std::isfinite(finalMass) && finalMass >= 0) {
+	for (uint8_t source = AFR_None; source <= AFR_EffectiveMAP; source++) {
+		m_loads[source] = resolveAirmassLoad(inputs, finalMass, static_cast<load_override_e>(source));
+	}
+}
+
+AirmassLoad AirmassResolvedLoads::strict(load_override_e source) const {
+	const auto index = static_cast<uint8_t>(source);
+	return index <= AFR_EffectiveMAP ? m_loads[index] : AirmassLoad{};
+}
+
+AirmassLoad AirmassResolvedLoads::consumer(load_override_e source) const {
+	return applyConsumerFallback(strict(source), m_massValid);
+}
+
 void resolveCapturedMap(AirmassInputs& inputs, const ValueProvider3D* estimateTable) {
 	auto& result = inputs.NativeMap;
 	result = {};
@@ -280,6 +434,8 @@ void captureAirmassInputs(
 	}
 	inputs.FuelingLoad = getFuelingLoad();
 	inputs.IgnitionLoad = getIgnitionLoad();
+	inputs.LambdaOverride = engineConfiguration->afrOverrideMode;
+	inputs.IgnitionOverride = engineConfiguration->ignOverrideMode;
 
 	inputs.TpsToleranceMin = engineConfiguration->tpsErrorDetectionTooLow;
 	inputs.TpsToleranceMax = engineConfiguration->tpsErrorDetectionTooHigh;

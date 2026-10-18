@@ -40,6 +40,9 @@ struct AirmassInputs {
 	float Rpm = 0;
 	expected<float> MeasuredMap = unexpected;
 	MapEvaluation NativeMap;
+	// Explicit native model load for models whose table coordinate is not
+	// represented by NativeMap (currently MAF EngineLoadPercent).
+	expected<float> NativeLoad = unexpected;
 	expected<float> Tps = unexpected;
 	expected<float> Iat = unexpected;
 	expected<float> BarometricPressure = unexpected;
@@ -49,6 +52,8 @@ struct AirmassInputs {
 	expected<float> Maf2 = unexpected;
 	expected<float> FuelingLoad = unexpected;
 	expected<float> IgnitionLoad = unexpected;
+	load_override_e LambdaOverride = AFR_None;
+	load_override_e IgnitionOverride = AFR_None;
 	bool HasSecondaryMaf = false;
 	float TemperatureK = 0;
 	bool TemperatureValid = false;
@@ -113,6 +118,48 @@ void evaluateAirmassTemperature(const AirmassInputs& inputs, AirmassDiagnostics&
 MapEvaluation evaluateAirmassMap(float rpm, const ValueProvider3D* estimateTable = nullptr);
 void publishAirmassDiagnostics(const AirmassDiagnostics& diagnostics);
 expected<float> normalizeAirmassPercent(const AirmassInputs& inputs, expected<float> sensor);
+
+enum class AirmassLoadSource : uint8_t {
+	Invalid,
+	EffectiveMap,
+	MeasuredMap,
+	Tps,
+	Pedal,
+	CylinderFilling
+};
+
+enum class AirmassLoadUnit : uint8_t {
+	Kpa,
+	Percent
+};
+
+struct AirmassLoad {
+	float Value = 0;
+	AirmassLoadSource Source = AirmassLoadSource::Invalid;
+	AirmassLoadUnit Unit = AirmassLoadUnit::Percent;
+	bool Valid = false;
+	bool UsesEstimate = false;
+};
+
+// Snapshot-owned strict loads. Consumer substitution is a separate projection,
+// so numeric fallback never changes the captured coordinate's provenance.
+class AirmassResolvedLoads {
+public:
+	AirmassResolvedLoads(const AirmassInputs& inputs, mass_t finalMass);
+	AirmassLoad strict(load_override_e source) const;
+	AirmassLoad consumer(load_override_e source) const;
+
+private:
+	AirmassLoad m_loads[AFR_EffectiveMAP + 1];
+	bool m_massValid;
+};
+
+static_assert(sizeof(AirmassResolvedLoads) <= 52);
+
+// Pure resolution: never re-read sensors or apply numeric consumer fallbacks.
+AirmassLoad resolveAirmassLoad(const AirmassInputs& inputs, mass_t finalMass, load_override_e selector);
+// Upstream numeric substitutes for downstream tables; strict resolution stays unchanged.
+AirmassLoad resolveAirmassConsumerLoad(const AirmassInputs& inputs, mass_t finalMass, load_override_e selector);
 
 struct AirmassModelBase {
 	virtual expected<AirmassResult> getAirmass(float rpm, bool postState) = 0;

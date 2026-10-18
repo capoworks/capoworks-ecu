@@ -9,6 +9,7 @@
 
 #include "airmass.h"
 #include "airmass_injection_state.h"
+#include "airmass_loads.h"
 #include "rusefi_types.h"
 
 template <unsigned TRowCount, unsigned TColumnCount>
@@ -32,6 +33,7 @@ struct FuelAirmassCapture {
 // calculateFuelPublication() completes and the caller commits the publication.
 struct FuelPublicationCandidate {
 	AirmassDiagnostics Diagnostics;
+	AirmassConsumerLoadCandidate ConsumerLoads;
 	AirmassInjectionFault Fault = AirmassInjectionFault::Result;
 	bool Valid = false;
 	bool Stale = false;
@@ -49,6 +51,7 @@ struct FuelPublicationCandidate {
 	float RunningBaseFuel = 0;
 	float RunningFuel = 0;
 	float TotalFuelCorrection = 0;
+	float ResolvedLambdaLoad = 0;
 	float AfrTableYAxis = 0;
 	float TargetLambda = 0;
 	float TargetAFR = 0;

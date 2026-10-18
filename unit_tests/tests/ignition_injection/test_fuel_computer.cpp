@@ -28,6 +28,35 @@ TEST(FuelComputer, getCycleFuel) {
 	EXPECT_FLOAT_EQ(result, 7.0f / (5 * 3));
 }
 
+TEST(FuelComputer, ResolvedLoadDoesNotRereadOverrideAxis) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	MockFuelComputer dut;
+
+	EXPECT_CALL(dut, getStoichiometricRatio()).WillOnce(Return(14.7f));
+	EXPECT_CALL(dut, getTargetLambda(1000, FloatEq(0.8f))).WillOnce(Return(0.9f));
+
+	const auto result = dut.getCycleFuelWithResolvedLoad(7.0f, 1000, 0.8f);
+	EXPECT_FLOAT_EQ(result, 7.0f / (14.7f * 0.9f));
+	EXPECT_FLOAT_EQ(dut.getResolvedLambdaLoad(), 0.8f);
+	EXPECT_FLOAT_EQ(dut.afrTableYAxis, 0.8f);
+	EXPECT_FLOAT_EQ(dut.targetLambda, 0.9f);
+}
+
+TEST(FuelComputer, InvalidResolvedLoadClearsDiagnostics) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	MockFuelComputer dut;
+	dut.publishResolvedLambdaLoad(25);
+	dut.afrTableYAxis = 25;
+	dut.targetLambda = 1;
+
+	EXPECT_TRUE(std::isnan(dut.getCycleFuelWithResolvedLoad(7.0f, 1000, NAN)));
+	EXPECT_FLOAT_EQ(0, dut.getResolvedLambdaLoad());
+	EXPECT_FLOAT_EQ(0, dut.afrTableYAxis);
+	EXPECT_FLOAT_EQ(0, dut.targetLambda);
+}
+
 TEST(FuelComputer, FlexFuel) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 

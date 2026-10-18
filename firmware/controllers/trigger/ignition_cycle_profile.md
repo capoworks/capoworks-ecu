@@ -9,7 +9,7 @@ Both settings default to Legacy. Time-budget planning additionally requires a su
 
 ## Configuration migration
 
-Each new setting is appended at the end of `engine_configuration_s`, after the existing idle rolling-RPM field. The flash data version is `20029`. The loader rejects incompatible versions or stored sizes and restores defaults. Export a tune with the matching firmware and TunerStudio definition and migrate it field by field; do not copy a binary tune from another layout.
+The ignition cycle-profile setting was introduced in flash data version `20028`, followed by the time-budget setting in `20029`; later schema additions may advance the current version. Use the TunerStudio INI generated for the installed firmware and follow the manual tune-transfer instructions.
 
 ## Planned timing behavior
 

@@ -1,5 +1,39 @@
 #include "pch.h"
 
+#include "airmass_loads.h"
+
+namespace {
+bool publishPhysicalFuelLoad() {
+	engineConfiguration->fuelAlgorithm = LM_SPEED_DENSITY;
+	engineConfiguration->displacement = 2.4f;
+	setCylinderCount(4);
+
+	const auto token = engine->airmassInjectionState.beginCalculation(
+			LM_SPEED_DENSITY, 2000, engine->getGlobalConfigurationVersion());
+	AirmassInputs inputs;
+	inputs.HasPublicationContext = true;
+	inputs.PublicationEpoch = token;
+	inputs.ConfigurationVersion = engine->getGlobalConfigurationVersion();
+	inputs.CalibrationGeneration = engine->airmassCalibration.Generation;
+	inputs.ActiveStrategy = LM_SPEED_DENSITY;
+	inputs.Displacement = engineConfiguration->displacement;
+	inputs.CylinderCount = engine->engineState.cylinderCount;
+	inputs.Rpm = 2000;
+	inputs.MeasuredMap = 92.375f;
+	inputs.NativeMap.Map = 71.25f;
+	inputs.NativeMap.Valid = true;
+	inputs.Tps = 23.5f;
+	inputs.Pedal = 41.5f;
+	inputs.TpsToleranceMin = -10;
+	inputs.TpsToleranceMax = 110;
+
+	const auto candidate = prepareAirmassConsumerLoads(inputs, 0.3f);
+	chibios_rt::CriticalSectionLocker csl;
+	auto admission = engine->airmassInjectionState.locked(csl);
+	return publishAirmassConsumerLoads(candidate, admission);
+}
+} // namespace
+
 static void updateFan1() {
 	engine->module<FanControl1>()->onSlowCallback();
 }
@@ -19,6 +53,22 @@ struct MockAc : public AcController {
 		return acState;
 	}
 };
+
+TEST(Actuators, FanLoadAxisUsesPhysicalSnapshotAndSafetyDutyWhenStale) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engineConfiguration->fan1PwmXAxis = GPPWM_FuelLoad;
+	engineConfiguration->fanPwmSafetyDuty = 80;
+	engine->engineState.fuelingLoad = 12.0f;
+	setTable(config->fan1DutyAcOff, 50);
+	FanControl1 fan;
+
+	ASSERT_TRUE(publishPhysicalFuelLoad());
+	EXPECT_FLOAT_EQ(fan.getAcOffDuty(90), 50);
+	EXPECT_FLOAT_EQ(fan.fanXAxisValue, 71.25f);
+
+	invalidateAirmassConsumerLoads();
+	EXPECT_FLOAT_EQ(fan.getAcOffDuty(90), 80);
+}
 
 TEST(Actuators, Fan) {
 

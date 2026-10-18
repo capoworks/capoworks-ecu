@@ -3,6 +3,7 @@
 #include "closed_loop_fuel.h"
 #include "closed_loop_fuel_cell.h"
 #include "deadband.h"
+#include "airmass_loads.h"
 
 struct FuelingBank {
 	ClosedLoopFuelCellImpl cells[STFT_CELL_COUNT];
@@ -142,5 +143,9 @@ ClosedLoopFuelResult fuelClosedLoopCorrection(float load, float targetLambda) {
 }
 
 ClosedLoopFuelResult fuelClosedLoopCorrection() {
-	return fuelClosedLoopCorrection(getFuelingLoad(), engine->fuelComputer.targetLambda);
+	const float load = getAirmassConsumerLoad(AirmassConsumer::Stft);
+	if (!std::isfinite(load)) {
+		return {};
+	}
+	return fuelClosedLoopCorrection(load, engine->fuelComputer.targetLambda);
 }

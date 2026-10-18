@@ -300,4 +300,15 @@ struct_no_prefix output_channels_s
 
 	! Zero while disabled or until one complete cycle is valid.
 	uint16_t rollingCycleRpm;RPM: Rolling cycle;"RPM", 1, 0, 0, 8000, 0
+	int16_t autoscale injectionPhaseLoad;Load: injection phase;"", 0.1, 0, -3276, 3276, 1
+	int16_t[12 iterate] autoscale ignitionTrimLoad;Load: ignition trim;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale stftLoad;Load: STFT;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale stagingLoad;Load: staged injection;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale lambdaDeviationLoad;Load: lambda deviation;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale lambdaMonitorLoad;Load: lambda protection;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale trailingSparkLoad;Load: trailing spark;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale ignitionIatLoad;Load: ignition IAT correction;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale knockRetardLoad;Load: knock retard;"", 0.1, 0, -3276, 3276, 1
+	int16_t[12 iterate] autoscale knockGainLoad;Load: knock gain;"", 0.1, 0, -3276, 3276, 1
+	int16_t autoscale hpfpTargetLoad;Load: HPFP target;"", 0.1, 0, -3276, 3276, 1
 end_struct
