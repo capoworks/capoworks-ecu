@@ -300,6 +300,7 @@ public:
 	std::function<void()> onAirmassCalibrationScanned;
 	// Observes final ignition angle conversion only; absent from firmware.
 	std::function<void(bool)> onIgnitionTiming;
+	std::function<void(int, float, float, float, float, int)> onIgnitionRetarget;
 #endif // EFI_UNIT_TEST
 
 #if EFI_ENGINE_CONTROL

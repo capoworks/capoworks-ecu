@@ -69,6 +69,7 @@ void setDefaultIgnition() {
 	// Ignition base settings
 	engineConfiguration->isIgnitionEnabled = true;
 	engineConfiguration->ignitionCycleProfile = false;
+	engineConfiguration->ignitionTimeBudget = false;
 
 	engineConfiguration->timingMode = TM_DYNAMIC;
 	engineConfiguration->fixedModeTiming = 50;

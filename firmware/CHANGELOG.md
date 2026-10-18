@@ -34,10 +34,11 @@ or
 ### Breaking Changes
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
+ - Advance the flash data version to `20029` for the new experimental ignition setting at the end of `engine_configuration_s`. Older binary tunes are rejected and defaults restored. Export and migrate a tune with matching firmware and TunerStudio definitions; both experimental ignition settings remain Legacy by default.
 
 ### Added
  - Add opt-in full-engine-cycle RPM feedback for closed-loop idle air and ignition timing, with instantaneous fallback until a complete cycle is valid and a `rollingCycleRpm` diagnostic channel. Instantaneous feedback remains the default.
- - Add an experimental opt-in ignition cycle profile for final charge and firing angle conversion on supported rising-only missing-tooth crank wheels with full cam sync. Legacy timing remains the default and fallback; RPM and dwell start angle planning are unchanged.
+ - Add experimental opt-in ignition cycle-profile conversion and time-budget dwell planning on supported rising-only missing-tooth crank wheels with full cam sync. Time-budget planning requires individual coils, admits each target for one TDC occurrence, and retargets only within causal timing and physical dwell windows. Legacy timing remains the default and fallback; RPM and injection policies are unchanged.
  - Support for the Hella OPS+T (6PR 010 378-207) combined digital oil pressure and temperature sensor
  - SD card logs are now organized into `YYYY/MM/DD` folders when the real-time clock is set. If the clock is not set, logs are still written to the root of the card with a sequential name.
  - Add an opt-in "Service / Workshop" flood-clear mode that keeps fuel cut through the cranking-to-running transition until the accelerator is released. Roadside remains the default and restores fuel at running RPM; cranking priming now follows driver throttle intent and its flood-clear help reflects the 90% threshold.
@@ -67,6 +68,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Invalidate superseded planner firing callbacks independently of occurrence ownership. Pending charge estimates, active pulse minimum dwell, physical hard deadlines, multispark timing and trailing-charge lifecycle retain their existing guards.
  - Electronic throttle and DC wastegate outputs stop immediately when disabled in configuration or when reinitialization fails.
  - Blocking calibration burns inhibit configured electronic-throttle and DC wastegate outputs, then resume only after fresh position feedback and a new valid control cycle.
  - Repeated software PWM stop and restart cycles no longer accumulate callback nesting until the nesting-limit error is hit.

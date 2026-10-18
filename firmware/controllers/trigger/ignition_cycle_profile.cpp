@@ -5,6 +5,7 @@ void IgnitionCycleProfile::reset() {
 	m_count = 0;
 	m_head = 0;
 	m_valid = false;
+	m_budgetValid = false;
 }
 
 void IgnitionCycleProfile::configure(const TriggerWaveform& shape, const TriggerFormDetails& details) {
@@ -53,6 +54,7 @@ void IgnitionCycleProfile::configure(const TriggerWaveform& shape, const Trigger
 
 void IgnitionCycleProfile::update(const uint32_t* timestamps, uint16_t index, const EnginePhaseInfo& phase) {
 	m_valid = false;
+	m_budgetValid = false;
 	if (!m_slots || index >= m_slots || (index & 1)) {
 		reset();
 		return;
@@ -92,10 +94,45 @@ void IgnitionCycleProfile::update(const uint32_t* timestamps, uint16_t index, co
 			const float oldWindow = static_cast<float>(recentOld);
 			// Experimental rejection, rather than clamping an untrusted profile into a timer.
 			if (nowWindow >= 0.5f * oldWindow && nowWindow <= 2.0f * oldWindow) {
-				// One float division per tooth; each ignition event only needs a multiply.
+				m_scale = nowWindow / oldWindow;
+				m_oldCurrent = oldCurrent;
+				m_index = index;
+				m_timestamps = timestamps;
+				m_budgetValid = true;
+				// Two divisions shared by local conversion and the long-horizon planner.
 				m_ticksPerDegree = (static_cast<float>(durationOld) * nowWindow) / (oldWindow * span);
 				m_span = span;
 				m_valid = std::isfinite(m_ticksPerDegree) && m_ticksPerDegree > 0 && m_ticksPerDegree * span <= maxGap;
+			} else {
+				// Do not relax the historical-profile ratio guard. Use a local last
+				// interval only when all three matched speed ratios agree within 10%.
+				const auto p1 = index >= 2 ? index - 2 : index + m_slots - 2;
+				const auto p2 = index >= 4 ? index - 4 : index + m_slots - 4;
+				const auto h1 = m_head + 1 == 3 ? 0 : m_head + 1;
+				const auto h2 = h1 + 1 == 3 ? 0 : h1 + 1;
+				const uint32_t d1 = oldCurrent - m_old[h2];
+				const uint32_t d2 = m_old[h2] - m_old[h1];
+				const uint32_t d3 = m_old[h1] - m_old[m_head];
+				const uint32_t n1 = now - timestamps[p1];
+				const uint32_t n2 = timestamps[p1] - timestamps[p2];
+				const uint32_t n3 = timestamps[p2] - timestamps[past3];
+				if (d1 && d2 && d3 && n1 && n2 && n3 && d1 <= maxGap && d2 <= maxGap && d3 <= maxGap && n1 <= maxGap &&
+					n2 <= maxGap && n3 <= maxGap) {
+					const float r1 = static_cast<float>(n1) / d1;
+					const float r2 = static_cast<float>(n2) / d2;
+					const float r3 = static_cast<float>(n3) / d3;
+					if (std::min({r1, r2, r3}) >= 0.9f * std::max({r1, r2, r3})) {
+						float pastSpan = phase.currentTrgPhase.angle - m_details->eventAngles[p1];
+						if (pastSpan < 0) {
+							pastSpan += 720;
+						}
+						m_ticksPerDegree = static_cast<float>(n1) / pastSpan;
+						m_span = span;
+						m_valid = std::isfinite(m_ticksPerDegree) && m_ticksPerDegree > 0 &&
+								  m_ticksPerDegree * span <= maxGap;
+						// This local fallback never authorizes a historical long-horizon ETA.
+					}
+				}
 			}
 		}
 	}
@@ -118,4 +155,68 @@ expected<float> IgnitionCycleProfile::getDelayNt(const EnginePhaseInfo& phase, f
 		return unexpected;
 	}
 	return m_ticksPerDegree * angleOffset;
+}
+
+expected<float> IgnitionCycleProfile::getTimeToAngleNt(const EnginePhaseInfo& phase, float angleOffset) const {
+	if (!m_budgetValid || phase.timestamp != m_phase.timestamp || !(phase.currentTrgPhase == m_phase.currentTrgPhase) ||
+		!(phase.nextTrgPhase == m_phase.nextTrgPhase) || !(phase.currentEngPhase == m_phase.currentEngPhase) ||
+		!(phase.nextEngPhase == m_phase.nextEngPhase) || !std::isfinite(angleOffset) || angleOffset < 0 ||
+		angleOffset > 180) {
+		return unexpected;
+	}
+	float ticks = 0;
+	auto index = m_index;
+	auto oldTime = m_oldCurrent;
+	// Whole historical intervals need no division; only the final partial interval does.
+	for (unsigned count = 0; count < 32; count++) {
+		const auto next = index + 2 == m_slots ? 0 : index + 2;
+		const float span = next ? m_details->eventAngles[next] - m_details->eventAngles[index]
+								: 720.0f - m_details->eventAngles[index];
+		const auto nextTime = m_timestamps[next];
+		const uint32_t duration = nextTime - oldTime;
+		if (!duration || duration > 100000U * US_TO_NT_MULTIPLIER || span <= 0) {
+			return unexpected;
+		}
+		if (angleOffset <= span) {
+			const float result = (ticks + static_cast<float>(duration) * (angleOffset / span)) * m_scale;
+			return std::isfinite(result) && result >= 0 ? expected<float>(result) : unexpected;
+		}
+		ticks += duration;
+		angleOffset -= span;
+		oldTime = nextTime;
+		index = next;
+	}
+	return unexpected;
+}
+
+expected<float> IgnitionCycleProfile::getAngleForTimeNt(const EnginePhaseInfo& phase, float ticks) const {
+	if (!std::isfinite(ticks) || ticks < 0 || !getTimeToAngleNt(phase, 0)) {
+		return unexpected;
+	}
+	float remaining = ticks / m_scale;
+	float angle = 0;
+	auto index = m_index;
+	auto oldTime = m_oldCurrent;
+	for (unsigned count = 0; count < 32; count++) {
+		const auto next = index + 2 == m_slots ? 0 : index + 2;
+		const float span = next ? m_details->eventAngles[next] - m_details->eventAngles[index]
+								: 720.0f - m_details->eventAngles[index];
+		const auto nextTime = m_timestamps[next];
+		const uint32_t duration = nextTime - oldTime;
+		if (!duration || duration > 100000U * US_TO_NT_MULTIPLIER || span <= 0) {
+			return unexpected;
+		}
+		if (remaining <= duration) {
+			const float result = angle + span * remaining / duration;
+			return std::isfinite(result) && result <= 180 ? expected<float>(result) : unexpected;
+		}
+		remaining -= duration;
+		angle += span;
+		if (angle >= 180) {
+			return unexpected;
+		}
+		oldTime = nextTime;
+		index = next;
+	}
+	return unexpected;
 }

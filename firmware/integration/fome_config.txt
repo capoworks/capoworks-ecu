@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20028
+#define FLASH_DATA_VERSION 20029
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -1494,6 +1494,7 @@ pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
 	! Appended engine fields expand engine_configuration_s and shift later persistent-table offsets; FLASH_DATA_VERSION requires a tune transfer between schemas.
 	bit idleTimingUseRollingRpm,"Rolling cycle","Instantaneous";Use a full engine-cycle RPM window for closed-loop idle air and ignition timing to reject cyclic speed ripple.\nInstantaneous feedback remains the default. Until one complete cycle is valid, idle air uses instantaneous feedback and idle timing correction is zero.\nDoes not affect idle phase detection, open-loop air or other RPM consumers. PID gains may need retuning.
 	bit ignitionCycleProfile,"Cycle profile (experimental)","Legacy";Use the recent 720 degree tooth profile for final ignition charge and firing delays. Requires a supported rising-only missing-tooth crank wheel and full cam phase sync. Falls back to legacy timing during warmup or invalid history. RPM and dwell start angle planning are unchanged.
+	bit ignitionTimeBudget,"Time budget (experimental)","Legacy";Plan charge and fire timing from the bounded causal cycle profile for individual coils. Requires full cam phase sync and a supported rising-only missing-tooth crank wheel. Legacy timing remains the default and fallback. Experimental. Not a substitute for the independent physical dwell guard.
 
 ! end of engine_configuration_s
 end_struct

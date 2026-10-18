@@ -108,8 +108,8 @@ void InstantRpmCalculator::updateInstantRpm(
 
 	assertIsInBounds(index, timeOfLastEvent, "calc timeOfLastEvent");
 
-	if (engineConfiguration->ignitionCycleProfile && !getTriggerCentral()->directSelfStimulation &&
-		getTriggerCentral()->triggerState.hasSynchronizedPhase()) {
+	if ((engineConfiguration->ignitionCycleProfile || engineConfiguration->ignitionTimeBudget) &&
+		!getTriggerCentral()->directSelfStimulation && getTriggerCentral()->triggerState.hasSynchronizedPhase()) {
 		ignitionProfile.update(timeOfLastEvent, index, phaseInfo);
 	} else {
 		ignitionProfile.reset();
