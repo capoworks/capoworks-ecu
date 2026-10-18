@@ -238,6 +238,37 @@ TEST(AirmassFuelPublication, CurrentCorrectionFailureClearsEverythingAndRecovers
 	EXPECT_GT(engine->cylinders[0].getInjectionMass(), 0);
 }
 
+TEST(AirmassFuelPublication, StandaloneSpeedDensityFallbackRemainsFueledAndRecovers) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	configureSpeedDensityFuel(eth);
+	config->useMapEstimateTable = true;
+	setLinearCurve(config->mapEstimateTpsBins, 0, 100, 1);
+	setLinearCurve(config->mapEstimateRpmBins, 500, 8000, 1);
+	setTable(config->mapEstimateTable, 70);
+	invalidateAirmassCalibration();
+
+	Sensor::setInvalidMockValue(SensorType::Map);
+	runFuelCalculation(eth);
+
+	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
+	EXPECT_EQ(Status::Degraded, engine->airmassInjectionState.status());
+	EXPECT_TRUE(
+			engine->airmassInjectionState.fault() == Fault::Sensor ||
+			engine->airmassInjectionState.fault() == Fault::Load);
+	EXPECT_EQ(static_cast<uint8_t>(Status::Degraded), engine->outputChannels.blendedStatus);
+	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
+	EXPECT_GT(engine->cylinders[0].getInjectionMass(), 0);
+
+	Sensor::setMockValue(SensorType::Map, 55);
+	runFuelCalculation(eth);
+
+	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
+	EXPECT_EQ(Status::Legacy, engine->airmassInjectionState.status());
+	EXPECT_EQ(Fault::None, engine->airmassInjectionState.fault());
+	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
+	EXPECT_GT(engine->cylinders[0].getInjectionMass(), 0);
+}
+
 TEST(AirmassFuelPublication, InvalidCylinderBankClearsEverythingAndRecovers) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	configureSpeedDensityFuel(eth);

@@ -32,11 +32,9 @@ or
 ## Unreleased
 
 ### Breaking Changes
- - Advance the flash data version to `20032` and replace the former 4x4 residual cylinder fuel trims with separate 16x16 Speed Density and Alpha-N families. Older binary tunes are rejected; legacy fuel-trim cells are not migrated, so re-enter corrections in the new model maps. Per-cylinder ignition trims are unchanged.
- - Advance the flash data version to `20031` for the appended SD + Alpha-N authority schema. Older binary tunes are rejected; transfer blend calibration manually.
+ - Advance the flash data version to `20032` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, per-model 16x16 cylinder fuel trims, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI, recreating former 4x4 fuel-trim values in the new model families.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
- - Advance the flash data version to `20030` for the experimental ignition settings and appended independent consumer selectors in the tune layout. Older binary tunes are rejected and defaults restored. Use the firmware's matching generated TunerStudio INI and transfer tune values manually; both experimental ignition settings remain Legacy by default.
 
 ### Added
  - Add separate per-cylinder Speed Density (MAP kPa/RPM) and Alpha-N (TPS/RPM) model fuel trims with shared axes and neutral defaults.
@@ -74,6 +72,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - VE Analyze now applies strategy-specific crank, transient-fuel, cut-recovery, launch/anti-lag and lambda filters to Speed Density, Alpha-N and MAF maps, and publishes cranking and cut-recovery telemetry without moving existing output channels.
  - Invalidate superseded planner firing callbacks independently of occurrence ownership. Pending charge estimates, active pulse minimum dwell, physical hard deadlines, multispark timing and trailing-charge lifecycle retain their existing guards.
  - Electronic throttle and DC wastegate outputs stop immediately when disabled in configuration or when reinitialization fails.
  - Blocking calibration burns inhibit configured electronic-throttle and DC wastegate outputs, then resume only after fresh position feedback and a new valid control cycle.

@@ -427,8 +427,19 @@ static void updateFuelInfo() {
 	updateFuelResults();
 
 	const auto& wallFuel = engine->injectionEvents.elements[0].getWallFuel();
-	engine->outputChannels.wallFuelAmount = wallFuel.getWallFuel() * 1000;				 // Convert grams to mg
-	engine->outputChannels.wallFuelCorrectionValue = wallFuel.wallFuelCorrection * 1000; // Convert grams to mg
+	engine->outputChannels.wallFuelAmount = wallFuel.getWallFuel() * 1000; // Convert grams to mg
+	// A disabled wall model retains its internal history, but has no current correction.
+	engine->outputChannels.wallFuelCorrectionValue =
+			engine->module<WallFuelController>()->getEnable() ? wallFuel.wallFuelCorrection * 1000 : 0; // grams to mg
+
+	engine->outputChannels.veAnalyzeIsCranking = engine->rpmCalculator.isCranking();
+	const float timeSinceCut = std::min(
+			engine->module<DfcoController>()->getTimeSinceCut(), engine->module<LimpManager>()->getTimeSinceAnyCut());
+	engine->outputChannels.veAnalyzeTimeSinceCut = clampF(0, timeSinceCut, 655.35f);
+	static_assert(offsetof(TunerStudioOutputChannels, veAnalyzeIsCranking) == 259);
+	static_assert(offsetof(TunerStudioOutputChannels, coilDutyCycle) == 260);
+	static_assert(offsetof(TunerStudioOutputChannels, veAnalyzeTimeSinceCut) == 262);
+	static_assert(offsetof(TunerStudioOutputChannels, seconds) == 264);
 
 	engine->outputChannels.veValue = engine->engineState.currentVe;
 }
