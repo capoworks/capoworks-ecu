@@ -34,6 +34,7 @@ public:
 
 	virtual void disable(const char* msg) = 0;
 	virtual void enable() = 0;
+	virtual void setFlashInhibited(bool inhibited) = 0;
 
 	/**
 	 * Physically force all bridge outputs inactive before returning.
@@ -88,6 +89,7 @@ private:
 	OutputPin* const m_disable;
 	float m_value = 0;
 	bool m_isInverted = false;
+	bool m_flashInhibited = false;
 
 	ControlType m_type = ControlType::PwmDirectionPins;
 
@@ -107,6 +109,7 @@ public:
 
 	void enable() override;
 	void disable(const char* msg) override;
+	void setFlashInhibited(bool inhibited) override;
 	void stopImmediately() override;
 
 	void setType(ControlType type) {

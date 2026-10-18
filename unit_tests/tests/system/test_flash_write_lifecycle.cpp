@@ -3,9 +3,11 @@
 #include "configuration_storage.h"
 #include "crc_accelerator.h"
 #include "eficonsole.h"
+#include "electronic_throttle.h"
 #include "flash_int.h"
 #include "flash_main.h"
 #include "runtime_state.h"
+#include "stored_value_sensor.h"
 #include "tunerstudio.h"
 
 #include <functional>
@@ -34,6 +36,14 @@ flashaddr_t getFlashAddrFirstCopy() {
 
 flashaddr_t getFlashAddrSecondCopy() {
 	return 0x200000;
+}
+
+void beginBlockingFlash() {
+	events.push_back('B');
+}
+
+void endBlockingFlash() {
+	events.push_back('E');
 }
 
 void firmwareError(const char*, ...) {
@@ -111,8 +121,60 @@ TEST_F(FlashWriteLifecycle, CoalescesRequestsBeforeAutomaticWrite) {
 
 	flash_lifecycle_test::writeToFlashIfPending();
 
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
+	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
+}
+
+TEST_F(FlashWriteLifecycle, DirectWriteBracketsStorageAndRestoresSensorTimeouts) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	StoredValueSensor sensor(SensorType::WastegatePosition, MS2NT(10));
+	sensor.setValidValue(20, getTimeNowNt());
+	eth.moveTimeForwardMs(100);
+	ASSERT_FALSE(sensor.get().Valid);
+
+	flash_lifecycle_test::duringWrite = [&] {
+		EXPECT_TRUE(sensor.get().Valid);
+		EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());
+	};
+	flash_lifecycle_test::writeToFlashNow();
+
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
+	EXPECT_FALSE(sensor.get().Valid);
+	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
+}
+
+TEST_F(FlashWriteLifecycle, ConcurrentFlashDoesNotSuspendActuatorsOrSensorTimeouts) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	StoredValueSensor sensor(SensorType::WastegatePosition, MS2NT(10));
+	sensor.setValidValue(20, getTimeNowNt());
+	eth.moveTimeForwardMs(100);
+	ASSERT_FALSE(sensor.get().Valid);
+
+	flash_lifecycle_test::concurrent = true;
+	flash_lifecycle_test::setNeedToWriteConfiguration();
+	flash_lifecycle_test::writeToFlashIfPending();
+	EXPECT_TRUE(flash_lifecycle_test::events.empty());
+
+	flash_lifecycle_test::duringWrite = [&] { EXPECT_FALSE(sensor.get().Valid); };
+	flash_lifecycle_test::writeToFlashNow();
 	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W'}));
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
+}
+
+TEST_F(FlashWriteLifecycle, BurnWithoutFlashDoesNotGuardOrTouchStorage) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	StoredValueSensor sensor(SensorType::WastegatePosition, MS2NT(10));
+	sensor.setValidValue(20, getTimeNowNt());
+	eth.moveTimeForwardMs(100);
+	ASSERT_FALSE(sensor.get().Valid);
+
+	flash_lifecycle_test::burnWithoutFlash = true;
+	flash_lifecycle_test::setNeedToWriteConfiguration();
+	flash_lifecycle_test::writeToFlashIfPending();
+
+	EXPECT_TRUE(flash_lifecycle_test::events.empty());
+	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
+	EXPECT_FALSE(sensor.get().Valid);
 }
 
 TEST_F(FlashWriteLifecycle, RequestDuringWriteSurvivesUntilNextAttempt) {
@@ -123,13 +185,31 @@ TEST_F(FlashWriteLifecycle, RequestDuringWriteSurvivesUntilNextAttempt) {
 	};
 	flash_lifecycle_test::writeToFlashNow();
 
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
 	EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());
 
 	flash_lifecycle_test::duringWrite = {};
 	flash_lifecycle_test::writeToFlashIfPending();
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W', 'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E', 'B', 'W', 'E'}));
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
+}
+
+TEST_F(FlashWriteLifecycle, NoRequestPollDuringDirectWriteKeepsGuardInhibitionActive) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	StoredValueSensor sensor(SensorType::WastegatePosition, MS2NT(10));
+	sensor.setValidValue(20, getTimeNowNt());
+	eth.moveTimeForwardMs(100);
+	ASSERT_FALSE(sensor.get().Valid);
+
+	flash_lifecycle_test::duringWrite = [&] {
+		flash_lifecycle_test::writeToFlashIfPending();
+		EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W'}));
+		EXPECT_TRUE(sensor.get().Valid);
+	};
+	flash_lifecycle_test::writeToFlashNow();
+
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
+	EXPECT_FALSE(sensor.get().Valid);
 }
 
 TEST_F(FlashWriteLifecycle, RequestDuringReadSurvivesWithoutOverlappingWrite) {
@@ -146,8 +226,28 @@ TEST_F(FlashWriteLifecycle, RequestDuringReadSurvivesWithoutOverlappingWrite) {
 	EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());
 
 	flash_lifecycle_test::writeToFlashIfPending();
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'R', 'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'R', 'B', 'W', 'E'}));
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
+}
+
+TEST_F(FlashWriteLifecycle, PendingPollDuringReadDoesNotChangeTimeoutPolicy) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	StoredValueSensor sensor(SensorType::WastegatePosition, MS2NT(10));
+	sensor.setValidValue(20, getTimeNowNt());
+	eth.moveTimeForwardMs(100);
+	ASSERT_FALSE(sensor.get().Valid);
+	Sensor::inhibitTimeouts(true);
+
+	flash_lifecycle_test::duringRead = [] {
+		flash_lifecycle_test::setNeedToWriteConfiguration();
+		flash_lifecycle_test::writeToFlashIfPending();
+		EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'R'}));
+	};
+	flash_lifecycle_test::readFromFlash();
+
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'R'}));
+	EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());
+	EXPECT_TRUE(sensor.get().Valid);
 }
 
 TEST_F(FlashWriteLifecycle, ReentrantDirectWritesDeferAndCoalesce) {
@@ -159,12 +259,12 @@ TEST_F(FlashWriteLifecycle, ReentrantDirectWritesDeferAndCoalesce) {
 	};
 	flash_lifecycle_test::writeToFlashNow();
 
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
 	EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());
 
 	flash_lifecycle_test::duringWrite = {};
 	flash_lifecycle_test::writeToFlashIfPending();
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W', 'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E', 'B', 'W', 'E'}));
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
 }
 
@@ -176,7 +276,7 @@ TEST_F(FlashWriteLifecycle, ReadConfigIsRejectedWhileWriting) {
 	};
 	flash_lifecycle_test::writeToFlashNow();
 
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
 	EXPECT_EQ(flash_lifecycle_test::reads, 0u);
 }
 
@@ -198,7 +298,7 @@ TEST_F(FlashWriteLifecycle, FailedAttemptRemainsPendingWithoutContinuousRetry) {
 	flash_lifecycle_test::writeToFlashIfPending();
 
 	EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
 	EXPECT_EQ(flash_lifecycle_test::errors, 1u);
 
 	const auto eventCount = flash_lifecycle_test::events.size();
@@ -212,7 +312,7 @@ TEST_F(FlashWriteLifecycle, FailedAttemptRemainsPendingWithoutContinuousRetry) {
 	flash_lifecycle_test::writeToFlashIfPending();
 
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
-	EXPECT_EQ(flash_lifecycle_test::events.size(), eventCount + 1);
+	EXPECT_EQ(flash_lifecycle_test::events.size(), eventCount + 3);
 }
 
 TEST_F(FlashWriteLifecycle, ConsumedRequestDoesNotTriggerDuplicateAttempt) {
@@ -224,7 +324,7 @@ TEST_F(FlashWriteLifecycle, ConsumedRequestDoesNotTriggerDuplicateAttempt) {
 	flash_lifecycle_test::writeToFlashIfPending();
 	flash_lifecycle_test::writeToFlashIfPending();
 
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
 }
 
@@ -244,7 +344,7 @@ TEST_F(FlashWriteLifecycle, RequestDuringFailedWriteIsEligibleForNextAttempt) {
 	flash_lifecycle_test::duringWrite = {};
 	flash_lifecycle_test::nextResult = {ConfigurationWritePhase::Complete, 0, FLASH_RETURN_SUCCESS, 2};
 	flash_lifecycle_test::writeToFlashIfPending();
-	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'W', 'W'}));
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E', 'B', 'W', 'E'}));
 	EXPECT_FALSE(flash_lifecycle_test::getNeedToWriteConfiguration());
 }
 } // namespace
