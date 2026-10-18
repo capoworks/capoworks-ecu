@@ -18,7 +18,7 @@ static_assert(std::is_same_v<PackedLoad, std::remove_reference_t<decltype(output
 
 bool revisedModel() {
 	const auto mode = engineConfiguration->fuelAlgorithm;
-	return mode == LM_SPEED_DENSITY || mode == LM_ALPHA_N || mode == LM_REAL_MAF;
+	return mode == LM_SPEED_DENSITY || mode == LM_ALPHA_N || mode == LM_REAL_MAF || mode == LM_SD_ALPHA_N;
 }
 
 bool cylinderConsumer(AirmassConsumer consumer) {
@@ -180,7 +180,13 @@ float consumerValue(const AirmassLoadSnapshot& snapshot, AirmassConsumer consume
 	if (source > AFR_EffectiveMAP || !(snapshot.ValidSources & (1u << static_cast<unsigned>(source)))) {
 		switch (source) {
 			case AFR_None:
-				return snapshot.Native;
+				if (std::isfinite(snapshot.Native)) {
+					return snapshot.Native;
+				}
+				// Composite and SD native coordinates are effective MAP. A healthy
+				// Alpha-N blend can fuel without MAP, but downstream tables retain
+				// their historical 200 kPa substitute without changing provenance.
+				return snapshot.Strategy == LM_SD_ALPHA_N || snapshot.Strategy == LM_SPEED_DENSITY ? 200 : NAN;
 			case AFR_MAP:
 			case AFR_EffectiveMAP:
 				return consumer == AirmassConsumer::HpfpTarget && source == AFR_MAP ? 0 : 200;
@@ -231,7 +237,9 @@ void fillSnapshot(
 	snapshot.CylinderCount = inputs.CylinderCount;
 	snapshot.Displacement = inputs.Displacement;
 
-	snapshot.Native = strictValue(loads.strict(AFR_None));
+	// Control values keep their historical numeric substitute; strict source
+	// validity remains in ValidSources below.
+	snapshot.Native = loads.consumer(AFR_None).Value;
 	snapshot.Map = strictValue(loads.strict(AFR_MAP));
 	snapshot.EffectiveMap = strictValue(loads.strict(AFR_EffectiveMAP));
 	snapshot.Tps = strictValue(loads.strict(AFR_Tps));
@@ -425,6 +433,21 @@ void clearAirmassConsumerCursorFields(output_channels_s& outputs) {
 		value = PackedLoad{};
 	}
 	outputs.hpfpTargetLoad = PackedLoad{};
+
+	outputs.blendedSdMass = 0;
+	outputs.blendedAlphaNMass = 0;
+	outputs.blendedRequestedAuthority = 0;
+	outputs.blendedEffectiveAuthority = 0;
+	outputs.blendedSdLoad = 0;
+	outputs.blendedAlphaNLoad = 0;
+	outputs.blendedSdVe = 0;
+	outputs.blendedAlphaNVe = 0;
+	outputs.blendedCorrection = 0;
+	outputs.blendedFault = static_cast<uint8_t>(AirmassInjectionFault::None);
+	outputs.blendedFlags = 0;
+	outputs.blendedLambdaLoad = 0;
+	outputs.blendedAuthorityLoad = 0;
+	outputs.blendedVeAnalyzeEndpoint = 0;
 }
 
 void invalidateAirmassConsumerLoadsLocked() {

@@ -10,6 +10,7 @@
 #include "airmass.h"
 #include "airmass_injection_state.h"
 #include "airmass_loads.h"
+#include "blended_airmass.h"
 #include "rusefi_types.h"
 
 template <unsigned TRowCount, unsigned TColumnCount>
@@ -33,11 +34,14 @@ struct FuelAirmassCapture {
 // calculateFuelPublication() completes and the caller commits the publication.
 struct FuelPublicationCandidate {
 	AirmassDiagnostics Diagnostics;
+	BlendedAirmassDiagnostics BlendedDiagnostics;
 	AirmassConsumerLoadCandidate ConsumerLoads;
 	AirmassInjectionFault Fault = AirmassInjectionFault::Result;
 	bool Valid = false;
 	bool Stale = false;
 	bool Degraded = false;
+	bool HasBlendedDiagnostics = false;
+	uint8_t VeAnalyzeEndpoint = 0;
 
 	float BaseFuelMass = 0;
 	float CycleInjectionMass = 0;
@@ -103,6 +107,7 @@ bool isFuelCaptureCurrent(const FuelAirmassCapture& capture);
 bool isFuelCaptureCurrentLocked(const FuelAirmassCapture& capture, AirmassInjectionState::LockedAccess& admission);
 FuelPublicationCandidate
 calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& capture, bool requireCurrent = true);
+void publishBlendedAirmassDiagnostics(const FuelPublicationCandidate& candidate);
 
 float getStandardAirCharge();
 float getCylinderFuelTrim(

@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20030
+#define FLASH_DATA_VERSION 20031
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -466,7 +466,7 @@ uint16_t autoscale benchTestOnTime;Duration of each test pulse;"ms", 0.01, 0, 0,
 
 float cylinderBore;Cylinder diameter in mm.;"mm", 1, 0, 0, 20000, 2
 
-#define engine_load_mode_e_enum "Speed Density", "MAF Air Charge", "Alpha-N", "Lua"
+#define engine_load_mode_e_enum "Speed Density", "MAF Air Charge", "Alpha-N", "Lua", "SD + Alpha-N"
 
 
 custom engine_load_mode_e 1 bits, U08, @OFFSET@, [0:2], @@engine_load_mode_e_enum@@
@@ -1861,6 +1861,19 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 	load_override_e knockRetardLoadSource;Independent maximum knock retard coordinate.
 	load_override_e[MAX_CYLINDER_COUNT iterate] knockGainLoadSource;Independent cylinder knock gain coordinate.
 	load_override_e hpfpTargetLoadSource;HPFP pressure target table coordinate. Table output and pressure feedback remain kPa.
+
+	! SD + Alpha-N authority is appended at the persistent-config tail.
+	! Changing the Y-axis source changes this table's units and requires retuning its breakpoints.
+	#define AirmassBlendLoadSource_enum "TPS %", "Measured MAP kPa"
+	custom AirmassBlendLoadSource 1 bits, U08, @OFFSET@, [0:0], @@AirmassBlendLoadSource_enum@@
+	AirmassBlendLoadSource airmassBlendLoadSource;Y-axis source for the SD + Alpha-N authority table. Changing it requires retuning the breakpoints.
+	#define AIRMASS_BLEND_LOAD_COUNT 8
+	#define AIRMASS_BLEND_RPM_COUNT 8
+	begin_table
+		table_rows num AIRMASS_BLEND_LOAD_COUNT float airmassBlendLoadBins;;"", 1, 0, 0, 1000, 2
+		table_cols num AIRMASS_BLEND_RPM_COUNT uint16_t airmassBlendRpmBins;;"RPM", 1, 0, 0, 18000, 0
+		table_values uint8_t airmassBlendTable;Alpha-N contribution to cylinder air mass. 0% uses SD only, 100% uses Alpha-N only.;"% Alpha-N", 1, 0, 0, 100, 0
+	end_table
 end_struct
 
 ! Pedal Position Sensor

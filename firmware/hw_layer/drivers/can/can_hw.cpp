@@ -60,10 +60,10 @@ private:
 	CANDriver* m_device;
 };
 
-CCM_OPTIONAL static CanRead canRead1(CanBusIndex::Bus0);
-CCM_OPTIONAL static CanRead canRead2(CanBusIndex::Bus1);
-CCM_OPTIONAL static CanWrite canWrite0(CanBusIndex::Bus0);
-CCM_OPTIONAL static CanWrite canWrite1(CanBusIndex::Bus1);
+CCM_OPTIONAL_BACKGROUND static CanRead canRead1(CanBusIndex::Bus0);
+CCM_OPTIONAL_BACKGROUND static CanRead canRead2(CanBusIndex::Bus1);
+CCM_OPTIONAL_BACKGROUND static CanWrite canWrite0(CanBusIndex::Bus0);
+CCM_OPTIONAL_BACKGROUND static CanWrite canWrite1(CanBusIndex::Bus1);
 
 static void canInfo() {
 	if (!isCanEnabled) {

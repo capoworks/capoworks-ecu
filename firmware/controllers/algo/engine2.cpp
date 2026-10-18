@@ -407,9 +407,16 @@ void EngineState::periodicFastCallback() {
 				engine->cylinders[i].setIgnitionTimingBtdc(cylinderTiming[i]);
 			}
 			if (fuelCapture.Standalone) {
-				publishAirmassDiagnostics(fuelCandidate.Diagnostics);
+				if (fuelCandidate.HasBlendedDiagnostics) {
+					publishBlendedAirmassDiagnostics(fuelCandidate);
+				} else {
+					publishAirmassDiagnostics(fuelCandidate.Diagnostics);
+				}
 			}
-			admission.completeCalculation(fuelCalculation, fuelPublicationValid);
+			admission.completeCalculation(
+					fuelCalculation,
+					fuelPublicationValid,
+					fuelCandidate.HasBlendedDiagnostics ? fuelCandidate.Fault : AirmassInjectionFault::None);
 		}
 	}
 

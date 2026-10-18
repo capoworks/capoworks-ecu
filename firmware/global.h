@@ -88,5 +88,21 @@ typedef unsigned int time_t;
 #define DMA_BUFFER_MEMORY(size)
 #endif
 
+/**
+ * CAN reader and writer working areas only need ordinary SRAM: they are
+ * CPU-only, DMA cannot reach CCM either way, and nothing about them depends on
+ * the CCM bus.
+ *
+ * USB console, USB RX pump, mass storage and the main loop stay in CCM. This
+ * keeps their existing placement while allowing boards whose 64k CCM has to
+ * stay reserved for calibration and engine state to move only the CAN objects
+ * to regular SRAM. Other boards keep their current placement.
+ */
+#if defined(EFI_RESERVE_CCM_FOR_CALIBRATION) && EFI_RESERVE_CCM_FOR_CALIBRATION
+#define CCM_OPTIONAL_BACKGROUND
+#else
+#define CCM_OPTIONAL_BACKGROUND CCM_OPTIONAL
+#endif
+
 #define UNIT_TEST_BUSY_WAIT_CALLBACK()                                                                                 \
 	{}

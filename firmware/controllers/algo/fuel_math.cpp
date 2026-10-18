@@ -25,6 +25,7 @@
 
 #include "airmass.h"
 #include "alphan_airmass.h"
+#include "blended_airmass.h"
 #include "maf_airmass.h"
 #include "speed_density_airmass.h"
 #include "fuel_math.h"
@@ -184,6 +185,7 @@ float getRunningFuel(float baseFuel) {
 static SpeedDensityAirmass sdAirmass(nullptr, mapEstimationTable);
 static MafAirmass mafAirmass;
 static AlphaNAirmass alphaNAirmass;
+static BlendedAirmass blendedAirmass(sdAirmass, alphaNAirmass);
 
 AirmassModelBase* getAirmassModel(engine_load_mode_e mode) {
 	switch (mode) {
@@ -193,6 +195,8 @@ AirmassModelBase* getAirmassModel(engine_load_mode_e mode) {
 			return &mafAirmass;
 		case LM_ALPHA_N:
 			return &alphaNAirmass;
+		case LM_SD_ALPHA_N:
+			return &blendedAirmass;
 #if EFI_LUA
 		case LM_LUA:
 			return &(getLuaAirmassModel());
@@ -207,8 +211,9 @@ AirmassModelBase* getAirmassModel(engine_load_mode_e mode) {
 	}
 }
 
-static bool isStandaloneFuelStrategy(engine_load_mode_e strategy) {
-	return strategy == LM_SPEED_DENSITY || strategy == LM_ALPHA_N || strategy == LM_REAL_MAF;
+static bool isRevisedFuelStrategy(engine_load_mode_e strategy) {
+	return strategy == LM_SPEED_DENSITY || strategy == LM_ALPHA_N || strategy == LM_REAL_MAF ||
+		   strategy == LM_SD_ALPHA_N;
 }
 
 bool isFuelCaptureCurrentLocked(const FuelAirmassCapture& capture, AirmassInjectionState::LockedAccess& admission) {
@@ -232,7 +237,8 @@ bool isFuelCaptureCurrentLocked(const FuelAirmassCapture& capture, AirmassInject
 	return inputs.HasPublicationContext && inputs.PublicationEpoch == capture.Token &&
 		   inputs.ConfigurationVersion == capture.ConfigurationVersion &&
 		   inputs.CalibrationGeneration == capture.CalibrationGeneration && inputs.ActiveStrategy == capture.Strategy &&
-		   inputs.CylinderCount == capture.CylinderCount && inputs.Displacement == capture.Displacement;
+		   inputs.CylinderCount == capture.CylinderCount && inputs.Displacement == capture.Displacement &&
+		   (capture.Strategy != LM_SD_ALPHA_N || inputs.BlendLoadSource == config->airmassBlendLoadSource);
 }
 
 bool isFuelCaptureCurrent(const FuelAirmassCapture& capture) {
@@ -254,7 +260,7 @@ bool captureFuelAirmassInputs(
 		capture.CalibrationGeneration = engine->airmassCalibration.Generation;
 		capture.Displacement = engineConfiguration->displacement;
 		capture.CylinderCount = engine->engineState.cylinderCount;
-		capture.Standalone = isStandaloneFuelStrategy(capture.Strategy);
+		capture.Standalone = isRevisedFuelStrategy(capture.Strategy);
 		capture.Current = admission.isCalculationCurrent(token);
 	}
 
@@ -281,6 +287,9 @@ bool captureFuelAirmassInputs(
 			break;
 		case LM_REAL_MAF:
 			captureAirmassInputs(rpm, capture.Inputs, nullptr, false, true);
+			break;
+		case LM_SD_ALPHA_N:
+			captureAirmassInputs(rpm, capture.Inputs, nullptr, true, true);
 			break;
 		default:
 			break;
@@ -314,6 +323,33 @@ static float getStandardAirCharge(float displacement, float cylinderCount) {
 	return idealGasLaw(displacement / cylinderCount, 101.325f, 273.15f + 20.0f);
 }
 
+static bool isBlendedVeAnalyzeResult(
+		const BlendedAirmassEvaluation& evaluation,
+		const BlendedAirmassDiagnostics& diagnostics,
+		const AirmassInputs& inputs,
+		AirmassVeAnalyzeEndpoint endpoint) {
+	if (!evaluation.Airmass.Valid || endpoint == AirmassVeAnalyzeEndpoint::None ||
+		!(diagnostics.Flags & BlendedCalculationValid) ||
+		(diagnostics.Flags & (BlendedTemperatureFallback | BlendedBranchFallback | BlendedAuthorityUnavailable |
+							  BlendedBaroFallback | BlendedIdleFallback | BlendedCorrectionFallback))) {
+		return false;
+	}
+	if (inputs.UseSeparateVeForIdle && inputs.IdleActive) {
+		return false;
+	}
+
+	if (endpoint == AirmassVeAnalyzeEndpoint::SpeedDensity) {
+		return diagnostics.EffectiveAuthority == 0 && !(diagnostics.Flags & BlendedMapFallback) &&
+			   (diagnostics.Flags & BlendedSdValid) && diagnostics.Sd.Valid;
+	}
+
+	// Alpha-N does not depend on MAP. A strict MAP failure may still use the
+	// historical native-load substitute downstream without invalidating this
+	// endpoint's own mass.
+	return diagnostics.EffectiveAuthority == 100 && (diagnostics.Flags & BlendedAlphaNValid) &&
+		   diagnostics.AlphaN.Valid;
+}
+
 FuelPublicationCandidate
 calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& capture, bool requireCurrent) {
 	ScopePerf perf(PE::GetBaseFuel);
@@ -326,25 +362,48 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 
 	AirmassResult airmass;
 	if (capture.Standalone) {
-		if (!isAirmassModelConfigurationValid(capture.Strategy)) {
+		if (capture.Strategy != LM_SD_ALPHA_N && !isAirmassModelConfigurationValid(capture.Strategy)) {
 			candidate.Fault = AirmassInjectionFault::Configuration;
 			return candidate;
 		}
 
-		auto evaluation = getCapturedAirmassForFuel(capture.Inputs, candidate.Diagnostics);
-		if (requireCurrent && !isFuelCaptureCurrent(capture)) {
-			candidate.Stale = true;
-			return candidate;
-		}
-		if (!evaluation.Valid) {
-			candidate.Fault = isAirmassModelConfigurationValid(capture.Strategy) ? AirmassInjectionFault::Result
-																				 : AirmassInjectionFault::Configuration;
-			return candidate;
-		}
+		if (capture.Strategy == LM_SD_ALPHA_N) {
+			const auto evaluation = blendedAirmass.evaluateAirmass(capture.Inputs, &candidate.BlendedDiagnostics);
+			candidate.HasBlendedDiagnostics = true;
+			if (requireCurrent && !isFuelCaptureCurrent(capture)) {
+				candidate.Stale = true;
+				return candidate;
+			}
+			if (!evaluation.Airmass.Valid) {
+				candidate.Fault = evaluation.Fault;
+				return candidate;
+			}
 
-		airmass = evaluation.Result;
-		candidate.Degraded = evaluation.Degraded;
-		candidate.Fault = evaluation.Degraded ? AirmassInjectionFault::Sensor : AirmassInjectionFault::None;
+			airmass = evaluation.Airmass.Result;
+			candidate.Degraded = evaluation.Airmass.Degraded;
+			candidate.Fault = evaluation.Fault;
+			candidate.NormalizedCylinderFilling = evaluation.NormalizedFilling;
+			const auto endpoint = getCapturedAirmassAuthorityEndpoint(capture.Inputs);
+			if (isBlendedVeAnalyzeResult(evaluation, candidate.BlendedDiagnostics, capture.Inputs, endpoint)) {
+				candidate.VeAnalyzeEndpoint = static_cast<uint8_t>(endpoint);
+			}
+		} else {
+			const auto evaluation = getCapturedAirmassForFuel(capture.Inputs, candidate.Diagnostics);
+			if (requireCurrent && !isFuelCaptureCurrent(capture)) {
+				candidate.Stale = true;
+				return candidate;
+			}
+			if (!evaluation.Valid) {
+				candidate.Fault = isAirmassModelConfigurationValid(capture.Strategy)
+										? AirmassInjectionFault::Result
+										: AirmassInjectionFault::Configuration;
+				return candidate;
+			}
+
+			airmass = evaluation.Result;
+			candidate.Degraded = evaluation.Degraded;
+			candidate.Fault = evaluation.Degraded ? AirmassInjectionFault::Sensor : AirmassInjectionFault::None;
+		}
 	} else {
 		auto model = getAirmassModel(capture.Strategy);
 		if (model == nullptr) {
@@ -365,7 +424,9 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 	}
 
 	candidate.SdAirMassInOneCylinder = airmass.CylinderAirmass;
-	candidate.NormalizedCylinderFilling = 100 * airmass.CylinderAirmass / standardAirCharge;
+	if (capture.Strategy != LM_SD_ALPHA_N) {
+		candidate.NormalizedCylinderFilling = 100 * airmass.CylinderAirmass / standardAirCharge;
+	}
 	candidateFuelComputer.sdAirMassInOneCylinder = candidate.SdAirMassInOneCylinder;
 	candidateFuelComputer.normalizedCylinderFilling = candidate.NormalizedCylinderFilling;
 
@@ -386,6 +447,10 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		if (!candidate.ConsumerLoads.Prepared || !candidate.ConsumerLoads.Snapshot.Valid) {
 			candidate.Fault = AirmassInjectionFault::Result;
 			return candidate;
+		}
+		if (candidate.ConsumerLoads.Snapshot.RequiredFallbackUsed && candidate.Fault == AirmassInjectionFault::None) {
+			candidate.Degraded = true;
+			candidate.Fault = AirmassInjectionFault::Load;
 		}
 	}
 
@@ -524,6 +589,73 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 
 	candidate.Valid = true;
 	return candidate;
+}
+
+void publishBlendedAirmassDiagnostics(const FuelPublicationCandidate& candidate) {
+	if (!candidate.HasBlendedDiagnostics || !candidate.Valid || candidate.Stale) {
+		return;
+	}
+
+	const auto& diagnostics = candidate.BlendedDiagnostics;
+	auto& output = engine->outputChannels;
+	auto& state = engine->engineState;
+
+	if (!state.veAnalyzeSessionStarted) {
+		state.veAnalyzeSessionStarted = true;
+	}
+	if (candidate.VeAnalyzeEndpoint == 0) {
+		state.veAnalyzeSessionInvalid = true;
+		state.veAnalyzeEndpoint = 0;
+	} else if (!state.veAnalyzeSessionInvalid) {
+		state.veAnalyzeEndpoint = candidate.VeAnalyzeEndpoint;
+	}
+
+	const auto finiteOrZero = [](float value) { return std::isfinite(value) ? value : 0; };
+	const auto alphaNLoad = normalizeAirmassPercent(diagnostics.Inputs, diagnostics.Inputs.Tps).value_or(0);
+
+	output.blendedSdMass = finiteOrZero(diagnostics.SdMass);
+	output.blendedAlphaNMass = finiteOrZero(diagnostics.AlphaNMass);
+	output.blendedRequestedAuthority = diagnostics.RequestedAuthority;
+	output.blendedEffectiveAuthority = diagnostics.EffectiveAuthority;
+	output.blendedSdLoad = diagnostics.Sd.HasValue ? diagnostics.Inputs.NativeMap.Map : 0;
+	output.blendedAlphaNLoad = diagnostics.AlphaN.HasValue ? alphaNLoad : 0;
+	output.blendedSdVe = diagnostics.Sd.HasValue && diagnostics.Sd.Valid ? diagnostics.Sd.TableValue : 0;
+	output.blendedAlphaNVe =
+			diagnostics.AlphaN.HasValue && diagnostics.AlphaN.Valid ? diagnostics.AlphaN.TableValue : 0;
+	output.blendedCorrection = finiteOrZero(diagnostics.CorrectionMultiplier);
+	output.blendedFault = static_cast<uint8_t>(diagnostics.Fault);
+	output.blendedFlags = diagnostics.Flags;
+	output.blendedLambdaLoad = finiteOrZero(candidate.ResolvedLambdaLoad);
+	output.blendedAuthorityLoad = diagnostics.AuthorityLoadValid ? diagnostics.AuthorityLoad : 0;
+	output.blendedVeAnalyzeEndpoint = state.veAnalyzeSessionInvalid ? 0 : state.veAnalyzeEndpoint;
+
+	output.airmassTemperature = diagnostics.TemperatureValid ? diagnostics.TemperatureK - KELV : 0;
+	output.airmassTemperatureSourceUsed = static_cast<uint8_t>(diagnostics.TemperatureSource);
+	output.alphaNBaroCoefficient = diagnostics.BaroCoefficient;
+	output.airmassPressureFlags =
+			(diagnostics.TemperatureFallback ? 1 : 0) | (diagnostics.Flags & BlendedBaroFallback ? 2 : 0) |
+			(diagnostics.Flags & BlendedMapFallback ? 4 : 0) | (diagnostics.Flags & BlendedMapEstimateUsed ? 8 : 0);
+	if (diagnostics.Map.HasValue) {
+		output.fallbackMap = diagnostics.Map.FallbackMap;
+	}
+
+	for (size_t i = 0; i < VE_BLEND_COUNT; i++) {
+		const auto& blend = diagnostics.Corrections.Blends[i];
+		output.veBlendParameter[i] = blend.BlendParameter;
+		output.veBlendBias[i] = blend.Bias;
+		output.veBlendOutput[i] = blend.Value;
+		output.veBlendYAxis[i] = blend.TableYAxis;
+	}
+
+	// A composite calculation has two model-native VE coordinates. Consumers
+	// use the dedicated branch cursors instead of either legacy scalar.
+	state.currentVe = 0;
+	state.veTableYAxis = 0;
+	if (diagnostics.Sd.IdleWeight > 0) {
+		state.idleVeTableYAxis = diagnostics.Sd.IdleLoad;
+	} else if (diagnostics.AlphaN.IdleWeight > 0) {
+		state.idleVeTableYAxis = diagnostics.AlphaN.IdleLoad;
+	}
 }
 
 angle_t getInjectionOffset(float rpm, float load) {

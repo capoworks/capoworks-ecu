@@ -134,6 +134,8 @@ typedef enum __attribute__((__packed__)) {
 
 	LM_LUA = 3,
 
+	LM_SD_ALPHA_N = 4,
+
 	// This mode is for unit testing only, so that tests don't have to rely on a particular real airmass mode
 	LM_MOCK = 100,
 
@@ -571,6 +573,11 @@ enum class IdleVeLoadSource : uint8_t {
 	MeasuredMap = 1,
 	Tps = 2,
 	EffectiveMap = 3,
+};
+
+enum class AirmassBlendLoadSource : uint8_t {
+	Tps = 0,
+	MeasuredMap = 1,
 };
 
 typedef enum __attribute__((__packed__)) {

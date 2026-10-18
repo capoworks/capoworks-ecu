@@ -132,6 +132,33 @@ float SpeedDensityAirmass::getVeImpl(float rpm, percent_t load) const {
 	return interpolate3d(config->veTable, config->veLoadBins, load, config->veRpmBins, rpm);
 }
 
+AirmassEvaluation
+SpeedDensityAirmass::evaluateRawAirmass(const AirmassInputs& inputs, RawAirmassDiagnostics* diagnostics) const {
+	if (diagnostics) {
+		*diagnostics = {};
+	}
+
+	AirmassEvaluation evaluation;
+	if (!inputs.NativeMap.Valid || !std::isfinite(inputs.NativeMap.Map) || inputs.NativeMap.Map < 0 ||
+		inputs.NativeMap.Map > 1000 || !inputs.TemperatureValid || !std::isfinite(inputs.TemperatureK) ||
+		inputs.TemperatureK <= 0 || !std::isfinite(inputs.Rpm) || inputs.Rpm <= 0 ||
+		!std::isfinite(inputs.Displacement) || inputs.Displacement <= 0 || !std::isfinite(inputs.CylinderCount) ||
+		inputs.CylinderCount <= 0) {
+		return evaluation;
+	}
+
+	const auto ve = evaluateRawVe(inputs, inputs.NativeMap.Map, diagnostics);
+	const mass_t airmass = getAirmassImpl(
+			ve.Ve * PERCENT_DIV, inputs.NativeMap.Map, inputs.TemperatureK, inputs.Displacement, inputs.CylinderCount);
+	evaluation.Result = {airmass, inputs.NativeMap.Map};
+	evaluation.Degraded = inputs.TemperatureFallback || inputs.NativeMap.Fallback || ve.IdleFallback;
+	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
+	if (!evaluation.Valid) {
+		evaluation.Result.CylinderAirmass = 0;
+	}
+	return evaluation;
+}
+
 void SpeedDensityAirmass::captureInputs(float rpm, AirmassInputs& inputs, bool liveCalibration) const {
 	captureAirmassInputs(rpm, inputs, m_mapEstimationTable, true, liveCalibration);
 }

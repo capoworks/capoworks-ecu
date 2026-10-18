@@ -149,3 +149,39 @@ AirmassEvaluation AlphaNAirmass::evaluateAirmass(
 float AlphaNAirmass::getVeImpl(float rpm, percent_t load) const {
 	return interpolate3d(config->alphaNTable, config->alphaNTpsBins, load, config->alphaNRpmBins, rpm);
 }
+
+AirmassEvaluation AlphaNAirmass::evaluateRawAirmass(
+		const AirmassInputs& inputs, RawAirmassDiagnostics* diagnostics, AlphaNPressurePolicy pressurePolicy) const {
+	if (diagnostics) {
+		*diagnostics = {};
+	}
+
+	AirmassEvaluation evaluation;
+	const auto tps = normalizeAirmassPercent(inputs, inputs.Tps);
+	if (!validAlphaNInputs(inputs) || !tps) {
+		return evaluation;
+	}
+
+	float coefficient;
+	bool pressureFallback;
+	const auto pressure = evaluateAlphaNPressure(inputs, pressurePolicy, coefficient, pressureFallback);
+	if (diagnostics) {
+		diagnostics->BaroCoefficient = coefficient;
+		diagnostics->BaroFallback = pressureFallback;
+	}
+	if (!pressure) {
+		return evaluation;
+	}
+
+	const auto ve = evaluateRawVe(inputs, tps.Value, diagnostics);
+	const mass_t airmass = getAirmassImpl(
+			ve.Ve * PERCENT_DIV, pressure.Value, inputs.TemperatureK, inputs.Displacement, inputs.CylinderCount);
+	evaluation.Result = {airmass, tps.Value};
+	evaluation.Degraded = inputs.TemperatureFallback || pressureFallback || ve.IdleFallback ||
+						  (pressurePolicy == AlphaNPressurePolicy::EffectiveMap && inputs.NativeMap.Fallback);
+	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
+	if (!evaluation.Valid) {
+		evaluation.Result.CylinderAirmass = 0;
+	}
+	return evaluation;
+}
