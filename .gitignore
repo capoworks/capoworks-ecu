@@ -27,6 +27,13 @@ gitversion.h*
 engine_modules_generated.h*
 modules_list_generated.h*
 
+# Java tooling (VS Code/JDT and Gradle) generates these locally.
+# Keep the rules scoped to the Java trees: some tracked bin/ directories
+# contain intentional third-party runtime binaries.
+**/.gradle/
+java_console/**/bin/
+java_tools/**/bin/
+
 # Eclipse
 .metadata/
 

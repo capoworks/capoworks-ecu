@@ -4,6 +4,66 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Core8: Build firmware",
+			"detail": "Clears firmware/bootloader outputs and shared firmware PCH files, builds Core8, and replaces firmware/deliver artifacts.",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"${workspaceFolder}/.vscode/scripts/core8_dfu.sh"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": "$gcc",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
+			"label": "Core8: Flash firmware (USB DFU)",
+			"detail": "Explicit hardware operation. Verifies one DFU device, firmware/INI signatures and the expected device ID, writes with verification, then boots.",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"${workspaceFolder}/.vscode/scripts/core8_dfu.sh",
+				"flash"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
+			"label": "Core8: Show TunerStudio INI",
+			"detail": "Shows the generated Core8 INI path and confirms its signature matches the built firmware.",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"${workspaceFolder}/.vscode/scripts/core8_dfu.sh",
+				"ini"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			}
+		},
+		{
 			"label": "Clean Firmware",
 			"type": "shell",
 			"command": "make clean",
