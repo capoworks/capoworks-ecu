@@ -329,7 +329,17 @@ float IdleController::getIdlePosition(float rpm, float rpmRate) {
 
 	// If TPS is working and automatic mode enabled, add any closed loop correction
 	if (tps.Valid && idleMode == IM_AUTO) {
-		auto closedLoop = getClosedLoop(phase, rpm, rpmRate, targetRpm.ClosedLoopTarget);
+		float feedbackRpm = rpm;
+		float feedbackRate = rpmRate;
+		if (engineConfiguration->idleTimingUseRollingRpm) {
+			auto rolling = engine->rpmCalculator.getRollingCycleRpm();
+			// Keep air control responsive until a complete cycle is available.
+			if (rolling.rpm > 0) {
+				feedbackRpm = rolling.rpm;
+				feedbackRate = rolling.rpmRate;
+			}
+		}
+		auto closedLoop = getClosedLoop(phase, feedbackRpm, feedbackRate, targetRpm.ClosedLoopTarget);
 		idleClosedLoop = closedLoop;
 		iacPosition += closedLoop;
 	} else {
@@ -367,6 +377,7 @@ void IdleController::onFastCallback() {
 
 void IdleController::onEngineStop() {
 	m_pid.reset();
+	m_timingPid.reset();
 }
 
 void IdleController::onConfigurationChange(engine_configuration_s const* previousConfiguration) {
@@ -375,6 +386,19 @@ void IdleController::onConfigurationChange(engine_configuration_s const* previou
 		m_pid.reset();
 	}
 #endif
+	bool feedbackModeChanged = !previousConfiguration || previousConfiguration->idleTimingUseRollingRpm !=
+																 engineConfiguration->idleTimingUseRollingRpm;
+	if (feedbackModeChanged) {
+		m_pid.reset();
+	}
+#if EFI_SHAFT_POSITION_INPUT
+	if (feedbackModeChanged) {
+		engine->rpmCalculator.resetRollingCycleRpm();
+	}
+#endif
+	if (feedbackModeChanged || !m_timingPid.isSame(&previousConfiguration->idleTimingPid)) {
+		m_timingPid.reset();
+	}
 }
 
 void IdleController::init() {
