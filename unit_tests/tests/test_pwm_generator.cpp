@@ -87,6 +87,35 @@ TEST(PWM, testSwitchToNanPeriod) {
 	assertNextEvent("exec3@NAN", LOW_VALUE, &executor, pin);
 }
 
+TEST(PWM, RepeatedStopRestartBalancesCallbackNesting) {
+	OutputPin pin;
+	SimplePwm pwm("restart test");
+	TestExecutor executor;
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->scheduler.setMockExecutor(&executor);
+
+	// A stopped callback must leave no nesting behind for the next start.
+	// The former leak reached the fatal nesting limit after 25 starts.
+	for (int cycle = 0; cycle < 40; cycle++) {
+		SCOPED_TRACE(cycle);
+		startSimplePwm(&pwm, "restart test", &pin, 1000, 0.6f);
+		ASSERT_EQ(0, pwm.dbgNestingLevel);
+		ASSERT_EQ(1, executor.size());
+		EXPECT_EQ(HIGH_VALUE, pin.m_currentLogicValue);
+
+		setTimeNowUs(executor.getForUnitTest(0)->momentX);
+		ASSERT_EQ(1, executor.executeAll(getTimeNowUs()));
+		ASSERT_EQ(1, executor.size());
+		EXPECT_EQ(LOW_VALUE, pin.m_currentLogicValue);
+
+		pwm.stop();
+		setTimeNowUs(executor.getForUnitTest(0)->momentX);
+		ASSERT_EQ(1, executor.executeAll(getTimeNowUs()));
+		ASSERT_EQ(0, executor.size());
+		ASSERT_EQ(0, pwm.dbgNestingLevel);
+	}
+}
+
 TEST(PWM, testPwmGenerator) {
 	expectedTimeOfNextEvent = 0;
 	setTimeNowUs(0);

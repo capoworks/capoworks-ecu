@@ -65,6 +65,7 @@ or
 ### Fixed
  - Electronic throttle and DC wastegate outputs stop immediately when disabled in configuration or when reinitialization fails.
  - Blocking calibration burns inhibit configured electronic-throttle and DC wastegate outputs, then resume only after fresh position feedback and a new valid control cycle.
+ - Repeated software PWM stop and restart cycles no longer accumulate callback nesting until the nesting-limit error is hit.
  - Configuration flash operations are now serialized, so concurrent saves and reads cannot overwrite each other, and a failed write is not retried continuously without a new request.
  - Calibration burns now verify erase, programmed bytes, header, and CRC before replacing the remaining valid copy; a failed write stops immediately and reports how many copies were verified.
  - Bound every continuous ignition output pulse with an independent 1.5x nominal dwell guard. Physical ownership and pulse age survive callback promotion and repeated HIGH, competing occurrences cannot take over an energized coil, and the guard still forces LOW if the ignition occurrence was invalidated. Invalid dwell cannot energize a main, trailing or raw ignition output.
