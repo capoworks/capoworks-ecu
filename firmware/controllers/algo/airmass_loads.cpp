@@ -2,6 +2,7 @@
 
 #include "airmass_loads.h"
 #include "closed_loop_fuel.h"
+#include "cylinder_model_fuel_trim.h"
 #include "fuel_math.h"
 #include "lambda_monitor.h"
 
@@ -456,6 +457,9 @@ void invalidateAirmassConsumerLoadsLocked() {
 	state.airmassLoadsInvalidationEpoch++;
 	state.airmassLoadsPublicationSerial++;
 	clearAirmassConsumerCursorFields(engine->outputChannels);
+	// A stop, fault or actual configuration invalidation must clear both the
+	// published factors and their model-coordinate cursors on this owner.
+	resetCylinderModelFuelTrim(*engine);
 }
 
 void invalidateAirmassConsumerLoads() {

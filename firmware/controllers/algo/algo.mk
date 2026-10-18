@@ -14,6 +14,7 @@ CONTROLLERS_ALGO_SRC_CPP = $(PROJECT_DIR)/controllers/algo/ignition/ignition_sta
 	$(PROJECT_DIR)/controllers/algo/engine_configuration.cpp \
 	$(PROJECT_DIR)/controllers/algo/engine.cpp \
 	$(PROJECT_DIR)/controllers/algo/engine2.cpp \
+	$(PROJECT_DIR)/controllers/algo/cylinder_model_fuel_trim.cpp \
 	$(PROJECT_DIR)/controllers/algo/airmass/airmass.cpp \
 	$(PROJECT_DIR)/controllers/algo/airmass/alphan_airmass.cpp \
 	$(PROJECT_DIR)/controllers/algo/airmass/blended_airmass.cpp \

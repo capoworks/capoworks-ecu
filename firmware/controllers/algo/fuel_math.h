@@ -11,6 +11,7 @@
 #include "airmass_injection_state.h"
 #include "airmass_loads.h"
 #include "blended_airmass.h"
+#include "cylinder_model_fuel_trim.h"
 #include "rusefi_types.h"
 
 template <unsigned TRowCount, unsigned TColumnCount>
@@ -36,15 +37,20 @@ struct FuelPublicationCandidate {
 	AirmassDiagnostics Diagnostics;
 	BlendedAirmassDiagnostics BlendedDiagnostics;
 	AirmassConsumerLoadCandidate ConsumerLoads;
+	CylinderModelFuelTrimCandidate CylinderFuelTrim;
 	AirmassInjectionFault Fault = AirmassInjectionFault::Result;
 	bool Valid = false;
 	bool Stale = false;
 	bool Degraded = false;
 	bool HasBlendedDiagnostics = false;
+	bool ApplyCylinderModelFuelTrim = false;
+	bool FuelCut = false;
 	uint8_t VeAnalyzeEndpoint = 0;
 
 	float BaseFuelMass = 0;
 	float CycleInjectionMass = 0;
+	float ModeledCycleFuelMass = 0;
+	float AdditiveCycleFuelMass = 0;
 	float TpsAccelEnrich = 0;
 	float SdAirMassInOneCylinder = 0;
 	float NormalizedCylinderFilling = 0;
@@ -110,8 +116,6 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 void publishBlendedAirmassDiagnostics(const FuelPublicationCandidate& candidate);
 
 float getStandardAirCharge();
-float getCylinderFuelTrim(
-		size_t cylinderNumber, const PreparedTable3DInterpolation<TRIM_SIZE, TRIM_SIZE>& interpolation);
 
 struct AirmassModelBase;
 AirmassModelBase* getAirmassModel(engine_load_mode_e mode);
