@@ -435,6 +435,48 @@ TEST(TriggerStateOnStop, EngineStopResetsCrankSyncCounter) {
 	EXPECT_TRUE(engine->rpmCalculator.isStopped());
 }
 
+// A zero-RPM start is SPINNING_UP even though isStopped() is true for engine math.
+// After the trigger timeout, periodicSlowCallback() must perform the actual stop transition.
+TEST(TriggerStateOnStop, FailedStartAfterTriggerTimeoutStopsAndFlushesQueue) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	eth.setTriggerType(trigger_type_e::TT_ONE);
+	engineConfiguration->isFasterEngineSpinUpEnabled = true;
+	eth.fireRise(1);
+
+	auto& rpmCalculator = engine->rpmCalculator;
+	auto& triggerState = engine->triggerCentral.triggerState;
+	auto& triggerScheduler = *engine->module<TriggerScheduler>();
+	AngleBasedEvent staleEvent;
+
+	ASSERT_EQ(SPINNING_UP, rpmCalculator.getState());
+	ASSERT_EQ(0, rpmCalculator.getCachedRpm());
+	ASSERT_TRUE(rpmCalculator.isStopped());
+	ASSERT_TRUE(engine->triggerCentral.engineMovedRecently(getTimeNowNt()));
+
+	const int queuedBeforeStop = triggerScheduler.getQueueSizeForUnitTest();
+	triggerState.crankSynchronizationCounter = 25;
+	triggerState.setShaftSynchronized(true);
+	triggerState.hasSignal = true;
+	triggerScheduler.schedule(&staleEvent, EngPhase{123}, {});
+	ASSERT_EQ(queuedBeforeStop + 1, triggerScheduler.getQueueSizeForUnitTest());
+
+	// A recent trigger means this is still a start attempt, not a stop.
+	engine->periodicSlowCallback();
+	EXPECT_EQ(SPINNING_UP, rpmCalculator.getState());
+	EXPECT_EQ(25, triggerState.crankSynchronizationCounter);
+	EXPECT_TRUE(triggerState.getShaftSynchronized());
+	EXPECT_EQ(queuedBeforeStop + 1, triggerScheduler.getQueueSizeForUnitTest());
+
+	advanceTimeUs(10e6);
+	ASSERT_FALSE(engine->triggerCentral.engineMovedRecently(getTimeNowNt()));
+	engine->periodicSlowCallback();
+
+	EXPECT_EQ(STOPPED, rpmCalculator.getState());
+	EXPECT_EQ(0, triggerState.crankSynchronizationCounter);
+	EXPECT_FALSE(triggerState.getShaftSynchronized());
+	EXPECT_EQ(0, triggerScheduler.getQueueSizeForUnitTest());
+}
+
 // Negative control: while the engine is genuinely moving, periodicSlowCallback() must
 // NOT reset the counter.
 TEST(TriggerStateOnStop, RunningEngineKeepsCrankSyncCounter) {
