@@ -251,6 +251,10 @@ struct_no_prefix output_channels_s
 	uint8_t vssEdgeCounter
 
 	uint16_t autoscale fallbackMap;;"kPa", 0.1, 0, 0, 1000, 1
+	float airmassTemperature;Airmass: Temperature used;"C", 1, 0, 0, 0, 2
+	uint8_t airmassTemperatureSourceUsed;Airmass: Temperature source;"code", 1, 0, 0, 0, 0
+	float alphaNBaroCoefficient;Alpha-N: BARO coefficient;"ratio", 1, 0, 0, 0, 3
+	uint8_t airmassPressureFlags;Airmass: Temperature/MAP estimate fallback flags;"bits", 1, 0, 0, 0, 0
 
 	uint16_t autoscale instantMAPValue;Instant MAP;"kPa",{1/@@PACK_MULT_PRESSURE@@}, 0, 0, 655, 2
 

@@ -559,6 +559,18 @@ typedef enum __attribute__((__packed__)) {
 	AFR_CylFilling = 4,
 } load_override_e;
 
+enum class AirmassTemperatureSource : uint8_t {
+	Tcharge,
+	Iat,
+};
+
+enum class IdleVeLoadSource : uint8_t {
+	ModelDefault = 0,
+	MeasuredMap = 1,
+	Tps = 2,
+	EffectiveMap = 3,
+};
+
 typedef enum __attribute__((__packed__)) {
 	DC_None = 0,
 	DC_Throttle1 = 1,

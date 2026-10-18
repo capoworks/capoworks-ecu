@@ -7,6 +7,8 @@
 
 #include "pch.h"
 
+using ::testing::_;
+
 TEST(engine, testPlainCrankingWithoutAdvancedFeatures) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	setTable(config->injectionPhase, -180.0f);
@@ -26,9 +28,9 @@ TEST(engine, testPlainCrankingWithoutAdvancedFeatures) {
 	// two simultaneous injections
 	ASSERT_EQ(4, engine->scheduler.size()) << "plain#2";
 
-	eth.assertEvent5("sim start", 0, (void*)startInjection, 100000 - 1625);
+	eth.assertEvent5("sim start", 0, (void*)scheduledStartInjection, 100000 - 1625);
 	// -1 because ugh floating point math
-	eth.assertEvent5("sim end", 1, (void*)endInjection, 100000 - 1);
+	eth.assertEvent5("sim end", 1, (void*)scheduledEndInjection, 100000 - 1);
 }
 
 TEST(priming, startScheduling) {
@@ -40,6 +42,7 @@ TEST(priming, startScheduling) {
 	engine->module<PrimeController>()->onIgnitionStateChanged(true);
 
 	ASSERT_EQ(1, engine->scheduler.size()) << "prime fuel";
+	EXPECT_EQ(1, engine->airmassInjectionState.pendingCallbacks());
 }
 
 TEST(priming, floodClearSkipsPrimeFromDriverIntent) {
@@ -52,6 +55,7 @@ TEST(priming, floodClearSkipsPrimeFromDriverIntent) {
 	engine->module<PrimeController>()->onIgnitionStateChanged(true);
 
 	EXPECT_EQ(0, engine->scheduler.size()) << "flood clear must not schedule prime fuel";
+	EXPECT_EQ(0, engine->airmassInjectionState.pendingCallbacks());
 }
 
 TEST(priming, duration) {
@@ -74,4 +78,66 @@ TEST(priming, duration) {
 	// Without coolant temp, no prime
 	Sensor::resetMockValue(SensorType::Clt);
 	EXPECT_EQ(0, engine->module<PrimeController>()->getPrimeDuration());
+}
+
+TEST(priming, delayedSkipStillAcknowledgesAdmittedCallback) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	Sensor::setInvalidMockValue(SensorType::Clt);
+
+	engine->module<PrimeController>()->onIgnitionStateChanged(true);
+	ASSERT_EQ(1, engine->airmassInjectionState.pendingCallbacks());
+
+	eth.moveTimeForwardAndInvokeEventsUs(100000);
+	EXPECT_EQ(0, engine->airmassInjectionState.pendingCallbacks());
+	EXPECT_EQ(0, engine->scheduler.size());
+	EXPECT_FALSE(engine->module<PrimeController>()->isPriming());
+}
+
+TEST(priming, isIndependentFromAirmassInjectionAdmission) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	MockInjectorModel2 injector;
+	engine->module<InjectorModelPrimary>().set(&injector);
+	engineConfiguration->fuelAlgorithm = LM_SPEED_DENSITY;
+	engineConfiguration->primingDelay = 0;
+	Sensor::setMockValue(SensorType::Clt, 50);
+	std::fill(std::begin(engineConfiguration->primeValues), std::end(engineConfiguration->primeValues), 100);
+	EXPECT_CALL(injector, getInjectionDuration(_)).WillOnce(Return(20.0f));
+
+	EXPECT_FALSE(engine->airmassInjectionState.allowInjection());
+	engine->module<PrimeController>()->onIgnitionStateChanged(true);
+	ASSERT_EQ(1, engine->airmassInjectionState.pendingCallbacks());
+
+	eth.moveTimeForwardAndInvokeEventsUs(100000);
+	EXPECT_TRUE(engine->module<PrimeController>()->isPriming());
+	EXPECT_EQ(1, enginePins.injectors[0].getOverlappingCounter());
+	EXPECT_EQ(1, engine->airmassInjectionState.pendingCallbacks());
+
+	eth.moveTimeForwardAndInvokeEventsUs(20000);
+	EXPECT_FALSE(engine->module<PrimeController>()->isPriming());
+	EXPECT_EQ(0, enginePins.injectors[0].getOverlappingCounter());
+	EXPECT_EQ(0, engine->airmassInjectionState.pendingCallbacks());
+}
+
+TEST(priming, directStartSchedulesTrackedPairWithCapturedMask) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	MockInjectorModel2 injector;
+	engine->module<InjectorModelPrimary>().set(&injector);
+	Sensor::setMockValue(SensorType::Clt, 50);
+	std::fill(std::begin(engineConfiguration->primeValues), std::end(engineConfiguration->primeValues), 100);
+	engine->engineState.cylinderCount = 4;
+	EXPECT_CALL(injector, getInjectionDuration(_)).WillOnce(Return(20.0f));
+
+	// This direct call has no registered delayed-start callback to acknowledge.
+	engine->module<PrimeController>()->onPrimeStart();
+	ASSERT_EQ(2, engine->airmassInjectionState.pendingCallbacks());
+
+	eth.executeActions();
+	EXPECT_EQ(1, enginePins.injectors[3].getOverlappingCounter());
+	EXPECT_EQ(1, engine->airmassInjectionState.pendingCallbacks());
+
+	// Closing must use the mask captured with the pair, not the new cylinder count.
+	engine->engineState.cylinderCount = 2;
+	eth.moveTimeForwardAndInvokeEventsUs(20000);
+	EXPECT_EQ(0, enginePins.injectors[3].getOverlappingCounter());
+	EXPECT_EQ(0, engine->airmassInjectionState.pendingCallbacks());
 }

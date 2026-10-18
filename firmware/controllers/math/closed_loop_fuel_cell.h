@@ -6,17 +6,24 @@ class ClosedLoopFuelCellBase {
 public:
 	// Update the cell's internal state - adjusting fuel up/down as appropriate
 	void update(bool ignoreErrorMagnitude);
+	void update(bool ignoreErrorMagnitude, float targetLambda);
 
 	// Get the current adjustment amount, without altering internal state.
 	float getAdjustment() const;
 
 	// Helpers - virtual for mocking
 	virtual float getLambdaError() const = 0;
+	virtual float getLambdaError(float targetLambda) const {
+		// Legacy cell implementations still provide the no-argument calculation.
+		return getLambdaError();
+	}
 	virtual float getMaxAdjustment() const = 0;
 	virtual float getMinAdjustment() const = 0;
 	virtual float getIntegratorGain() const = 0;
 
 private:
+	void updateFromError(bool ignoreErrorMagnitude, float lambdaError);
+
 	// Current fueling adjustment.
 	// 0 = no adjustment.
 	// 0.1 = add 10% fuel.
@@ -33,6 +40,7 @@ public:
 	}
 
 	float getLambdaError() const override;
+	float getLambdaError(float targetLambda) const override;
 	float getMaxAdjustment() const override;
 	float getMinAdjustment() const override;
 	float getIntegratorGain() const override;

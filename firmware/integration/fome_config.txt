@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20025
+#define FLASH_DATA_VERSION 20026
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -106,7 +106,7 @@ struct_no_prefix persistent_config_s
 
 struct_no_prefix engine_configuration_s
 
-#define BLOCKING_FACTOR 1400
+#define BLOCKING_FACTOR 1408
 
 #define LUA_PWM_COUNT 8
 #define LUA_DIGITAL_INPUT_COUNT 8
@@ -168,6 +168,9 @@ struct_no_prefix engine_configuration_s
 
 #define FUEL_RPM_COUNT 16
 #define FUEL_LOAD_COUNT 16
+
+#define ALPHA_N_RPM_COUNT 16
+#define ALPHA_N_LOAD_COUNT 16
 
 #define BOOST_RPM_COUNT 8
 #define BOOST_LOAD_COUNT 8
@@ -1821,6 +1824,25 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 	int16_t[FAN_TABLE_SIZE] autoscale fan2XAxisBins;;"", 0.1, 0, -10000, 10000, 1
 	uint8_t[FAN_TABLE_SIZE x FAN_TABLE_SIZE] autoscale fan2DutyAcOff;Fan 2 duty cycle when AC is off;"%", 0.5, 0, 0, 100, 1
 	uint8_t[FAN_TABLE_SIZE x FAN_TABLE_SIZE] autoscale fan2DutyAcOn;Fan 2 duty cycle when AC is on;"%", 0.5, 0, 0, 100, 1
+
+	! Standalone airmass policy fields are appended to the persistent-config tail to preserve engine_configuration_s field offsets.
+	bit useMapEstimateTable;Allow the configured TPS/RPM table for MAP fallback and optional transient estimation.
+	bit alphaNMultiplyMap;Standalone Alpha-N: multiply reference filling by measured/effective MAP / 101.325 kPa.
+	bit alphaNBaroCompensation;Standalone Alpha-N: correct reference filling with ambient BARO / calibrated reference pressure.
+	#define AirmassTemperatureSource_enum "Tcharge", "IAT"
+	custom AirmassTemperatureSource 1 bits, U08, @OFFSET@, [0:0], @@AirmassTemperatureSource_enum@@
+	AirmassTemperatureSource airmassTemperatureSource;Temperature source used by the active physical airmass model.
+	#define IdleVeLoadSource_enum "Model default", "Measured MAP", "TPS", "Effective MAP"
+	custom IdleVeLoadSource 1 bits, U08, @OFFSET@, [0:1], @@IdleVeLoadSource_enum@@
+	IdleVeLoadSource idleVeLoadSource;Independent load coordinate for the Idle VE overlay.
+	float alphaNBaroReferencePressure;Pressure at which the Alpha-N filling map was calibrated.;"kPa", 1, 0, 20, 120, 3
+
+	! Dedicated model calibration tables retain their prior offsets; the new policy fields above are appended after the legacy Fan 2 tables.
+	begin_table
+		table_rows num ALPHA_N_LOAD_COUNT uint16_t autoscale alphaNTpsBins;;"% TPS", {1/@@TPS_2_BYTE_PACKING_MULT@@}, 0, 0, 100, 2
+		table_cols num ALPHA_N_RPM_COUNT uint16_t alphaNRpmBins;;"RPM", 1, 0, 0, 18000, 0
+		table_values uint16_t autoscale alphaNTable;Alpha-N cylinder filling at the reference pressure and selected temperature.;"%", 0.1, 0, 0, 999, 1
+	end_table
 end_struct
 
 ! Pedal Position Sensor

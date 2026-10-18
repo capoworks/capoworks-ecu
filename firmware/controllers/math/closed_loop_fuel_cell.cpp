@@ -5,9 +5,14 @@
 constexpr float integrator_dt = FAST_CALLBACK_PERIOD_MS * 0.001f;
 
 void ClosedLoopFuelCellBase::update(bool ignoreErrorMagnitude) {
-	// Compute how far off target we are
-	float lambdaError = getLambdaError();
+	updateFromError(ignoreErrorMagnitude, getLambdaError());
+}
 
+void ClosedLoopFuelCellBase::update(bool ignoreErrorMagnitude, float targetLambda) {
+	updateFromError(ignoreErrorMagnitude, getLambdaError(targetLambda));
+}
+
+void ClosedLoopFuelCellBase::updateFromError(bool ignoreErrorMagnitude, float lambdaError) {
 	// Fixed magnitude - runs in constant adjustment rate mode
 	if (ignoreErrorMagnitude) {
 		if (lambdaError > 0) {
@@ -32,14 +37,18 @@ float ClosedLoopFuelCellBase::getAdjustment() const {
 }
 
 float ClosedLoopFuelCellImpl::getLambdaError() const {
+	return getLambdaError(engine->fuelComputer.targetLambda);
+}
+
+float ClosedLoopFuelCellImpl::getLambdaError(float targetLambda) const {
 	auto lambda = Sensor::get(m_lambdaSensor);
 
 	// Failed sensor -> no error
-	if (!lambda) {
+	if (!lambda || !std::isfinite(targetLambda) || targetLambda <= 0) {
 		return 0;
 	}
 
-	return (lambda.Value / engine->fuelComputer.targetLambda) - 1;
+	return (lambda.Value / targetLambda) - 1;
 }
 
 #define MAX_ADJ (0.25f)
