@@ -106,12 +106,16 @@ bool shouldUpdateCorrection(SensorType sensor) {
 	return true;
 }
 
-ClosedLoopFuelResult fuelClosedLoopCorrection() {
+ClosedLoopFuelResult fuelClosedLoopCorrection(float load, float targetLambda) {
+	if (!std::isfinite(load) || !std::isfinite(targetLambda) || targetLambda <= 0) {
+		return {};
+	}
+
 	if (!shouldCorrect()) {
 		return {};
 	}
 
-	size_t binIdx = computeStftBin(getFuelingLoad(), engineConfiguration->stft);
+	size_t binIdx = computeStftBin(load, engineConfiguration->stft);
 
 #if EFI_TUNER_STUDIO
 	engine->outputChannels.fuelClosedLoopBinIdx = binIdx;
@@ -128,11 +132,15 @@ ClosedLoopFuelResult fuelClosedLoopCorrection() {
 		cell.configure(engineConfiguration->stft.cellCfgs[binIdx], sensor);
 
 		if (shouldUpdateCorrection(sensor)) {
-			cell.update(engineConfiguration->stftIgnoreErrorMagnitude);
+			cell.update(engineConfiguration->stftIgnoreErrorMagnitude, targetLambda);
 		}
 
 		result.banks[i] = cell.getAdjustment();
 	}
 
 	return result;
+}
+
+ClosedLoopFuelResult fuelClosedLoopCorrection() {
+	return fuelClosedLoopCorrection(getFuelingLoad(), engine->fuelComputer.targetLambda);
 }

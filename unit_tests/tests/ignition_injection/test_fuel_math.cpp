@@ -38,6 +38,7 @@ TEST(FuelMath, getStandardAirCharge) {
 
 TEST(AirmassModes, AlphaNNormal) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->engineState.sd.tChargeK = 293.15f;
 	// 4 cylinder 4 liter = easy math
 	engineConfiguration->displacement = 4.0f;
 	setCylinderCount(4);
@@ -51,8 +52,8 @@ TEST(AirmassModes, AlphaNNormal) {
 	// that's 0.71% not 71%
 	Sensor::setMockValue(SensorType::Tps1, 0.71f);
 
-	// Mass of 1 liter of air * VE
-	mass_t expectedAirmass = 1.2047f * 0.35f;
+	// Mass of 1 liter of air at 20 C * VE
+	mass_t expectedAirmass = 101.325f / (0.28705f * (273.15f + 20)) * 0.35f;
 
 	auto result = dut.getAirmass(1200, false).value_or({});
 	EXPECT_NEAR(result.CylinderAirmass, expectedAirmass, EPS4D);
@@ -61,6 +62,7 @@ TEST(AirmassModes, AlphaNNormal) {
 
 TEST(AirmassModes, AlphaNUseIat) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->engineState.sd.tChargeK = 293.15f;
 	// 4 cylinder 4 liter = easy math
 	engineConfiguration->displacement = 4.0f;
 	setCylinderCount(4);
@@ -74,20 +76,20 @@ TEST(AirmassModes, AlphaNUseIat) {
 	// that's 0.71% not 71%
 	Sensor::setMockValue(SensorType::Tps1, 0.71f);
 
-	// Mass of 1 liter of air * VE
-	mass_t expectedAirmass = 1.2047f * 0.35f;
+	// Mass of 1 liter of air at 20 C * VE
+	mass_t expectedAirmass = 101.325f / (0.28705f * (273.15f + 20)) * 0.35f;
 
 	EXPECT_NEAR(dut.getAirmass(1200, false).value_or({}).CylinderAirmass, expectedAirmass, EPS4D);
 
-	engineConfiguration->alphaNUseIat = true;
+	config->airmassTemperatureSource = AirmassTemperatureSource::Iat;
 
 	// Cold we get more airmass
-	float expectedAirmassCold = expectedAirmass * (273.0f + 20) / (273.0f + 0);
+	float expectedAirmassCold = expectedAirmass * (273.15f + 20) / (273.15f + 0);
 	Sensor::setMockValue(SensorType::Iat, 0);
 	EXPECT_NEAR(dut.getAirmass(1200, false).value_or({}).CylinderAirmass, expectedAirmassCold, EPS4D);
 
 	// Hot we get less airmass
-	float expectedAirmassHot = expectedAirmass * (273.0f + 20) / (273.0f + 40);
+	float expectedAirmassHot = expectedAirmass * (273.15f + 20) / (273.15f + 40);
 	Sensor::setMockValue(SensorType::Iat, 40);
 	EXPECT_NEAR(dut.getAirmass(1200, false).value_or({}).CylinderAirmass, expectedAirmassHot, EPS4D);
 }
@@ -214,10 +216,10 @@ TEST(AirmassModes, SpeedDensityFailed) {
 	EXPECT_TRUE(dut.getAirmass(3000, 100, false).Valid);
 	EXPECT_GT(dut.getAirflow(3000, 100, false), 0);
 
-	// tCharge not ready -> fail
+	// tCharge not ready -> IAT/standard-temperature fallback remains usable
 	engine->engineState.sd.tChargeK = NAN;
-	EXPECT_FALSE(dut.getAirmass(3000, 100, false).Valid);
-	EXPECT_EQ(0, dut.getAirflow(3000, 100, false));
+	EXPECT_TRUE(dut.getAirmass(3000, 100, false).Valid);
+	EXPECT_GT(dut.getAirflow(3000, 100, false), 0);
 
 	// NaN airmass -> fail
 	engine->engineState.sd.tChargeK = 273.15f + 20;
@@ -272,14 +274,12 @@ TEST(AirmassModes, FallbackMap) {
 	{
 		InSequence is;
 
-		// Working map -> return 33 (should be unused)
-		EXPECT_CALL(mapFallback, getValue(1234, 20)).WillOnce(Return(33));
-
 		// Failed map -> use 75
 		EXPECT_CALL(mapFallback, getValue(5678, 20)).WillOnce(Return(75));
 	}
 
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	config->useMapEstimateTable = true;
 
 	SpeedDensityAirmass dut(&veTable, mapFallback);
 
@@ -458,6 +458,9 @@ TEST(FuelMath, IdleVeTable) {
 
 	// Idle VE table returns 40
 	setTable(config->idleVeTable, 40);
+	config->idleVeLoadSource = IdleVeLoadSource::ModelDefault;
+	setLinearCurve(config->idleVeLoadBins, 0, 100, 1);
+	setLinearCurve(config->idleVeRpmBins, 0, 8000, 1);
 
 	// Enable separate idle VE table
 	engineConfiguration->useSeparateVeForIdle = true;

@@ -50,6 +50,8 @@ public:
 
 	float currentVe = 0;
 
+	bool airmassCalculationValid = false;
+
 	/**
 	 * Raw fuel injection duration produced by current fuel algorithm, without any correction
 	 */

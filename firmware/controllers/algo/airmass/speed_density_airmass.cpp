@@ -4,73 +4,134 @@
 expected<AirmassResult> SpeedDensityAirmass::getAirmass(float rpm, bool postState) {
 	ScopePerf perf(PE::GetSpeedDensityFuel);
 
-	auto map = getMap(rpm, postState);
-
-	return getAirmass(rpm, map, postState);
+	AirmassInputs inputs;
+	captureInputs(rpm, inputs);
+	const auto evaluation = evaluateAirmass(inputs, postState, nullptr);
+	return evaluation.Valid ? expected<AirmassResult>(evaluation.Result) : expected<AirmassResult>(unexpected);
 }
 
 expected<AirmassResult> SpeedDensityAirmass::getAirmass(float rpm, float map, bool postState) {
-	/**
-	 * most of the values are pre-calculated for performance reasons
-	 */
-	float tChargeK = engine->engineState.sd.tChargeK;
-	if (std::isnan(tChargeK)) {
-		warning(ObdCode::CUSTOM_ERR_TCHARGE_NOT_READY2,
-				"tChargeK not ready"); // this would happen before we have CLT reading for example
-		return unexpected;
+	AirmassInputs inputs;
+	captureAirmassInputs(rpm, inputs, nullptr, false);
+	inputs.NativeMap.Map = map;
+	inputs.NativeMap.Valid = std::isfinite(map) && map >= 0 && map <= 1000;
+	inputs.NativeMap.Fallback = !inputs.NativeMap.Valid;
+	const auto evaluation = evaluateAirmass(inputs, postState, nullptr);
+	return evaluation.Valid ? expected<AirmassResult>(evaluation.Result) : expected<AirmassResult>(unexpected);
+}
+
+AirmassEvaluation SpeedDensityAirmass::getAirmassForFuel(float rpm) const {
+	ScopePerf perf(PE::GetSpeedDensityFuel);
+
+	AirmassInputs inputs;
+	captureInputs(rpm, inputs, true);
+	return evaluateAirmass(inputs, true, nullptr);
+}
+
+AirmassEvaluation SpeedDensityAirmass::evaluateAirmass(float rpm, AirmassDiagnostics* diagnostics) const {
+	AirmassInputs inputs;
+	captureInputs(rpm, inputs);
+	return evaluateAirmass(inputs, false, diagnostics);
+}
+
+AirmassEvaluation SpeedDensityAirmass::evaluateAirmass(float rpm, float map, AirmassDiagnostics* diagnostics) const {
+	AirmassInputs inputs;
+	captureAirmassInputs(rpm, inputs, nullptr, false);
+	inputs.NativeMap.Map = map;
+	inputs.NativeMap.Valid = std::isfinite(map) && map >= 0 && map <= 1000;
+	inputs.NativeMap.Fallback = !inputs.NativeMap.Valid;
+	return evaluateAirmass(inputs, false, diagnostics);
+}
+
+AirmassEvaluation
+SpeedDensityAirmass::evaluateAirmass(const AirmassInputs& inputs, AirmassDiagnostics* diagnostics) const {
+	return evaluateAirmass(inputs, false, diagnostics);
+}
+
+AirmassEvaluation SpeedDensityAirmass::evaluateAirmass(
+		const AirmassInputs& inputs, bool postState, AirmassDiagnostics* diagnostics) const {
+	if (diagnostics) {
+		*diagnostics = {};
+	}
+	AirmassDiagnostics localDiagnostics;
+	AirmassDiagnostics& resultDiagnostics = diagnostics ? *diagnostics : localDiagnostics;
+	AirmassEvaluation evaluation;
+	resultDiagnostics.Map = inputs.NativeMap;
+	evaluateAirmassTemperature(inputs, resultDiagnostics);
+
+	if (!inputs.NativeMap.Valid || !std::isfinite(inputs.NativeMap.Map) || inputs.NativeMap.Map < 0 ||
+		inputs.NativeMap.Map > 1000 || !resultDiagnostics.TemperatureValid || !std::isfinite(inputs.Rpm) ||
+		inputs.Rpm <= 0 || !std::isfinite(inputs.Displacement) || inputs.Displacement <= 0 ||
+		!std::isfinite(inputs.CylinderCount) || inputs.CylinderCount <= 0) {
+		return evaluation;
 	}
 
-	float ve = getVe(rpm, map, postState, VeTableType::SpeedDensity);
-
-	float airMass = getAirmassImpl(ve, map, tChargeK);
-	if (std::isnan(airMass)) {
-		warning(ObdCode::CUSTOM_ERR_6685, "NaN airMass");
-		return unexpected;
-	}
-
-	return AirmassResult{
-			airMass,
-			map, // AFR/VE table Y axis
+	const auto ve =
+			evaluateVe(inputs, inputs.NativeMap.Map, postState, VeTableType::SpeedDensity, &resultDiagnostics.Ve);
+	const mass_t airmass = getAirmassImpl(
+			ve.Ve * PERCENT_DIV,
+			inputs.NativeMap.Map,
+			resultDiagnostics.TemperatureK,
+			inputs.Displacement,
+			inputs.CylinderCount);
+	evaluation.Result = {
+			airmass,
+			inputs.NativeMap.Map,
 	};
+	evaluation.Degraded = resultDiagnostics.TemperatureFallback || resultDiagnostics.Map.Fallback || ve.IdleFallback ||
+						  ve.CorrectionFallback;
+	evaluation.Valid = ve.Valid && std::isfinite(airmass) && airmass >= 0;
+	if (!evaluation.Valid) {
+		evaluation.Result.CylinderAirmass = 0;
+	}
+	if (postState) {
+		publishAirmassDiagnostics(resultDiagnostics);
+	}
+	return evaluation;
 }
 
 float SpeedDensityAirmass::getAirflow(float rpm, float map, bool postState) {
-	auto airmassResult = getAirmass(rpm, map, postState);
-	if (!airmassResult) {
+	AirmassInputs inputs;
+	captureAirmassInputs(rpm, inputs, nullptr, false);
+	inputs.NativeMap.Map = map;
+	inputs.NativeMap.Valid = std::isfinite(map) && map >= 0 && map <= 1000;
+	inputs.NativeMap.Fallback = !inputs.NativeMap.Valid;
+	const auto evaluation = evaluateAirmass(inputs, postState, nullptr);
+	if (!evaluation.Valid || evaluation.Result.CylinderAirmass < 0) {
 		return 0;
 	}
 
-	float massPerCycle = airmassResult.Value.CylinderAirmass * engine->engineState.cylinderCount;
+	float massPerCycle = evaluation.Result.CylinderAirmass * inputs.CylinderCount;
 
-	if (!engineConfiguration->twoStroke) {
+	if (!inputs.TwoStroke) {
 		// 4 stroke engines only do a half cycle per rev
 		massPerCycle = massPerCycle / 2;
 	}
 
 	// g/s
-	return massPerCycle * rpm / 60;
+	return massPerCycle * inputs.Rpm / 60;
 }
 
 float SpeedDensityAirmass::getMap(float rpm, bool postState) const {
-	float fallbackMap = m_mapEstimationTable->getValue(rpm, Sensor::getOrZero(SensorType::Tps1));
-
-#if EFI_TUNER_STUDIO
-	if (postState) {
-		engine->outputChannels.fallbackMap = fallbackMap;
+	AirmassInputs inputs;
+	captureInputs(rpm, inputs);
+	const auto& evaluation = inputs.NativeMap;
+	if (postState && evaluation.HasValue) {
+		engine->outputChannels.fallbackMap = evaluation.FallbackMap;
 	}
-#endif // EFI_TUNER_STUDIO
+	return evaluation.Valid ? evaluation.Map : NAN;
+}
 
-	auto map = Sensor::get(SensorType::Map);
-	if (!map) {
-		// MAP sensor is dead, nothing we can do
-		return fallbackMap;
-	} else if (
-			engineConfiguration->useMapEstimateDuringTransient &&
-			engine->module<TpsAccelEnrichment>()->isAboveAccelThreshold) {
-		// Take the greater of real or estimated map so we don't under-fuel on a transient
-		return std::max(map.Value, fallbackMap);
-	} else {
-		// Normal operation,
-		return map.Value;
-	}
+MapEvaluation SpeedDensityAirmass::evaluateMap(float rpm) const {
+	AirmassInputs inputs;
+	captureInputs(rpm, inputs);
+	return inputs.NativeMap;
+}
+
+float SpeedDensityAirmass::getVeImpl(float rpm, percent_t load) const {
+	return interpolate3d(config->veTable, config->veLoadBins, load, config->veRpmBins, rpm);
+}
+
+void SpeedDensityAirmass::captureInputs(float rpm, AirmassInputs& inputs, bool liveCalibration) const {
+	captureAirmassInputs(rpm, inputs, m_mapEstimationTable, true, liveCalibration);
 }

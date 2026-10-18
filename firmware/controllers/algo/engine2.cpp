@@ -86,6 +86,11 @@ void EngineState::periodicFastCallback() {
 	efitick_t nowNt = getTimeNowNt();
 	bool isCranking = engine->rpmCalculator.isCranking();
 	float rpm = Sensor::getOrZero(SensorType::Rpm);
+	const auto fuelCalculation = engine->airmassInjectionState.beginCalculation(
+			engineConfiguration->fuelAlgorithm, rpm, engine->getGlobalConfigurationVersion());
+	// The prior completed fuel publication remains live, but this calculation
+	// is not valid until every candidate output has been committed below.
+	airmassCalculationValid = false;
 
 	if (isCranking) {
 		crankingTimer.reset(nowNt);
@@ -132,33 +137,28 @@ void EngineState::periodicFastCallback() {
 	auto tps = Sensor::get(SensorType::Tps1);
 	updateTChargeK(rpm, tps.value_or(0));
 
-	float cycleFuelMass =
-			getCycleInjectionMass(rpm, isCranking) * engine->engineState.lua.fuelMult + engine->engineState.lua.fuelAdd;
-	auto clResult = fuelClosedLoopCorrection();
+	FuelAirmassCapture fuelCapture;
+	captureFuelAirmassInputs(rpm, fuelCalculation, fuelCapture);
+	auto fuelCandidate = calculateFuelPublication(rpm, isCranking, fuelCapture);
 
-	{
-		float injectionFuelMass = cycleFuelMass * getInjectionModeDurationMultiplier(getCurrentInjectionMode());
-
-		injectionStage2Fraction = getStage2InjectionFraction(rpm, engine->fuelComputer.afrTableYAxis);
-		float stage2InjectionMass = injectionFuelMass * injectionStage2Fraction;
-		float stage1InjectionMass = injectionFuelMass - stage2InjectionMass;
-
-		// Store the pre-wall wetting injection duration for scheduling purposes only, not the actual injection duration
-		engine->engineState.injectionDuration =
-				engine->module<InjectorModelPrimary>()->getInjectionDuration(stage1InjectionMass);
-		engine->engineState.injectionDurationStage2 =
-				engineConfiguration->enableStagedInjection
-						? engine->module<InjectorModelSecondary>()->getInjectionDuration(stage2InjectionMass)
-						: 0;
+	const float luaFuelMult = engine->engineState.lua.fuelMult;
+	const float luaFuelAdd = engine->engineState.lua.fuelAdd;
+	float cycleFuelMass = 0;
+	if (fuelCandidate.Valid && !fuelCandidate.Stale) {
+		cycleFuelMass = fuelCandidate.CycleInjectionMass * luaFuelMult + luaFuelAdd;
+	}
+	ClosedLoopFuelResult clResult;
+	if (fuelCandidate.Valid && !fuelCandidate.Stale) {
+		clResult = fuelClosedLoopCorrection(fuelCandidate.FuelingLoad, fuelCandidate.TargetLambda);
 	}
 
-	float fuelLoad = getFuelingLoad();
-	injectionOffset = getInjectionOffset(rpm, fuelLoad);
-	engine->lambdaMonitor.update(rpm, fuelLoad);
+	const float nextFuelLoad = fuelCandidate.Valid ? fuelCandidate.FuelingLoad : 0;
+	const float nextIgnitionLoad = fuelCandidate.Valid ? fuelCandidate.IgnitionLoad : 0;
+	engine->lambdaMonitor.update(rpm, nextFuelLoad);
 
-	engine->ignitionState.updateAdvanceCorrections(ignitionLoad);
+	engine->ignitionState.updateAdvanceCorrections(nextIgnitionLoad);
 	float untrimmedAdvance =
-			engine->ignitionState.getAdvance(rpm, ignitionLoad, isCranking) * engine->ignitionState.luaTimingMult +
+			engine->ignitionState.getAdvance(rpm, nextIgnitionLoad, isCranking) * engine->ignitionState.luaTimingMult +
 			engine->ignitionState.luaTimingAdd;
 
 	// Torque-reduction controller: pull timing and arm cylinder cut to bring delivered
@@ -166,42 +166,196 @@ void EngineState::periodicFastCallback() {
 	untrimmedAdvance -= engine->torqueReductionController.update();
 
 	// that's weird logic. also seems broken for two stroke?
-	engine->outputChannels.ignitionAdvance =
+	const float nextIgnitionAdvance =
 			(float)(untrimmedAdvance > FOUR_STROKE_CYCLE_DURATION / 2 ? untrimmedAdvance - FOUR_STROKE_CYCLE_DURATION
 																	  : untrimmedAdvance);
 
-	// compute per-bank fueling
-	for (size_t i = 0; i < STFT_BANK_COUNT; i++) {
-		engine->stftCorrection[i] = clResult.banks[i];
-	}
-
 	PreparedTable3DInterpolation fuelTrimInterpolation(
-			config->fuelTrimLoadBins, fuelLoad, config->fuelTrimRpmBins, rpm);
+			config->fuelTrimLoadBins, nextFuelLoad, config->fuelTrimRpmBins, rpm);
 	PreparedTable3DInterpolation ignitionTrimInterpolation(
-			config->ignTrimLoadBins, ignitionLoad, config->ignTrimRpmBins, rpm);
+			config->ignTrimLoadBins, nextIgnitionLoad, config->ignTrimRpmBins, rpm);
 
-	// Now apply that to per-cylinder fueling and timing
-	for (size_t i = 0; i < engine->engineState.cylinderCount; i++) {
-		uint8_t bankIndex = engineConfiguration->cylinderBankSelect[i];
-		auto bankTrim = engine->stftCorrection[bankIndex];
-		auto cylinderTrim = getCylinderFuelTrim(i, fuelTrimInterpolation);
+	const size_t calculationCylinderCount = fuelCapture.CylinderCount;
+	bool fuelPublicationValid = fuelCandidate.Valid && !fuelCandidate.Stale && std::isfinite(cycleFuelMass) &&
+								cycleFuelMass >= 0 && std::isfinite(luaFuelMult) && std::isfinite(luaFuelAdd) &&
+								std::isfinite(rpm) && (rpm > 0 || (!fuelCapture.Standalone && rpm == 0)) &&
+								calculationCylinderCount > 0 && calculationCylinderCount <= MAX_CYLINDER_COUNT;
 
-		// Apply both per-bank and per-cylinder trims
-		engine->cylinders[i].setInjectionMass(cycleFuelMass * bankTrim * cylinderTrim);
-
-		engine->cylinders[i].setIgnitionTimingBtdc(
-				untrimmedAdvance + getCylinderIgnitionTrim(i, ignitionTrimInterpolation));
+	for (size_t i = 0; i < STFT_BANK_COUNT; i++) {
+		fuelPublicationValid &= std::isfinite(clResult.banks[i]) && clResult.banks[i] >= 0;
 	}
 
-	shouldUpdateInjectionTiming = getInjectorDutyCycle(rpm) < 90;
-	trailingSparkAngle = interpolate3d(
-			config->trailingIgnitionTable,
-			config->trailingIgnitionLoadBins,
-			fuelLoad,
-			config->trailingIgnitionRpmBins,
-			rpm);
+	float cylinderFuelMasses[MAX_CYLINDER_COUNT] = {};
+	float cylinderTiming[MAX_CYLINDER_COUNT] = {};
+	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
+		const uint8_t bankIndex = engineConfiguration->cylinderBankSelect[i];
+		const float cylinderTrim = getCylinderFuelTrim(i, fuelTrimInterpolation);
+		const float bankTrim = bankIndex < STFT_BANK_COUNT ? clResult.banks[bankIndex] : 0;
+		const float cylinderMass = cycleFuelMass * bankTrim * cylinderTrim;
+		if (bankIndex >= STFT_BANK_COUNT || !std::isfinite(bankTrim) || bankTrim < 0 || !std::isfinite(cylinderTrim) ||
+			cylinderTrim < 0 || !std::isfinite(cylinderMass) || cylinderMass < 0) {
+			fuelPublicationValid = false;
+		} else {
+			cylinderFuelMasses[i] = cylinderMass;
+		}
 
-	multispark.count = getMultiSparkCount(rpm);
+		cylinderTiming[i] = untrimmedAdvance + getCylinderIgnitionTrim(i, ignitionTrimInterpolation);
+	}
+
+	const auto injectionMode = getCurrentInjectionMode();
+	float nextStage2Fraction = 0;
+	float nextInjectionDuration = 0;
+	float nextInjectionDurationStage2 = 0;
+	float nextInjectionOffset = 0;
+	bool nextShouldUpdateInjectionTiming = false;
+	if (fuelPublicationValid) {
+		const float injectionFuelMass =
+				cycleFuelMass * getInjectionModeDurationMultiplier(injectionMode, calculationCylinderCount);
+		nextStage2Fraction = getStage2InjectionFraction(rpm, fuelCandidate.AfrTableYAxis);
+		const float stage2InjectionMass = injectionFuelMass * nextStage2Fraction;
+		const float stage1InjectionMass = injectionFuelMass - stage2InjectionMass;
+
+		nextInjectionDuration = engine->module<InjectorModelPrimary>()->getInjectionDuration(stage1InjectionMass);
+		nextInjectionDurationStage2 =
+				engineConfiguration->enableStagedInjection
+						? engine->module<InjectorModelSecondary>()->getInjectionDuration(stage2InjectionMass)
+						: 0;
+		nextInjectionOffset = getInjectionOffset(rpm, nextFuelLoad);
+
+		const float totalInjectionTime =
+				nextInjectionDuration * getNumberOfInjections(injectionMode, calculationCylinderCount);
+		const float cycleDuration = getEngineCycleDuration(rpm);
+		nextShouldUpdateInjectionTiming = 100 * totalInjectionTime / cycleDuration < 90;
+
+		fuelPublicationValid &=
+				std::isfinite(injectionFuelMass) && injectionFuelMass >= 0 && std::isfinite(nextStage2Fraction) &&
+				nextStage2Fraction >= 0 && nextStage2Fraction <= 1 && std::isfinite(stage1InjectionMass) &&
+				stage1InjectionMass >= 0 && std::isfinite(stage2InjectionMass) && stage2InjectionMass >= 0 &&
+				std::isfinite(nextInjectionDuration) && nextInjectionDuration >= 0 &&
+				std::isfinite(nextInjectionDurationStage2) && nextInjectionDurationStage2 >= 0 &&
+				std::isfinite(nextInjectionOffset) &&
+				((!fuelCapture.Standalone && rpm == 0) || (std::isfinite(cycleDuration) && cycleDuration > 0));
+	}
+
+	fuelCandidate.Stage2Fraction = nextStage2Fraction;
+	fuelCandidate.InjectionDuration = nextInjectionDuration;
+	fuelCandidate.InjectionDurationStage2 = nextInjectionDurationStage2;
+	fuelCandidate.InjectionOffset = nextInjectionOffset;
+	fuelCandidate.ShouldUpdateInjectionTiming = nextShouldUpdateInjectionTiming;
+	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
+		fuelCandidate.CylinderFuelMasses[i] = cylinderFuelMasses[i];
+	}
+
+	bool publicationCurrent = false;
+	{
+		// Commit or clear every dependent fuel value under the same lock that
+		// invalidates stale calculations and completes admission.
+		chibios_rt::CriticalSectionLocker csl;
+		auto admission = engine->airmassInjectionState.locked(csl);
+		publicationCurrent = isFuelCaptureCurrentLocked(fuelCapture, admission);
+		if (publicationCurrent) {
+			fuelPublicationValid &= calculationCylinderCount == engine->engineState.cylinderCount;
+			if (fuelPublicationValid) {
+				airmassCalculationValid = true;
+				baseFuel = fuelCandidate.BaseFuelMass;
+				tpsAccelEnrich = fuelCandidate.TpsAccelEnrich;
+				injectionStage2Fraction = fuelCandidate.Stage2Fraction;
+				injectionDuration = fuelCandidate.InjectionDuration;
+				injectionDurationStage2 = fuelCandidate.InjectionDurationStage2;
+				injectionOffset = fuelCandidate.InjectionOffset;
+				shouldUpdateInjectionTiming = fuelCandidate.ShouldUpdateInjectionTiming;
+
+				engine->fuelComputer.sdAirMassInOneCylinder = fuelCandidate.SdAirMassInOneCylinder;
+				engine->fuelComputer.normalizedCylinderFilling = fuelCandidate.NormalizedCylinderFilling;
+				engine->engineState.fuelingLoad = fuelCandidate.FuelingLoad;
+				engine->engineState.ignitionLoad = fuelCandidate.IgnitionLoad;
+				engine->engineState.airflowEstimate = fuelCandidate.AirflowEstimate;
+				engine->fuelComputer.afrTableYAxis = fuelCandidate.AfrTableYAxis;
+				engine->fuelComputer.targetLambda = fuelCandidate.TargetLambda;
+				engine->fuelComputer.targetAFR = fuelCandidate.TargetAFR;
+				engine->fuelComputer.stoichiometricRatio = fuelCandidate.StoichiometricRatio;
+				engine->engineState.currentVe =
+						fuelCandidate.Diagnostics.Ve.HasValue ? fuelCandidate.Diagnostics.Ve.Ve : 0;
+				engine->engineState.veTableYAxis =
+						fuelCandidate.Diagnostics.Ve.HasValue ? fuelCandidate.Diagnostics.Ve.Load : 0;
+				engine->engineState.idleVeTableYAxis =
+						fuelCandidate.Diagnostics.Ve.HasValue ? fuelCandidate.Diagnostics.Ve.IdleLoad : 0;
+
+				if (isCranking) {
+					engine->engineState.crankingFuel.coolantTemperatureCoefficient =
+							fuelCandidate.CrankingCoolantTemperatureCoefficient;
+					engine->engineState.crankingFuel.tpsCoefficient = fuelCandidate.CrankingTpsCoefficient;
+					engine->engineState.crankingFuel.durationCoefficient = fuelCandidate.CrankingDurationCoefficient;
+					engine->engineState.crankingFuel.fuel = fuelCandidate.CrankingFuel * 1000;
+				} else {
+					engine->fuelComputer.running.baseFuel = fuelCandidate.RunningBaseFuel;
+					engine->fuelComputer.totalFuelCorrection = fuelCandidate.TotalFuelCorrection;
+					engine->fuelComputer.running.fuel = fuelCandidate.RunningFuel * 1000;
+				}
+
+				for (size_t i = 0; i < STFT_BANK_COUNT; i++) {
+					engine->stftCorrection[i] = clResult.banks[i];
+				}
+				for (size_t i = 0; i < calculationCylinderCount; i++) {
+					engine->cylinders[i].setInjectionMass(fuelCandidate.CylinderFuelMasses[i]);
+				}
+			} else {
+				// A current failed calculation closes admission and clears every
+				// fuel output together; a stale one never reaches this branch.
+				airmassCalculationValid = false;
+				baseFuel = 0;
+				tpsAccelEnrich = 0;
+				injectionStage2Fraction = 0;
+				injectionDuration = 0;
+				injectionDurationStage2 = 0;
+				injectionOffset = 0;
+				shouldUpdateInjectionTiming = false;
+
+				engine->fuelComputer.sdAirMassInOneCylinder = 0;
+				engine->fuelComputer.normalizedCylinderFilling = 0;
+				engine->engineState.fuelingLoad = 0;
+				engine->engineState.ignitionLoad = 0;
+				engine->engineState.airflowEstimate = 0;
+				engine->fuelComputer.afrTableYAxis = 0;
+				engine->fuelComputer.targetLambda = 0;
+				engine->fuelComputer.targetAFR = 0;
+				engine->fuelComputer.stoichiometricRatio = 0;
+				engine->engineState.currentVe = 0;
+				engine->engineState.veTableYAxis = 0;
+				engine->engineState.idleVeTableYAxis = 0;
+				engine->fuelComputer.running.baseFuel = 0;
+				engine->fuelComputer.running.fuel = 0;
+				engine->fuelComputer.totalFuelCorrection = 0;
+				engine->engineState.crankingFuel.fuel = 0;
+				for (size_t i = 0; i < STFT_BANK_COUNT; i++) {
+					engine->stftCorrection[i] = 1;
+				}
+				for (auto& cylinder : engine->cylinders) {
+					cylinder.setInjectionMass(0);
+				}
+			}
+
+			engine->outputChannels.ignitionAdvance = nextIgnitionAdvance;
+			for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
+				engine->cylinders[i].setIgnitionTimingBtdc(cylinderTiming[i]);
+			}
+			if (fuelCapture.Standalone) {
+				publishAirmassDiagnostics(fuelCandidate.Diagnostics);
+			}
+			admission.completeCalculation(fuelCalculation, fuelPublicationValid);
+		}
+	}
+
+	if (publicationCurrent) {
+		trailingSparkAngle = interpolate3d(
+				config->trailingIgnitionTable,
+				config->trailingIgnitionLoadBins,
+				nextFuelLoad,
+				config->trailingIgnitionRpmBins,
+				rpm);
+
+		multispark.count = getMultiSparkCount(rpm);
+	}
 
 #if EFI_LAUNCH_CONTROL
 	engine->launchController.update();

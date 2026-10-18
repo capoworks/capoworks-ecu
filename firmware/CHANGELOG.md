@@ -16,6 +16,7 @@ or
  - 
 
 ### Added
+ - Added a dedicated 16x16 Alpha-N cylinder-filling map with independent TPS/RPM axes and configurable temperature, MAP-estimate, BARO and Idle VE policies; because this changes the calibration layout, older binary tunes reset and Alpha-N cells/axes must be transferred manually.
  -
 
 ### Fixed

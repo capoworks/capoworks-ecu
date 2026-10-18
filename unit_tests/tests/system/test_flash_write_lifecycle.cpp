@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "airmass_injection_state.h"
 #include "configuration_write_state.h"
 #include "configuration_storage.h"
 #include "crc_accelerator.h"
@@ -270,11 +271,56 @@ TEST_F(FlashWriteLifecycle, ReentrantDirectWritesDeferAndCoalesce) {
 TEST_F(FlashWriteLifecycle, ReadConfigIsRejectedWhileWriting) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
-	flash_lifecycle_test::duringWrite = [] { flash_lifecycle_test::readFromFlash(); };
+	engineConfiguration->fuelAlgorithm = LM_SPEED_DENSITY;
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	engine->engineState.airmassCalculationValid = true;
+	auto& gate = engine->airmassInjectionState;
+	auto calculation = gate.beginCalculation(LM_SPEED_DENSITY, 1000, engine->getGlobalConfigurationVersion());
+	gate.completeCalculation(calculation, true);
+	ASSERT_TRUE(gate.allowInjection());
+	const auto generation = engine->airmassCalibration.Generation;
+
+	flash_lifecycle_test::duringWrite = [&] {
+		flash_lifecycle_test::readFromFlash();
+		EXPECT_EQ(engine->airmassCalibration.Generation, generation);
+		EXPECT_TRUE(gate.isCalculationCurrent(calculation));
+		EXPECT_TRUE(gate.allowInjection());
+	};
 	flash_lifecycle_test::writeToFlashNow();
 
 	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
 	EXPECT_EQ(flash_lifecycle_test::reads, 0u);
+}
+
+TEST_F(FlashWriteLifecycle, ReadInvalidatesGateAndCacheBeforeStorageAccess) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->fuelAlgorithm = LM_ALPHA_N;
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	engine->engineState.airmassCalculationValid = true;
+	auto& gate = engine->airmassInjectionState;
+	auto calculation = gate.beginCalculation(LM_ALPHA_N, 1000, engine->getGlobalConfigurationVersion());
+	gate.completeCalculation(calculation, true);
+	ASSERT_TRUE(gate.allowInjection());
+
+	calculation = gate.beginCalculation(LM_ALPHA_N, 1000, engine->getGlobalConfigurationVersion());
+	gate.acceptCalculation();
+	ASSERT_TRUE(gate.isCalculationCurrent(calculation));
+	const auto generation = engine->airmassCalibration.Generation;
+	const auto pending = gate.pendingCallbacks();
+
+	flash_lifecycle_test::duringRead = [&] {
+		EXPECT_EQ(engine->airmassCalibration.Generation, generation + 1);
+		EXPECT_FALSE(gate.isCalculationCurrent(calculation));
+		EXPECT_FALSE(gate.allowInjection());
+		EXPECT_EQ(gate.pendingCallbacks(), pending);
+	};
+	flash_lifecycle_test::readFromFlash();
+
+	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'R'}));
+	EXPECT_EQ(flash_lifecycle_test::reads, 1u);
+	EXPECT_EQ(engine->airmassCalibration.Generation, generation + 1);
+	EXPECT_FALSE(gate.allowInjection());
 }
 
 TEST_F(FlashWriteLifecycle, FailedAttemptRemainsPendingWithoutContinuousRetry) {

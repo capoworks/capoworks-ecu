@@ -45,6 +45,19 @@ static void setDefaultVETable() {
 	setRpmTableBin(config->veRpmBins);
 	setTable(config->veTable, 80);
 
+	setRpmTableBin(config->alphaNRpmBins);
+	copyArray(
+			config->alphaNTpsBins,
+			{0.0f, 0.5f, 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 15.0f, 20.0f, 30.0f, 40.0f, 55.0f, 70.0f, 85.0f, 100.0f});
+	setTable(config->alphaNTable, 80);
+
+	config->useMapEstimateTable = false;
+	config->alphaNMultiplyMap = false;
+	config->alphaNBaroCompensation = false;
+	config->alphaNBaroReferencePressure = 101.325f;
+	config->airmassTemperatureSource = AirmassTemperatureSource::Tcharge;
+	config->idleVeLoadSource = IdleVeLoadSource::EffectiveMap;
+
 	setRpmTableBin(config->baroCorrRpmBins);
 	setLinearCurve(config->baroCorrPressureBins, 75, 105, 1);
 

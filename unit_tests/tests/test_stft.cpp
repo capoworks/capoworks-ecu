@@ -86,6 +86,53 @@ TEST(ClosedLoopFuel, CellSelection) {
 	EXPECT_EQ(3, computeStftBin(50, cfg));
 }
 
+TEST(ClosedLoopFuel, ExplicitTargetAndLoadDoNotUsePublishedState) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	struct : public MockIdleController {
+		bool isIdlingOrTaper() const override {
+			return false;
+		}
+	} idleController;
+	engine->engineModules.get<IdleController>().set(&idleController);
+
+	// Transition to running while correction is still disabled.
+	engine->rpmCalculator.setRpmValue(2000);
+
+	engineConfiguration->fuelClosedLoopCorrectionEnabled = true;
+	engineConfiguration->stft.startupDelay = 0;
+	engineConfiguration->stft.minClt = 60;
+	engineConfiguration->stft.minLambda = 0.7f;
+	engineConfiguration->stft.maxLambda = 1.2f;
+	engineConfiguration->noFuelTrimAfterDfcoTime = 0;
+	engineConfiguration->stftIgnoreErrorMagnitude = false;
+
+	for (auto& cellCfg : engineConfiguration->stft.cellCfgs) {
+		cellCfg.timeConstant = 1;
+		cellCfg.maxAdd = 0;
+		cellCfg.maxRemove = 0;
+	}
+	// Only the power cell may remove fuel, making the selected load observable.
+	engineConfiguration->stft.cellCfgs[2].maxRemove = -25;
+
+	Sensor::setMockValue(SensorType::Lambda1, 0.9f);
+	eth.moveTimeForwardSec(3);
+	engine->fuelComputer.running.timeSinceCrankingInSecs = 10;
+
+	// These are the last published values. The current calculation is 90 load at lambda 1.0.
+	constexpr float publishedLoad = 10;
+	constexpr float publishedTarget = 0.8f;
+	engine->engineState.fuelingLoad = publishedLoad;
+	engine->fuelComputer.targetLambda = publishedTarget;
+
+	auto result = fuelClosedLoopCorrection(90, 1.0f);
+
+	// Lambda 0.9 is rich against the current target 1.0, so the power cell removes fuel.
+	EXPECT_LT(result.banks[0], 1.0f);
+	EXPECT_FLOAT_EQ(publishedLoad, engine->engineState.fuelingLoad);
+	EXPECT_FLOAT_EQ(publishedTarget, engine->fuelComputer.targetLambda);
+}
+
 TEST(ClosedLoopFuel, lambdaLimits) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 

@@ -222,6 +222,12 @@ void readFromFlash() {
 		return;
 	}
 
+#if EFI_ENGINE_CONTROL
+	// Reading replaces the working calibration without loadConfiguration(), so
+	// close admission and invalidate cached axes before storage overwrites it.
+	engine->airmassInjectionState.onConfigurationWrite(engineConfiguration->fuelAlgorithm, false);
+#endif
+
 #if EFI_STORAGE_INT_FLASH == TRUE
 	auto result = readConfigurationCopies(getFlashAddrFirstCopy(), getFlashAddrSecondCopy(), persistentState);
 #else
