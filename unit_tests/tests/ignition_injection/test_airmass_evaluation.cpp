@@ -391,6 +391,103 @@ TEST(AirmassEvaluation, VeCorrectionsUseCapturedPreviousLoads) {
 	EXPECT_NEAR(engine->outputChannels.veBlendOutput[0], 20, EPS4D);
 }
 
+TEST(AirmassEvaluation, RawBranchesDeferCommonCorrectionsUntilAfterCombination) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	engine->engineState.sd.tChargeK = 293.15f;
+	engineConfiguration->displacement = 2.4f;
+	engineConfiguration->useSeparateVeForIdle = false;
+	engineConfiguration->fuelAlgorithm = LM_SPEED_DENSITY;
+	setCylinderCount(4);
+	setTable(config->veTable, 60);
+	setTable(config->alphaNTable, 40);
+
+	for (auto& blend : config->veBlends) {
+		blend.blendParameter = GPPWM_Zero;
+	}
+
+	auto& sdCorrection = config->veBlends[0];
+	sdCorrection.blendParameter = GPPWM_FuelLoad;
+	sdCorrection.yAxisOverride = GPPWM_Zero;
+	sdCorrection.veTableSelect = VeTableType::SpeedDensity;
+	setTable(sdCorrection.table, 20);
+	setArrayValues(sdCorrection.blendValues, 100);
+
+	auto& alphaNCorrection = config->veBlends[1];
+	alphaNCorrection.blendParameter = GPPWM_IgnLoad;
+	alphaNCorrection.yAxisOverride = GPPWM_Zero;
+	alphaNCorrection.veTableSelect = VeTableType::AlphaN;
+	setTable(alphaNCorrection.table, -10);
+	setArrayValues(alphaNCorrection.blendValues, 100);
+
+	config->alphaNMultiplyMap = true;
+	Sensor::setMockValue(SensorType::Map, 50);
+	Sensor::setMockValue(SensorType::Tps1, 25);
+	engine->engineState.fuelingLoad = 55;
+	engine->engineState.ignitionLoad = 77;
+
+	AirmassInputs inputs;
+	captureAirmassInputs(2500, inputs, nullptr, true);
+	// Supply captured consumers explicitly for this pure raw-evaluation test.
+	inputs.FuelingLoad = 55;
+	inputs.IgnitionLoad = 77;
+	ASSERT_TRUE(inputs.FuelingLoad.Valid);
+	ASSERT_TRUE(inputs.IgnitionLoad.Valid);
+
+	engine->engineState.sd.tChargeK = 373.15f;
+	engineConfiguration->displacement = 6.0f;
+	setCylinderCount(8);
+	Sensor::setMockValue(SensorType::Map, 90);
+	Sensor::setMockValue(SensorType::Tps1, 90);
+	engine->engineState.fuelingLoad = 0;
+	engine->engineState.ignitionLoad = 0;
+
+	MockVp3d mapEstimate;
+	SpeedDensityAirmass speedDensity(nullptr, mapEstimate);
+	AlphaNAirmass alphaN;
+	RawAirmassDiagnostics sdDiagnostics;
+	RawAirmassDiagnostics alphaNDiagnostics;
+	const auto rawSpeedDensity = speedDensity.evaluateRawAirmass(inputs, &sdDiagnostics);
+	const auto rawAlphaN = alphaN.evaluateRawAirmass(inputs, &alphaNDiagnostics);
+
+	ASSERT_TRUE(rawSpeedDensity.Valid);
+	ASSERT_TRUE(rawAlphaN.Valid);
+	EXPECT_NEAR(rawSpeedDensity.Result.CylinderAirmass, expectedIdealGasMass(2.4f, 4, 60, 50, 293.15f), EPS4D);
+	EXPECT_NEAR(rawAlphaN.Result.CylinderAirmass, expectedIdealGasMass(2.4f, 4, 40, 101.325f, 293.15f), EPS4D);
+	EXPECT_FLOAT_EQ(sdDiagnostics.TableValue, 60);
+	EXPECT_FLOAT_EQ(alphaNDiagnostics.TableValue, 40);
+	EXPECT_FLOAT_EQ(alphaNDiagnostics.BaroCoefficient, 1);
+
+	const auto effectiveMapAlphaN = alphaN.evaluateRawAirmass(inputs, nullptr, AlphaNPressurePolicy::EffectiveMap);
+	ASSERT_TRUE(effectiveMapAlphaN.Valid);
+	EXPECT_NEAR(effectiveMapAlphaN.Result.CylinderAirmass, expectedIdealGasMass(2.4f, 4, 40, 50, 293.15f), EPS4D);
+
+	VeCorrectionDiagnostics correctionDiagnostics;
+	const auto corrections = evaluateAirmassCorrections(inputs, &correctionDiagnostics);
+	ASSERT_TRUE(corrections.Valid);
+	EXPECT_FALSE(corrections.Fallback);
+	EXPECT_NEAR(corrections.Multiplier, 1.08f, EPS4D);
+	EXPECT_TRUE(correctionDiagnostics.HasValue);
+	EXPECT_TRUE(correctionDiagnostics.Valid);
+	EXPECT_NEAR(correctionDiagnostics.Blends[0].Value, 20, EPS4D);
+	EXPECT_NEAR(correctionDiagnostics.Blends[1].Value, -10, EPS4D);
+
+	const float rawCombined = (rawSpeedDensity.Result.CylinderAirmass + rawAlphaN.Result.CylinderAirmass) / 2;
+	EXPECT_NEAR(rawCombined * corrections.Multiplier, rawCombined * 1.08f, EPS4D);
+
+	// The compatibility wrappers retain their per-consumer filter and apply
+	// exactly the correction assigned to each standalone model.
+	AirmassDiagnostics sdStandaloneDiagnostics;
+	const auto sdStandalone = speedDensity.evaluateAirmass(inputs, &sdStandaloneDiagnostics);
+	ASSERT_TRUE(sdStandalone.Valid);
+	EXPECT_NEAR(sdStandalone.Result.CylinderAirmass, rawSpeedDensity.Result.CylinderAirmass * 1.2f, EPS4D);
+
+	AirmassDiagnostics alphaNStandaloneDiagnostics;
+	const auto alphaNStandalone =
+			alphaN.evaluateAirmass(inputs, AlphaNPressurePolicy::PureReference, &alphaNStandaloneDiagnostics);
+	ASSERT_TRUE(alphaNStandalone.Valid);
+	EXPECT_NEAR(alphaNStandalone.Result.CylinderAirmass, rawAlphaN.Result.CylinderAirmass * 0.9f, EPS4D);
+}
+
 TEST(AirmassEvaluation, TpsOvertravelClampsOnlyWithinFiniteOrderedLimits) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	engine->engineState.sd.tChargeK = 293.15f;

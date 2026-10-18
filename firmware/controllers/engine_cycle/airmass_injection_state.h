@@ -26,7 +26,8 @@ enum class AirmassInjectionFault : uint8_t {
 	Scheduling
 };
 
-// Owns only standalone injection admission/recovery. Accepted output callbacks always run to completion.
+// Owns revised physical-model injection admission/recovery. Accepted output
+// callbacks always run to completion.
 class AirmassInjectionState {
 public:
 	using CalculationToken = uint32_t;
@@ -34,7 +35,10 @@ public:
 	CalculationToken beginCalculation(engine_load_mode_e mode, float rpm, int configurationVersion);
 	void acceptCalculation(AirmassInjectionFault fallback = AirmassInjectionFault::None);
 	void rejectCalculation(AirmassInjectionFault fault);
-	void completeCalculation(CalculationToken token, bool publicationValid);
+	void completeCalculation(
+			CalculationToken token,
+			bool publicationValid,
+			AirmassInjectionFault fallback = AirmassInjectionFault::None);
 	bool isCalculationCurrent(CalculationToken token);
 	// Read-only capture for model evaluation; does not observe or change modes.
 	CalculationToken publicationEpoch() const;
@@ -57,7 +61,10 @@ public:
 		bool allowPrime();
 		bool isCalculationCurrent(CalculationToken token);
 		CalculationToken publicationEpoch() const;
-		void completeCalculation(CalculationToken token, bool publicationValid);
+		void completeCalculation(
+				CalculationToken token,
+				bool publicationValid,
+				AirmassInjectionFault fallback = AirmassInjectionFault::None);
 		void rejectCalculation(AirmassInjectionFault fault);
 		bool callbacksAccepted(size_t count);
 		void callbacksRejected(size_t count);
@@ -81,7 +88,10 @@ private:
 	bool allowInjectionLocked();
 	bool allowPrimeLocked();
 	bool isCalculationCurrentLocked(CalculationToken token);
-	void completeCalculationLocked(CalculationToken token, bool publicationValid);
+	void completeCalculationLocked(
+			CalculationToken token,
+			bool publicationValid,
+			AirmassInjectionFault fallback = AirmassInjectionFault::None);
 	void rejectCalculationLocked(AirmassInjectionFault fault);
 	bool callbacksAccepted(size_t count);
 	void callbacksRejected(size_t count);
@@ -97,8 +107,8 @@ private:
 	bool m_calculationAccepted = false;
 	AirmassInjectionFault m_calculationFallback = AirmassInjectionFault::None;
 	bool m_positiveRpmCalculation = false;
-	// Standalone physical models require their own completed fuel publication;
-	// priming retains its independent startup admission.
+	// Revised physical models, including the SD + Alpha-N composite, require
+	// their own completed fuel publication; priming remains independent.
 	bool m_standaloneReady = false;
 };
 

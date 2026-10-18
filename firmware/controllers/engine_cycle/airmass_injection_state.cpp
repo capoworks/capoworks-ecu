@@ -2,16 +2,27 @@
 #include "airmass_injection_state.h"
 #include "airmass_loads.h"
 
+static bool isComposite(engine_load_mode_e mode) {
+	return mode == LM_SD_ALPHA_N;
+}
+
 static bool needsStandalonePublication(engine_load_mode_e mode) {
-	return mode == LM_SPEED_DENSITY || mode == LM_ALPHA_N || mode == LM_REAL_MAF;
+	return mode == LM_SPEED_DENSITY || mode == LM_ALPHA_N || mode == LM_REAL_MAF || mode == LM_SD_ALPHA_N;
 }
 
 void AirmassInjectionState::setStatus(AirmassInjectionStatus status, AirmassInjectionFault fault) {
 	m_status = status;
 	m_fault = fault;
+	engine->outputChannels.blendedStatus = static_cast<uint8_t>(m_status);
+	engine->outputChannels.blendedFault = static_cast<uint8_t>(m_fault);
 }
 
 void AirmassInjectionState::failCalculation(AirmassInjectionFault fault) {
+	invalidateAirmassConsumerLoadsLocked();
+	if (isComposite(m_mode)) {
+		engine->engineState.veAnalyzeSessionInvalid = true;
+		engine->engineState.veAnalyzeEndpoint = 0;
+	}
 	setStatus(AirmassInjectionStatus::Faulted, fault);
 	m_calculationAccepted = false;
 	m_standaloneReady = false;
@@ -28,7 +39,13 @@ void AirmassInjectionState::observeMode(engine_load_mode_e mode) {
 		m_calculationAccepted = false;
 		m_standaloneReady = false;
 		m_calculationFallback = AirmassInjectionFault::None;
-		setStatus(AirmassInjectionStatus::Legacy, AirmassInjectionFault::None);
+		engine->engineState.veAnalyzeSessionStarted = false;
+		engine->engineState.veAnalyzeSessionInvalid = false;
+		engine->engineState.veAnalyzeEndpoint = 0;
+		engine->outputChannels.blendedVeAnalyzeEndpoint = 0;
+		setStatus(
+				isComposite(mode) ? AirmassInjectionStatus::NotReady : AirmassInjectionStatus::Legacy,
+				AirmassInjectionFault::None);
 	}
 }
 
@@ -91,12 +108,14 @@ AirmassInjectionState::CalculationToken AirmassInjectionState::publicationEpoch(
 	return m_epoch;
 }
 
-void AirmassInjectionState::completeCalculation(CalculationToken token, bool publicationValid) {
+void AirmassInjectionState::completeCalculation(
+		CalculationToken token, bool publicationValid, AirmassInjectionFault fallback) {
 	chibios_rt::CriticalSectionLocker csl;
-	completeCalculationLocked(token, publicationValid);
+	completeCalculationLocked(token, publicationValid, fallback);
 }
 
-void AirmassInjectionState::completeCalculationLocked(CalculationToken token, bool publicationValid) {
+void AirmassInjectionState::completeCalculationLocked(
+		CalculationToken token, bool publicationValid, AirmassInjectionFault fallback) {
 	observeMode(engineConfiguration->fuelAlgorithm);
 	// A stale completion cannot close or reopen a newer publication.
 	if (token != m_epoch || m_configurationVersion != engine->getGlobalConfigurationVersion()) {
@@ -115,8 +134,12 @@ void AirmassInjectionState::completeCalculationLocked(CalculationToken token, bo
 		failCalculation(AirmassInjectionFault::Result);
 		return;
 	}
+	if (fallback != AirmassInjectionFault::None) {
+		m_calculationFallback = fallback;
+	}
 	m_standaloneReady = true;
 	auto status = m_calculationFallback != AirmassInjectionFault::None ? AirmassInjectionStatus::Degraded
+				: isComposite(m_mode)								   ? AirmassInjectionStatus::Ready
 																	   : AirmassInjectionStatus::Legacy;
 	setStatus(status, m_calculationFallback);
 }
@@ -127,7 +150,10 @@ void AirmassInjectionState::onEngineStop() {
 	m_calculationAccepted = false;
 	m_positiveRpmCalculation = false;
 	m_standaloneReady = false;
-	setStatus(AirmassInjectionStatus::Legacy, AirmassInjectionFault::None);
+	// This also runs during Engine construction, when this gate may not yet be
+	// owned by the global engine. Published state is reset by the owning Engine.
+	m_status = isComposite(m_mode) ? AirmassInjectionStatus::NotReady : AirmassInjectionStatus::Legacy;
+	m_fault = AirmassInjectionFault::None;
 }
 
 void AirmassInjectionState::onConfigurationWrite(engine_load_mode_e proposedMode, bool strategyChanged) {
@@ -144,7 +170,14 @@ void AirmassInjectionState::onConfigurationWrite(engine_load_mode_e proposedMode
 	if (strategyChanged) {
 		observeMode(proposedMode);
 	}
-	setStatus(AirmassInjectionStatus::Legacy, AirmassInjectionFault::None);
+	const bool engineStopped = engine->rpmCalculator.getState() == STOPPED;
+	engine->engineState.veAnalyzeSessionStarted = false;
+	engine->engineState.veAnalyzeSessionInvalid = isComposite(m_mode) && (!engineStopped || m_positiveRpmCalculation);
+	engine->engineState.veAnalyzeEndpoint = 0;
+	engine->outputChannels.blendedVeAnalyzeEndpoint = 0;
+	setStatus(
+			isComposite(m_mode) ? AirmassInjectionStatus::NotReady : AirmassInjectionStatus::Legacy,
+			AirmassInjectionFault::None);
 }
 
 bool AirmassInjectionState::allowInjection() {
@@ -219,8 +252,9 @@ bool AirmassInjectionState::LockedAccess::isCalculationCurrent(CalculationToken 
 	return m_state.isCalculationCurrentLocked(token);
 }
 
-void AirmassInjectionState::LockedAccess::completeCalculation(CalculationToken token, bool publicationValid) {
-	m_state.completeCalculationLocked(token, publicationValid);
+void AirmassInjectionState::LockedAccess::completeCalculation(
+		CalculationToken token, bool publicationValid, AirmassInjectionFault fallback) {
+	m_state.completeCalculationLocked(token, publicationValid, fallback);
 }
 
 bool AirmassInjectionState::LockedAccess::allowInjection() {

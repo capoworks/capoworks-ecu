@@ -19,6 +19,10 @@ public:
 	evaluateAirmass(float rpm, AlphaNPressurePolicy policy, AirmassDiagnostics* diagnostics = nullptr) const;
 	AirmassEvaluation evaluateAirmass(
 			const AirmassInputs& inputs, AlphaNPressurePolicy policy, AirmassDiagnostics* diagnostics = nullptr) const;
+	AirmassEvaluation evaluateRawAirmass(
+			const AirmassInputs& inputs,
+			RawAirmassDiagnostics* diagnostics = nullptr,
+			AlphaNPressurePolicy pressurePolicy = AlphaNPressurePolicy::PureReference) const;
 	float getVeImpl(float rpm, percent_t load) const override;
 
 private:

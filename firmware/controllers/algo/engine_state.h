@@ -55,6 +55,9 @@ public:
 	AirmassLoadSnapshot airmassLoads;
 	uint32_t airmassLoadsInvalidationEpoch = 0;
 	uint32_t airmassLoadsPublicationSerial = 0;
+	bool veAnalyzeSessionStarted = false;
+	bool veAnalyzeSessionInvalid = false;
+	uint8_t veAnalyzeEndpoint = 0;
 
 	/**
 	 * Raw fuel injection duration produced by current fuel algorithm, without any correction

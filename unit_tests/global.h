@@ -51,6 +51,7 @@ void chDbgAssert(int c, char* msg, void* arg);
 #define RUS_EFI_VERSION_TAG "rusEfiVersion"
 
 #define CCM_OPTIONAL
+#define CCM_OPTIONAL_BACKGROUND
 
 #define chSysLock()                                                                                                    \
 	{}

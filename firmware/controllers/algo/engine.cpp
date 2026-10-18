@@ -182,6 +182,20 @@ void Engine::updateSwitchInputs() {
 	engine->engineState.brakePedalState = getBrakePedalState();
 }
 
+static void resetOwnedAirmassRuntimeState(Engine& owner) {
+	owner.airmassInjectionState.onEngineStop();
+
+	auto& state = owner.engineState;
+	state.veAnalyzeSessionStarted = false;
+	state.veAnalyzeSessionInvalid = false;
+	state.veAnalyzeEndpoint = 0;
+
+	auto& output = owner.outputChannels;
+	output.blendedVeAnalyzeEndpoint = 0;
+	output.blendedStatus = static_cast<uint8_t>(owner.airmassInjectionState.status());
+	output.blendedFault = static_cast<uint8_t>(owner.airmassInjectionState.fault());
+}
+
 Engine::Engine() {
 	reset();
 }
@@ -194,7 +208,9 @@ void Engine::reset() {
 	++airmassCalibration.Generation;
 	airmassCalibration.Known = 0;
 	airmassCalibration.ConfigurationVersion = -1;
-	airmassInjectionState.onEngineStop();
+	airmassCalibration.AuthorityEndpoint = AirmassVeAnalyzeEndpoint::None;
+	airmassCalibration.AuthorityEndpointKnown = false;
+	resetOwnedAirmassRuntimeState(*this);
 	engineState.airmassLoads = {};
 	engineState.airmassLoadsInvalidationEpoch++;
 	engineState.airmassLoadsPublicationSerial++;
@@ -231,7 +247,7 @@ void Engine::OnTriggerSynchronizationLost() {
 	efiPrintf("engine stopped");
 
 	rpmCalculator.setStopSpinning();
-	airmassInjectionState.onEngineStop();
+	resetOwnedAirmassRuntimeState(*this);
 	invalidateAirmassConsumerLoads();
 
 	triggerCentral.triggerState.resetState();

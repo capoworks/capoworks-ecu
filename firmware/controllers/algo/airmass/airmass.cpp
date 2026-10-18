@@ -40,6 +40,37 @@ bool isMapEstimateConfigurationValid() {
 	return true;
 }
 
+bool isAirmassBlendAuthorityCalibrationValid(AirmassBlendLoadSource source) {
+	const float maximum = source == AirmassBlendLoadSource::Tps			? 100.0f
+						: source == AirmassBlendLoadSource::MeasuredMap ? 1000.0f
+																		: -1.0f;
+	if (maximum < 0) {
+		return false;
+	}
+
+	const auto& loadBins = config->airmassBlendLoadBins;
+	if (!std::isfinite(loadBins[0]) || loadBins[0] < 0 || !std::isfinite(loadBins[efi::size(loadBins) - 1]) ||
+		loadBins[efi::size(loadBins) - 1] > maximum) {
+		return false;
+	}
+	for (size_t i = 1; i < efi::size(loadBins); i++) {
+		if (!std::isfinite(loadBins[i]) || loadBins[i] <= loadBins[i - 1]) {
+			return false;
+		}
+	}
+	if (!isAxisValid(config->airmassBlendRpmBins, 18000)) {
+		return false;
+	}
+	for (const auto& row : config->airmassBlendTable) {
+		for (auto value : row) {
+			if (value > 100) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 bool isAirmassModelConfigurationValid(engine_load_mode_e model) {
 	switch (model) {
 		case LM_SPEED_DENSITY:
@@ -48,6 +79,9 @@ bool isAirmassModelConfigurationValid(engine_load_mode_e model) {
 			return isAxisValid(config->alphaNTpsBins, 100) && isAxisValid(config->alphaNRpmBins, 18000);
 		case LM_REAL_MAF:
 			return isAxisValid(config->mafTrimLoadBins, 1000) && isAxisValid(config->mafTrimRpmBins, 18000);
+		case LM_SD_ALPHA_N:
+			return isAirmassBlendAuthorityCalibrationValid(config->airmassBlendLoadSource) &&
+				   isAirmassModelConfigurationValid(LM_SPEED_DENSITY) && isAirmassModelConfigurationValid(LM_ALPHA_N);
 		default:
 			return true;
 	}
@@ -64,6 +98,8 @@ bool scanCalibration(AirmassCalibration calibration) {
 			return isAirmassModelConfigurationValid(LM_REAL_MAF);
 		case AirmassCalibration::MapEstimate:
 			return isMapEstimateConfigurationValid();
+		case AirmassCalibration::Authority:
+			return isAirmassBlendAuthorityCalibrationValid(config->airmassBlendLoadSource);
 		case AirmassCalibration::Idle:
 			return isAxisValid(config->idleVeLoadBins, 1000) && isAxisValid(config->idleVeRpmBins, 18000);
 		default: {
@@ -78,6 +114,25 @@ bool scanCalibration(AirmassCalibration calibration) {
 		}
 	}
 }
+
+AirmassVeAnalyzeEndpoint scanAuthorityEndpoint(AirmassBlendLoadSource source) {
+	if (!isAirmassBlendAuthorityCalibrationValid(source)) {
+		return AirmassVeAnalyzeEndpoint::None;
+	}
+
+	const uint8_t endpoint = config->airmassBlendTable[0][0];
+	if (endpoint != 0 && endpoint != 100) {
+		return AirmassVeAnalyzeEndpoint::None;
+	}
+	for (const auto& row : config->airmassBlendTable) {
+		for (const auto value : row) {
+			if (value != endpoint) {
+				return AirmassVeAnalyzeEndpoint::None;
+			}
+		}
+	}
+	return endpoint == 0 ? AirmassVeAnalyzeEndpoint::SpeedDensity : AirmassVeAnalyzeEndpoint::AlphaN;
+}
 } // namespace
 
 static_assert(
@@ -89,6 +144,8 @@ void invalidateAirmassCalibration() {
 	auto& cache = engine->airmassCalibration;
 	++cache.Generation;
 	cache.Known = 0;
+	cache.AuthorityEndpoint = AirmassVeAnalyzeEndpoint::None;
+	cache.AuthorityEndpointKnown = false;
 }
 
 bool isCapturedAirmassCalibrationValid(const AirmassInputs& inputs, AirmassCalibration calibration) {
@@ -106,6 +163,8 @@ bool isCapturedAirmassCalibrationValid(const AirmassInputs& inputs, AirmassCalib
 		}
 		if (cache.ConfigurationVersion != inputs.ConfigurationVersion) {
 			cache.Known = 0;
+			cache.AuthorityEndpoint = AirmassVeAnalyzeEndpoint::None;
+			cache.AuthorityEndpointKnown = false;
 			cache.ConfigurationVersion = inputs.ConfigurationVersion;
 		}
 		if (cache.Known & bit) {
@@ -144,9 +203,50 @@ bool isCapturedAirmassModelValid(const AirmassInputs& inputs, engine_load_mode_e
 			return isCapturedAirmassCalibrationValid(inputs, AirmassCalibration::AlphaN);
 		case LM_REAL_MAF:
 			return isCapturedAirmassCalibrationValid(inputs, AirmassCalibration::MafTrim);
+		case LM_SD_ALPHA_N:
+			return isCapturedAirmassCalibrationValid(inputs, AirmassCalibration::Authority) &&
+				   isCapturedAirmassCalibrationValid(inputs, AirmassCalibration::SpeedDensity) &&
+				   isCapturedAirmassCalibrationValid(inputs, AirmassCalibration::AlphaN);
 		default:
 			return true;
 	}
+}
+
+AirmassVeAnalyzeEndpoint getCapturedAirmassAuthorityEndpoint(const AirmassInputs& inputs) {
+	if (!inputs.LiveCalibration) {
+		return scanAuthorityEndpoint(inputs.BlendLoadSource);
+	}
+
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		auto& cache = engine->airmassCalibration;
+		if (inputs.CalibrationGeneration != cache.Generation ||
+			inputs.ConfigurationVersion != engine->getGlobalConfigurationVersion()) {
+			return AirmassVeAnalyzeEndpoint::None;
+		}
+		if (cache.ConfigurationVersion != inputs.ConfigurationVersion) {
+			cache.Known = 0;
+			cache.AuthorityEndpoint = AirmassVeAnalyzeEndpoint::None;
+			cache.AuthorityEndpointKnown = false;
+			cache.ConfigurationVersion = inputs.ConfigurationVersion;
+		}
+		if (cache.AuthorityEndpointKnown) {
+			return cache.AuthorityEndpoint;
+		}
+	}
+
+	// The full authority table scan stays outside the critical section. Writers
+	// invalidate the generation before mutating it, so an old scan cannot land.
+	const auto endpoint = scanAuthorityEndpoint(inputs.BlendLoadSource);
+	chibios_rt::CriticalSectionLocker csl;
+	auto& cache = engine->airmassCalibration;
+	if (inputs.CalibrationGeneration != cache.Generation ||
+		inputs.ConfigurationVersion != engine->getGlobalConfigurationVersion()) {
+		return AirmassVeAnalyzeEndpoint::None;
+	}
+	cache.AuthorityEndpoint = endpoint;
+	cache.AuthorityEndpointKnown = true;
+	return endpoint;
 }
 
 bool isAirmassConfigurationValid() {
@@ -249,6 +349,13 @@ AirmassLoad resolveNativeModelLoad(const AirmassInputs& inputs) {
 			if (result.Valid) {
 				result.Value = inputs.NativeLoad.Value;
 			}
+			return result;
+		case LM_SD_ALPHA_N:
+			result.Value = inputs.NativeMap.Map;
+			result.Source = AirmassLoadSource::EffectiveMap;
+			result.Unit = AirmassLoadUnit::Kpa;
+			result.Valid = isMapCoordinateValid(inputs.NativeMap);
+			result.UsesEstimate = inputs.NativeMap.UsesEstimate;
 			return result;
 		default:
 			return result;
@@ -416,6 +523,7 @@ void captureAirmassInputs(
 		inputs.CalibrationGeneration = engine->airmassCalibration.Generation;
 		inputs.Displacement = engineConfiguration->displacement;
 		inputs.CylinderCount = engine->engineState.cylinderCount;
+		inputs.BlendLoadSource = config->airmassBlendLoadSource;
 	}
 	inputs.HasPublicationContext = true;
 	inputs.LiveCalibration = liveCalibration;
@@ -567,16 +675,91 @@ calculateCapturedBlend(const AirmassInputs& inputs, const blend_table_s& cfg, fl
 		}
 		load = yAxis.Value;
 	}
+	if (!std::isfinite(load)) {
+		fallback = true;
+		return {};
+	}
 	const float tableValue = interpolate3d(cfg.table, cfg.loadBins, load, cfg.rpmBins, inputs.Rpm);
 	const float blendFactor = interpolate2d(parameter.Value, cfg.blendBins, cfg.blendValues);
 	return {parameter.Value, blendFactor, 0.01f * blendFactor * tableValue, load};
 }
 
-VeDiagnostics
-AirmassVeModelBase::evaluateRawVe(const AirmassInputs& inputs, float load, VeDiagnostics* diagnostics) const {
+static VeCorrectionEvaluation evaluateAirmassCorrectionsImpl(
+		const AirmassInputs& inputs,
+		float nativeLoad,
+		bool postState,
+		const VeTableType* consumer,
+		VeCorrectionDiagnostics* diagnostics) {
 	if (diagnostics) {
 		*diagnostics = {};
 	}
+
+	VeCorrectionEvaluation evaluation;
+	evaluation.Multiplier = 1;
+	evaluation.Valid = true;
+	for (size_t i = 0; i < efi::size(config->veBlends); i++) {
+		const auto& blend = config->veBlends[i];
+		BlendResult result{};
+		if ((consumer && blend.veTableSelect != *consumer) || blend.blendParameter == GPPWM_Zero) {
+			continue;
+		}
+
+		const auto calibration =
+				static_cast<AirmassCalibration>(static_cast<uint8_t>(AirmassCalibration::Correction0) + i);
+		if (!isCapturedAirmassCalibrationValid(inputs, calibration)) {
+			evaluation.Fallback = true;
+		} else {
+			bool blendFallback = false;
+			result = calculateCapturedBlend(inputs, blend, nativeLoad, blendFallback);
+			evaluation.Fallback = evaluation.Fallback || blendFallback;
+
+			const float multiplier = (100 + result.Value) * 0.01f;
+			const float correctedMultiplier = evaluation.Multiplier * multiplier;
+			if (std::isfinite(result.Value) && std::isfinite(multiplier) && multiplier >= 0 &&
+				std::isfinite(correctedMultiplier)) {
+				if (!blendFallback) {
+					evaluation.Multiplier = correctedMultiplier;
+				}
+			} else {
+				evaluation.Fallback = true;
+				result = {};
+			}
+		}
+
+		if (diagnostics) {
+			diagnostics->Blends[i] = result;
+		}
+		if (postState) {
+			engine->outputChannels.veBlendParameter[i] = result.BlendParameter;
+			engine->outputChannels.veBlendBias[i] = result.Bias;
+			engine->outputChannels.veBlendOutput[i] = result.Value;
+			engine->outputChannels.veBlendYAxis[i] = result.TableYAxis;
+		}
+	}
+
+	evaluation.Valid = evaluation.Valid && std::isfinite(evaluation.Multiplier) && evaluation.Multiplier >= 0;
+	if (diagnostics) {
+		diagnostics->Fallback = evaluation.Fallback;
+		diagnostics->HasValue = true;
+		diagnostics->Valid = evaluation.Valid;
+	}
+	return evaluation;
+}
+
+VeCorrectionEvaluation evaluateAirmassCorrections(const AirmassInputs& inputs, VeCorrectionDiagnostics* diagnostics) {
+	const auto native = resolveAirmassLoad(inputs, 0, AFR_None);
+	const float nativeLoad = native.Valid && std::isfinite(native.Value) ? native.Value : NAN;
+	return evaluateAirmassCorrectionsImpl(inputs, nativeLoad, false, nullptr, diagnostics);
+}
+
+VeCorrectionEvaluation evaluateAirmassCorrectionsForFuel(const AirmassInputs& inputs) {
+	const auto native = resolveAirmassLoad(inputs, 0, AFR_None);
+	const float nativeLoad = native.Valid && std::isfinite(native.Value) ? native.Value : NAN;
+	return evaluateAirmassCorrectionsImpl(inputs, nativeLoad, true, nullptr, nullptr);
+}
+
+VeDiagnostics
+AirmassVeModelBase::evaluateRawVe(const AirmassInputs& inputs, float load, RawAirmassDiagnostics* diagnostics) const {
 	VeDiagnostics result;
 	const bool calibrationValid = m_veTable || (inputs.LiveCalibration ? isCapturedAirmassModelValid(inputs, m_model)
 																	   : isAirmassModelConfigurationValid(m_model));
@@ -590,6 +773,7 @@ AirmassVeModelBase::evaluateRawVe(const AirmassInputs& inputs, float load, VeDia
 	}
 
 	float idleVeLoad = load;
+	float idleWeight = 0;
 #if EFI_IDLE_CONTROL
 	// Use only the captured throttle intent and idle state. Model evaluation
 	// never re-reads these inputs after the snapshot is complete.
@@ -605,17 +789,22 @@ AirmassVeModelBase::evaluateRawVe(const AirmassInputs& inputs, float load, VeDia
 			result.IdleFallback = true;
 		} else {
 			idleVeLoad = idleLoad.Value;
+			idleWeight = interpolateClamped(idleThreshold / 2, 1, idleThreshold, 0, inputs.DriverThrottleIntent.Value);
 			percent_t idleVe = interpolate3d(
 					config->idleVeTable, config->idleVeLoadBins, idleVeLoad, config->idleVeRpmBins, inputs.Rpm);
 			if (!std::isfinite(idleVe) || idleVe < 0) {
 				result.IdleFallback = true;
 			} else {
-				ve = interpolateClamped(
-						idleThreshold / 2, idleVe, idleThreshold, ve, inputs.DriverThrottleIntent.Value);
+				ve += idleWeight * (idleVe - ve);
 			}
 		}
 	}
 #endif // EFI_IDLE_CONTROL
+
+	if (result.IdleFallback) {
+		idleWeight = 0;
+		idleVeLoad = load;
+	}
 
 	result.Ve = ve;
 	result.Load = load;
@@ -623,7 +812,12 @@ AirmassVeModelBase::evaluateRawVe(const AirmassInputs& inputs, float load, VeDia
 	result.HasValue = true;
 	result.Valid = std::isfinite(ve) && ve >= 0;
 	if (diagnostics) {
-		*diagnostics = result;
+		diagnostics->IdleFallback = result.IdleFallback;
+		diagnostics->TableValue = ve;
+		diagnostics->IdleLoad = idleVeLoad;
+		diagnostics->IdleWeight = idleWeight;
+		diagnostics->HasValue = result.HasValue;
+		diagnostics->Valid = result.Valid;
 	}
 	return result;
 }
@@ -634,45 +828,19 @@ VeDiagnostics AirmassVeModelBase::evaluateVe(
 		bool postState,
 		VeTableType consumer,
 		VeDiagnostics* diagnostics) const {
-	auto result = evaluateRawVe(inputs, load, diagnostics);
+	RawAirmassDiagnostics rawDiagnostics;
+	auto result = evaluateRawVe(inputs, load, &rawDiagnostics);
 	if (!result.HasValue) {
+		if (diagnostics) {
+			*diagnostics = result;
+		}
 		return result;
 	}
 
-	for (size_t i = 0; i < efi::size(config->veBlends); i++) {
-		const auto& blend = config->veBlends[i];
-		if (blend.veTableSelect != consumer || blend.blendParameter == GPPWM_Zero) {
-			continue;
-		}
-
-		const auto calibration =
-				static_cast<AirmassCalibration>(static_cast<uint8_t>(AirmassCalibration::Correction0) + i);
-		const bool axesValid = inputs.LiveCalibration ? isCapturedAirmassCalibrationValid(inputs, calibration)
-													  : scanCalibration(calibration);
-		BlendResult blendResult{};
-		if (axesValid) {
-			bool blendFallback = false;
-			blendResult = calculateCapturedBlend(inputs, blend, load, blendFallback);
-			result.CorrectionFallback = result.CorrectionFallback || blendFallback;
-			const float multiplier = (100 + blendResult.Value) * 0.01f;
-			if (!std::isfinite(blendResult.Value) || !std::isfinite(multiplier) || multiplier < 0) {
-				result.CorrectionFallback = true;
-			} else if (blendResult.Value != 0 && !blendFallback) {
-				result.Ve *= multiplier;
-			}
-		} else {
-			result.CorrectionFallback = true;
-		}
-
-		if (postState) {
-			engine->outputChannels.veBlendParameter[i] = blendResult.BlendParameter;
-			engine->outputChannels.veBlendBias[i] = blendResult.Bias;
-			engine->outputChannels.veBlendOutput[i] = blendResult.Value;
-			engine->outputChannels.veBlendYAxis[i] = blendResult.TableYAxis;
-		}
-	}
-
-	result.Valid = std::isfinite(result.Ve) && result.Ve >= 0;
+	const auto corrections = evaluateAirmassCorrectionsImpl(inputs, load, postState, &consumer, nullptr);
+	result.Ve *= corrections.Multiplier;
+	result.CorrectionFallback = corrections.Fallback;
+	result.Valid = result.Valid && corrections.Valid && std::isfinite(result.Ve) && result.Ve >= 0;
 	if (postState) {
 		engine->engineState.currentVe = result.Ve;
 		engine->engineState.veTableYAxis = load;

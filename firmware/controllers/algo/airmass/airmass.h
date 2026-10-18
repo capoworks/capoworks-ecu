@@ -2,6 +2,7 @@
 
 #include "rusefi_types.h"
 #include "rusefi_enums.h"
+#include "engine_math.h"
 #include "airmass_calibration.h"
 
 class ValueProvider3D;
@@ -36,6 +37,9 @@ struct AirmassInputs {
 	uint32_t CalibrationGeneration = 0;
 	bool HasPublicationContext = false;
 	bool LiveCalibration = false;
+	// Captured with the other configuration identity fields. Only these two
+	// sources may index the blended authority table.
+	AirmassBlendLoadSource BlendLoadSource = AirmassBlendLoadSource::Tps;
 
 	float Rpm = 0;
 	expected<float> MeasuredMap = unexpected;
@@ -88,6 +92,30 @@ struct VeDiagnostics {
 	bool CorrectionFallback = false;
 };
 
+struct RawAirmassDiagnostics {
+	bool IdleFallback = false;
+	bool BaroFallback = false;
+	float TableValue = 0;
+	float IdleLoad = 0;
+	float IdleWeight = 0;
+	float BaroCoefficient = 1;
+	bool HasValue = false;
+	bool Valid = false;
+};
+
+struct VeCorrectionEvaluation {
+	float Multiplier = 1;
+	bool Valid = false;
+	bool Fallback = false;
+};
+
+struct VeCorrectionDiagnostics {
+	bool Fallback = false;
+	BlendResult Blends[VE_BLEND_COUNT] = {};
+	bool HasValue = false;
+	bool Valid = false;
+};
+
 struct AirmassDiagnostics {
 	float TemperatureK = 0;
 	bool TemperatureValid = false;
@@ -105,6 +133,7 @@ bool isMapEstimateConfigurationValid();
 bool isMapEstimateAxesValid();
 bool isAirmassConfigurationValid();
 bool validateAirmassConfiguration();
+bool isAirmassBlendAuthorityCalibrationValid(AirmassBlendLoadSource source);
 
 void captureAirmassInputs(
 		float rpm,
@@ -118,6 +147,15 @@ void evaluateAirmassTemperature(const AirmassInputs& inputs, AirmassDiagnostics&
 MapEvaluation evaluateAirmassMap(float rpm, const ValueProvider3D* estimateTable = nullptr);
 void publishAirmassDiagnostics(const AirmassDiagnostics& diagnostics);
 expected<float> normalizeAirmassPercent(const AirmassInputs& inputs, expected<float> sensor);
+
+// Evaluate every configured common VE correction exactly once against a
+// captured snapshot. This entry point is unfiltered for a combined model;
+// compatibility wrappers retain their per-consumer VeTableType selection.
+// Table Y-axis defaults use the captured native model load.
+VeCorrectionEvaluation
+evaluateAirmassCorrections(const AirmassInputs& inputs, VeCorrectionDiagnostics* diagnostics = nullptr);
+// Live delivery variant: publishes correction diagnostics without a scratch copy.
+VeCorrectionEvaluation evaluateAirmassCorrectionsForFuel(const AirmassInputs& inputs);
 
 enum class AirmassLoadSource : uint8_t {
 	Invalid,
@@ -184,7 +222,8 @@ public:
 	virtual float getVeImpl(float /*rpm*/, percent_t /*load*/) const;
 
 protected:
-	VeDiagnostics evaluateRawVe(const AirmassInputs& inputs, float load, VeDiagnostics* diagnostics = nullptr) const;
+	VeDiagnostics
+	evaluateRawVe(const AirmassInputs& inputs, float load, RawAirmassDiagnostics* diagnostics = nullptr) const;
 
 private:
 	const ValueProvider3D* const m_veTable;

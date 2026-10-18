@@ -7,3 +7,8 @@ DDEFS += -DFIRMWARE_ID=\"core8\"
 DDEFS += -DDEFAULT_ENGINE_TYPE=MINIMAL_PINS
 # Core8 v2.3/v2.4 schematics: PG11 is LED3; PD14 drives Low Side 9.
 DDEFS += -DLED_CRITICAL_ERROR_BRAIN_PIN=Gpio::G11
+
+# The F407 has only 64k of CCM, and it must hold the calibration and the engine
+# state. Move only the CAN reader/writer working areas to ordinary SRAM, leaving
+# USB, mass storage and the main loop in CCM (see CCM_OPTIONAL_BACKGROUND).
+DDEFS += -DEFI_RESERVE_CCM_FOR_CALIBRATION=TRUE
