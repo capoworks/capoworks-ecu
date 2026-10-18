@@ -76,6 +76,8 @@ TESTS_SRC_CPP = \
 	tests/test_airmass_dispatcher.cpp \
 	tests/ignition_injection/test_dedicated_airmass_tables.cpp \
 	tests/ignition_injection/test_airmass_evaluation.cpp \
+	tests/ignition_injection/test_airmass_load_resolution.cpp \
+	tests/ignition_injection/test_airmass_consumer_infrastructure.cpp \
 	tests/ignition_injection/test_airmass_injection_gate.cpp \
 	tests/ignition_injection/test_airmass_fuel_publication.cpp \
 	tests/test_fuel_map.cpp \

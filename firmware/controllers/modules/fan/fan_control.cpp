@@ -12,7 +12,7 @@ static SimplePwm fan2Pwm("Fan2");
 // Fan 1 duty lookup implementations
 float FanControl1::getAcOffDuty(float clt) {
 	auto xAxis = readGppwmChannel(engineConfiguration->fan1PwmXAxis);
-	if (!xAxis) {
+	if (!xAxis || !std::isfinite(xAxis.Value)) {
 		return engineConfiguration->fanPwmSafetyDuty;
 	}
 	fanXAxisValue = xAxis.Value;
@@ -21,7 +21,7 @@ float FanControl1::getAcOffDuty(float clt) {
 
 float FanControl1::getAcOnDuty(float clt) {
 	auto xAxis = readGppwmChannel(engineConfiguration->fan1PwmXAxis);
-	if (!xAxis) {
+	if (!xAxis || !std::isfinite(xAxis.Value)) {
 		return engineConfiguration->fanPwmSafetyDuty;
 	}
 	fanXAxisValue = xAxis.Value;
@@ -31,7 +31,7 @@ float FanControl1::getAcOnDuty(float clt) {
 // Fan 2 duty lookup implementations
 float FanControl2::getAcOffDuty(float clt) {
 	auto xAxis = readGppwmChannel(engineConfiguration->fan2PwmXAxis);
-	if (!xAxis) {
+	if (!xAxis || !std::isfinite(xAxis.Value)) {
 		return engineConfiguration->fanPwmSafetyDuty;
 	}
 	fanXAxisValue = xAxis.Value;
@@ -40,7 +40,7 @@ float FanControl2::getAcOffDuty(float clt) {
 
 float FanControl2::getAcOnDuty(float clt) {
 	auto xAxis = readGppwmChannel(engineConfiguration->fan2PwmXAxis);
-	if (!xAxis) {
+	if (!xAxis || !std::isfinite(xAxis.Value)) {
 		return engineConfiguration->fanPwmSafetyDuty;
 	}
 	fanXAxisValue = xAxis.Value;

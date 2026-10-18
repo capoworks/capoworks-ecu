@@ -25,6 +25,7 @@
 #include "fuel_math.h"
 #include "gppwm_channel.h"
 #include "firing_order.h"
+#include "airmass_loads.h"
 
 floatms_t getEngineCycleDuration(float rpm) {
 	return getCrankshaftRevolutionTimeMs(rpm) * (getEngineRotationState()->getOperationMode() == TWO_STROKE ? 1 : 2);
@@ -41,11 +42,11 @@ floatms_t getCrankshaftRevolutionTimeMs(float rpm) {
 }
 
 float getFuelingLoad() {
-	return getEngineState()->fuelingLoad;
+	return getAirmassSelectedLoad(AFR_None, getEngineState()->fuelingLoad);
 }
 
 float getIgnitionLoad() {
-	return getEngineState()->ignitionLoad;
+	return getAirmassSelectedLoad(engineConfiguration->ignOverrideMode, getEngineState()->ignitionLoad);
 }
 
 /**

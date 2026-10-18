@@ -3,12 +3,15 @@
 #include "lambda_monitor.h"
 
 float LambdaMonitor::getMaxAllowedLambda(float rpm, float load) const {
-	return engine->fuelComputer.targetLambda + interpolate3d(
-													   config->lambdaMaxDeviationTable,
-													   config->lambdaMaxDeviationLoadBins,
-													   load,
-													   config->lambdaMaxDeviationRpmBins,
-													   rpm);
+	const float deviationLoad = std::isfinite(getDeviationLoadForUpdate()) ? getDeviationLoadForUpdate() : load;
+	const float targetLambda = std::isfinite(getTargetLambdaForUpdate()) ? getTargetLambdaForUpdate()
+																		 : (float)engine->fuelComputer.targetLambda;
+	return targetLambda + interpolate3d(
+								  config->lambdaMaxDeviationTable,
+								  config->lambdaMaxDeviationLoadBins,
+								  deviationLoad,
+								  config->lambdaMaxDeviationRpmBins,
+								  rpm);
 }
 
 float LambdaMonitor::getTimeout() const {
@@ -20,6 +23,16 @@ bool LambdaMonitorBase::isCut() const {
 }
 
 void LambdaMonitorBase::update(float rpm, float load) {
+	update(rpm, load, load, NAN);
+}
+
+void LambdaMonitorBase::update(float rpm, float load, float deviationLoad) {
+	update(rpm, load, deviationLoad, NAN);
+}
+
+void LambdaMonitorBase::update(float rpm, float load, float deviationLoad, float targetLambda) {
+	m_currentDeviationLoad = deviationLoad;
+	m_currentTargetLambda = targetLambda;
 	bool isGood = isCurrentlyGood(rpm, load);
 	lambdaCurrentlyGood = isGood;
 	if (isGood) {
@@ -51,6 +64,12 @@ bool LambdaMonitorBase::isCurrentlyGood(float rpm, float load) const {
 	// Below min RPM, don't check
 	if (rpm < engineConfiguration->lambdaProtectionMinRpm) {
 		return true;
+	}
+
+	// At monitored RPM, an unavailable control coordinate is a fault rather
+	// than permission to skip protection.
+	if (!std::isfinite(load)) {
+		return false;
 	}
 
 	// Below min load, don't check
@@ -94,6 +113,10 @@ bool LambdaMonitorBase::isCurrentlyGood(float rpm, float load) const {
 }
 
 bool LambdaMonitorBase::restoreConditionsMet(float rpm, float load) const {
+	if (!std::isfinite(load)) {
+		return false;
+	}
+
 	if (rpm > engineConfiguration->lambdaProtectionRestoreRpm) {
 		return false;
 	}

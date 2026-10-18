@@ -11,6 +11,7 @@
 #include "global.h"
 #include "engine_parts.h"
 #include "engine_state_generated.h"
+#include "airmass_loads.h"
 
 class EngineState : public engine_state_s {
 public:
@@ -51,6 +52,9 @@ public:
 	float currentVe = 0;
 
 	bool airmassCalculationValid = false;
+	AirmassLoadSnapshot airmassLoads;
+	uint32_t airmassLoadsInvalidationEpoch = 0;
+	uint32_t airmassLoadsPublicationSerial = 0;
 
 	/**
 	 * Raw fuel injection duration produced by current fuel algorithm, without any correction

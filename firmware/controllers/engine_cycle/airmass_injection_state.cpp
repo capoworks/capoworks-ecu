@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "airmass_injection_state.h"
+#include "airmass_loads.h"
 
 static bool needsStandalonePublication(engine_load_mode_e mode) {
 	return mode == LM_SPEED_DENSITY || mode == LM_ALPHA_N || mode == LM_REAL_MAF;
@@ -131,6 +132,10 @@ void AirmassInjectionState::onEngineStop() {
 
 void AirmassInjectionState::onConfigurationWrite(engine_load_mode_e proposedMode, bool strategyChanged) {
 	chibios_rt::CriticalSectionLocker csl;
+	// This hook is called before every persistent/calibration mutation while
+	// the global Engine is valid. onEngineStop intentionally does not do this:
+	// it also runs from the Engine constructor before the global is assigned.
+	invalidateAirmassConsumerLoads();
 	invalidateAirmassCalibration();
 	observeMode(engineConfiguration->fuelAlgorithm);
 	++m_epoch;

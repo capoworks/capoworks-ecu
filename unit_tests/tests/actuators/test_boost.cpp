@@ -1,9 +1,60 @@
 #include "pch.h"
 
+#include "airmass_loads.h"
 #include "boost_control.h"
 
 using ::testing::_;
 using ::testing::StrictMock;
+
+namespace {
+bool publishPhysicalFuelLoad() {
+	engineConfiguration->fuelAlgorithm = LM_SPEED_DENSITY;
+	engineConfiguration->displacement = 2.4f;
+	setCylinderCount(4);
+
+	const auto token = engine->airmassInjectionState.beginCalculation(
+			LM_SPEED_DENSITY, 2000, engine->getGlobalConfigurationVersion());
+	AirmassInputs inputs;
+	inputs.HasPublicationContext = true;
+	inputs.PublicationEpoch = token;
+	inputs.ConfigurationVersion = engine->getGlobalConfigurationVersion();
+	inputs.CalibrationGeneration = engine->airmassCalibration.Generation;
+	inputs.ActiveStrategy = LM_SPEED_DENSITY;
+	inputs.Displacement = engineConfiguration->displacement;
+	inputs.CylinderCount = engine->engineState.cylinderCount;
+	inputs.Rpm = 2000;
+	inputs.MeasuredMap = 92.375f;
+	inputs.NativeMap.Map = 71.25f;
+	inputs.NativeMap.Valid = true;
+	inputs.Tps = 23.5f;
+	inputs.Pedal = 41.5f;
+	inputs.TpsToleranceMin = -10;
+	inputs.TpsToleranceMax = 110;
+
+	const auto candidate = prepareAirmassConsumerLoads(inputs, 0.3f);
+	chibios_rt::CriticalSectionLocker csl;
+	auto admission = engine->airmassInjectionState.locked(csl);
+	return publishAirmassConsumerLoads(candidate, admission);
+}
+} // namespace
+
+TEST(BoostControl, LoadAxisUsesPhysicalSnapshotAndStalePublicationFallsBack) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	Sensor::setMockValue(SensorType::Rpm, 2000);
+	engine->engineState.fuelingLoad = 12.0f;
+	engineConfiguration->boostOpenLoopXAxis = GPPWM_Rpm;
+	engineConfiguration->boostOpenLoopYAxis = GPPWM_FuelLoad;
+	StrictMock<MockVp3d> openMap;
+	EXPECT_CALL(openMap, getValue(2000, 71.25f)).WillOnce([](float, float load) { return 40.0f; });
+	BoostController bc;
+	bc.init(nullptr, &openMap, nullptr, nullptr);
+
+	ASSERT_TRUE(publishPhysicalFuelLoad());
+	EXPECT_FLOAT_EQ(bc.getOpenLoop(0).value_or(0), 40.0f);
+
+	invalidateAirmassConsumerLoads();
+	EXPECT_FALSE(bc.getOpenLoop(0).Valid);
+}
 
 TEST(BoostControl, Setpoint) {
 	MockVp3d targetMap;

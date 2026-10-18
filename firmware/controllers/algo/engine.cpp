@@ -195,6 +195,10 @@ void Engine::reset() {
 	airmassCalibration.Known = 0;
 	airmassCalibration.ConfigurationVersion = -1;
 	airmassInjectionState.onEngineStop();
+	engineState.airmassLoads = {};
+	engineState.airmassLoadsInvalidationEpoch++;
+	engineState.airmassLoadsPublicationSerial++;
+	clearAirmassConsumerCursorFields(outputChannels);
 	/**
 	 * it's important for wrapAngle() that engineCycle field never has zero
 	 */
@@ -228,6 +232,7 @@ void Engine::OnTriggerSynchronizationLost() {
 
 	rpmCalculator.setStopSpinning();
 	airmassInjectionState.onEngineStop();
+	invalidateAirmassConsumerLoads();
 
 	triggerCentral.triggerState.resetState();
 	triggerCentral.instantRpm.resetInstantRpm();

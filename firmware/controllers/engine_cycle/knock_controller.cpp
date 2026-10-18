@@ -7,6 +7,7 @@
 
 #include "pch.h"
 #include "knock_logic.h"
+#include "airmass_loads.h"
 
 int getCylinderKnockBank(uint8_t cylinderNumber) {
 	// C/C++ can't index in to bit fields, we have to provide lookup ourselves
@@ -115,12 +116,13 @@ void KnockControllerBase::onFastCallback() {
 	m_maximumRetard = getMaximumRetard();
 
 	auto rpm = Sensor::getOrZero(SensorType::Rpm);
-	auto load = getIgnitionLoad();
-
-	PreparedTable3DInterpolation interpolation(config->knockGainLoadBins, load, config->knockGainRpmBins, rpm);
-
-	for (size_t i = 0; i < engine->engineState.cylinderCount; i++) {
-		m_gain[i] = interpolation.getValue(config->knockGains[i].table);
+	const AirmassConsumerLoadContext gainLoads(AirmassConsumer::KnockGain);
+	for (size_t i = 0; i < engine->engineState.cylinderCount && i < MAX_CYLINDER_COUNT; i++) {
+		const float load = gainLoads.get(AirmassConsumer::KnockGain, i);
+		if (std::isfinite(load)) {
+			PreparedTable3DInterpolation interpolation(config->knockGainLoadBins, load, config->knockGainRpmBins, rpm);
+			m_gain[i] = interpolation.getValue(config->knockGains[i].table);
+		}
 	}
 }
 
@@ -129,10 +131,15 @@ float KnockController::getKnockThreshold() const {
 }
 
 float KnockController::getMaximumRetard() const {
+	const float load = getAirmassConsumerLoad(AirmassConsumer::KnockRetard);
+	if (!std::isfinite(load)) {
+		// Retain the last limit while no current calculation is published.
+		return m_maximumRetard;
+	}
 	return interpolate3d(
 			config->maxKnockRetardTable,
 			config->maxKnockRetardLoadBins,
-			getIgnitionLoad(),
+			load,
 			config->maxKnockRetardRpmBins,
 			Sensor::getOrZero(SensorType::Rpm));
 }
