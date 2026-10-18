@@ -39,7 +39,11 @@ struct AngleBasedEvent {
 
 #define MAX_OUTPUTS_FOR_IGNITION 2
 
-enum class IgnitionOccurrenceState : uint8_t { Closed, ChargePending, Charging };
+enum class IgnitionOccurrenceState : uint8_t {
+	Closed,
+	ChargePending,
+	Charging
+};
 
 class IgnitionEvent {
 public:

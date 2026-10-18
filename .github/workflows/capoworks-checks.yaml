@@ -1,0 +1,82 @@
+name: Capoworks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master, 'port/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capoworks-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Capoworks / ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [unit-tests, simulator, core8]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6.0.1
+        with:
+          distribution: zulu
+          java-version: '21'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib g++-multilib mtools dosfstools zip xxd rsync
+
+      - name: Run check
+        env:
+          CHECK_TARGET: ${{ matrix.target }}
+          JOBS: '4'
+        run: bash misc/ci/capoworks-checks.sh "$CHECK_TARGET"
+
+      - name: Upload logs and test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: capoworks-${{ matrix.target }}-reports
+          path: build/capoworks-checks/${{ matrix.target }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Core8 firmware
+        if: ${{ matrix.target == 'core8' && success() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: capoworks-core8-firmware
+          path: |
+            firmware/deliver/fome.bin
+            firmware/deliver/fome_update.srec
+            firmware/deliver/fome_bl.srec
+            firmware/tunerstudio/generated/fome_core8.ini
+          if-no-files-found: error
+          retention-days: 14
+
+  required:
+    name: Capoworks checks
+    if: ${{ always() }}
+    needs: [check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every check to pass
+        env:
+          CHECK_RESULT: ${{ needs.check.result }}
+        run: |
+          echo "Capoworks checks: $CHECK_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          test "$CHECK_RESULT" = success

@@ -1,3 +1,6 @@
+For branch-specific Capoworks checks, local commands and artifacts, see the
+[Capoworks harness documentation](../../misc/ci/README.md).
+
 Here is a diagram of which configure scripts are used for which workflows.
 This is not a complete diagram of all workflows, nor does it show everything that these jobs do.
 

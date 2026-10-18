@@ -181,9 +181,7 @@ TEST_F(FlashWriteLifecycle, BurnWithoutFlashDoesNotGuardOrTouchStorage) {
 TEST_F(FlashWriteLifecycle, RequestDuringWriteSurvivesUntilNextAttempt) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
-	flash_lifecycle_test::duringWrite = [] {
-		flash_lifecycle_test::setNeedToWriteConfiguration();
-	};
+	flash_lifecycle_test::duringWrite = [] { flash_lifecycle_test::setNeedToWriteConfiguration(); };
 	flash_lifecycle_test::writeToFlashNow();
 
 	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
@@ -272,9 +270,7 @@ TEST_F(FlashWriteLifecycle, ReentrantDirectWritesDeferAndCoalesce) {
 TEST_F(FlashWriteLifecycle, ReadConfigIsRejectedWhileWriting) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
-	flash_lifecycle_test::duringWrite = [] {
-		flash_lifecycle_test::readFromFlash();
-	};
+	flash_lifecycle_test::duringWrite = [] { flash_lifecycle_test::readFromFlash(); };
 	flash_lifecycle_test::writeToFlashNow();
 
 	EXPECT_EQ(flash_lifecycle_test::events, (std::vector<char>{'B', 'W', 'E'}));
@@ -284,8 +280,7 @@ TEST_F(FlashWriteLifecycle, ReadConfigIsRejectedWhileWriting) {
 TEST_F(FlashWriteLifecycle, FailedAttemptRemainsPendingWithoutContinuousRetry) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
-	flash_lifecycle_test::nextResult = {
-			ConfigurationWritePhase::Verify, 0x100000, FLASH_RETURN_BAD_FLASH, 1};
+	flash_lifecycle_test::nextResult = {ConfigurationWritePhase::Verify, 0x100000, FLASH_RETURN_BAD_FLASH, 1};
 	flash_lifecycle_test::duringError = [] {
 		using namespace flash_lifecycle_test;
 		EXPECT_FALSE(configurationWriteState.writing());
@@ -332,11 +327,8 @@ TEST_F(FlashWriteLifecycle, ConsumedRequestDoesNotTriggerDuplicateAttempt) {
 TEST_F(FlashWriteLifecycle, RequestDuringFailedWriteIsEligibleForNextAttempt) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
-	flash_lifecycle_test::nextResult = {
-			ConfigurationWritePhase::Program, 0x100000, FLASH_RETURN_PSEQERROR, 0};
-	flash_lifecycle_test::duringWrite = [] {
-		flash_lifecycle_test::setNeedToWriteConfiguration();
-	};
+	flash_lifecycle_test::nextResult = {ConfigurationWritePhase::Program, 0x100000, FLASH_RETURN_PSEQERROR, 0};
+	flash_lifecycle_test::duringWrite = [] { flash_lifecycle_test::setNeedToWriteConfiguration(); };
 	flash_lifecycle_test::writeToFlashNow();
 
 	EXPECT_TRUE(flash_lifecycle_test::getNeedToWriteConfiguration());

@@ -75,8 +75,7 @@ TEST(TriggerScheduler, engineStopEmptiesQueueButKeepsArmedTimer) {
 	int newCount = 0;
 
 	triggerScheduler->schedule(&event, EngPhase{123}, {countAction, &oldCount});
-	engine->scheduler.schedule(
-			"ordinary", &event.scheduling, getTimeNowNt() + US2NT(2000), {countAction, &oldCount});
+	engine->scheduler.schedule("ordinary", &event.scheduling, getTimeNowNt() + US2NT(2000), {countAction, &oldCount});
 	ASSERT_EQ(1, triggerScheduler->getQueueSizeForUnitTest());
 
 	engine->OnTriggerSynchronizationLost();
@@ -892,8 +891,7 @@ TEST(IgnitionTrailing, pendingMultisparkHandoffCutDischargesTrailingHigh) {
 		const auto initialMainDeadline = enginePins.coils[0].hardDeadline();
 
 		eth.moveTimeForwardAndInvokeEventsUs(500);
-		engine->module<TriggerScheduler>()->onEnginePhase(
-				1000, {getTimeNowNt(), 20, 30, 20, 30});
+		engine->module<TriggerScheduler>()->onEnginePhase(1000, {getTimeNowNt(), 20, 30, 20, 30});
 		eth.moveTimeForwardAndInvokeEventsUs(500);
 		ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
 
@@ -905,9 +903,7 @@ TEST(IgnitionTrailing, pendingMultisparkHandoffCutDischargesTrailingHigh) {
 		ASSERT_EQ(2, ignitionCallbacks);
 		ASSERT_LT(getTimeNowNt(), initialMainDeadline);
 		const auto trailingDeadline = enginePins.trailingCoils[0].hardDeadline();
-		ASSERT_EQ(
-				enginePins.trailingCoils[0].firstHigh() + static_cast<uint32_t>(MSF2NT(1.5f)),
-				trailingDeadline);
+		ASSERT_EQ(enginePins.trailingCoils[0].firstHigh() + static_cast<uint32_t>(MSF2NT(1.5f)), trailingDeadline);
 		EXPECT_LT(event.dwellStartTimer.momentX, NT2US(trailingDeadline));
 		EXPECT_FALSE(event.trailingSparkFire.action);
 
@@ -976,8 +972,7 @@ TEST(IgnitionTrailing, copiedCallbacksAreGenerationBoundAndKeepDwellSnapshot) {
 	const auto initialMainDeadline = enginePins.coils[0].hardDeadline();
 
 	eth.moveTimeForwardAndInvokeEventsUs(500);
-	engine->module<TriggerScheduler>()->onEnginePhase(
-			1000, {getTimeNowNt(), 20, 30, 20, 30});
+	engine->module<TriggerScheduler>()->onEnginePhase(1000, {getTimeNowNt(), 20, 30, 20, 30});
 	eth.moveTimeForwardAndInvokeEventsUs(500);
 	ASSERT_TRUE(enginePins.trailingCoils[0].getLogicValue());
 	ASSERT_TRUE(event.trailingCharging);
@@ -985,9 +980,7 @@ TEST(IgnitionTrailing, copiedCallbacksAreGenerationBoundAndKeepDwellSnapshot) {
 	ASSERT_EQ(IgnitionOccurrenceState::ChargePending, event.state);
 	ASSERT_LT(getTimeNowNt(), initialMainDeadline);
 	const auto firstTrailingDeadline = enginePins.trailingCoils[0].hardDeadline();
-	ASSERT_EQ(
-			enginePins.trailingCoils[0].firstHigh() + static_cast<uint32_t>(MSF2NT(1.5f)),
-			firstTrailingDeadline);
+	ASSERT_EQ(enginePins.trailingCoils[0].firstHigh() + static_cast<uint32_t>(MSF2NT(1.5f)), firstTrailingDeadline);
 	EXPECT_LT(event.dwellStartTimer.momentX, NT2US(firstTrailingDeadline));
 
 	// A copied charge must not renew the high or clear the pending LOW.
