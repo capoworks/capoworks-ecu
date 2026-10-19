@@ -72,9 +72,10 @@
 
 #include "rusefi_generated.h"
 
-// Ensure that one TCP segment can always fit an entire response to TS - we never need to split a TS packet across
-// multiple frames.
-#define TCP_MSS (BLOCKING_FACTOR + 10)
+// A standard Ethernet MTU of 1500 leaves 1460 bytes of TCP payload after IPv4 and TCP headers.
+// EthernetChannel chunks writes at TCP_MSS, while TS stream framing does not require each response to fit in one
+// segment.
+#define TCP_MSS 1460
 
 // Enable the socket recv timeout (and it uses a nonstandard option of int, rather than timeval)
 #define LWIP_SO_SNDRCVTIMEO_NONSTANDARD 1

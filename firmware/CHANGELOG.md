@@ -67,6 +67,7 @@ or
 
 
 ### Changed
+ - Ethernet TCP buffers are now sized for the standard 1500-byte network MTU (1460-byte MSS) instead of growing with the TunerStudio block size. The effective packet MSS was already capped by the netif MTU, so this aligns lwIP's configured pool size with the packets it actually sends; no hardware testing has been performed for this change.
  - On STM32F4 boards, move background CAN, USB console and USB mass-storage objects from CCM to ordinary SRAM. On non-Ethernet STM32F429 builds, also move the main loop to ordinary SRAM; Ethernet-console builds retain the main-loop CCM placement. The common non-Ethernet F429 Lua heap is reduced from 65,000 to 60,000 bytes, while the 25,000-byte Ethernet Lua heap is unchanged. The F407 Lua heap is now 20,000 bytes, down from 30,000, reducing available Lua script capacity. Runtime behavior at these smaller heaps and timing with the new memory placement have not yet been validated on hardware.
  - The embedded compressed INI drive now uses a 16 KiB DEFLATE dictionary, reducing firmware RAM use by 16 KiB.
  - STM32F7 function alignment now uses 4-byte word alignment instead of 16-byte function alignment to reduce inter-function flash padding; timing has not been benchmarked.
