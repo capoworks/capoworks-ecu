@@ -16,7 +16,6 @@ TimeoutStopSec=120
 KillMode=mixed
 UMask=0077
 NoNewPrivileges=true
-PrivateTmp=true
 
 [Install]
 WantedBy=default.target
