@@ -32,7 +32,7 @@ check_profile() {
 				[[ -n "$value" ]] || die "empty CPU in module profile: $profile"
 				have_cpu=1
 				;;
-			config|output|ini)
+			config|persistent|output|ini)
 				[[ -f "$value" ]] || die "module fragment not found: $value (from $profile)"
 				;;
 			*)
@@ -45,7 +45,7 @@ check_profile() {
 }
 
 write_profile() {
-	[[ $# -ge 4 ]] || die "usage: $0 write <profile> <board> <cpu> <modules> [config|output|ini <path>]..."
+	[[ $# -ge 4 ]] || die "usage: $0 write <profile> <board> <cpu> <modules> [config|persistent|output|ini <path>]..."
 
 	local profile=$1
 	local board=$2
@@ -73,7 +73,7 @@ write_profile() {
 			path=$2
 			shift 2
 			case "$kind" in
-				config|output|ini)
+				config|persistent|output|ini)
 					[[ -f "$path" ]] || die "module fragment not found: $path"
 					printf '%s %s\n' "$kind" "$path"
 					;;
@@ -94,7 +94,7 @@ write_profile() {
 }
 
 read_profile() {
-	[[ $# -eq 2 ]] || die "usage: $0 read <profile> <modules|board|cpu|config|output|ini>"
+	[[ $# -eq 2 ]] || die "usage: $0 read <profile> <modules|board|cpu|config|persistent|output|ini>"
 
 	local profile=$1
 	local wanted=$2

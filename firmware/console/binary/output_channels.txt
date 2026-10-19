@@ -340,4 +340,5 @@ struct_no_prefix output_channels_s
 	float alphaNCylinderFuelTrimLoad;Fuel trim: Alpha-N model load;"% TPS", 1, 0, 0, 0, 2
 	float[12 iterate] cylinderModelFuelTrim;Fuel trim: effective per-cylinder percent;"%", 1, 0, 0, 0, 2
 	uint8_t cylinderModelFuelTrimBranches;Fuel trim: active model branch;"bits", 1, 0, 0, 0, 0
+! MODULE_OUTPUTS
 end_struct

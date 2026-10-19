@@ -12,27 +12,30 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Static composition points for module-owned configuration, live data, and TunerStudio text. */
 public final class ModuleFragments {
     public static final String CONFIG_ANCHOR = "! MODULE_CONFIG";
+    public static final String PERSISTENT_CONFIG_ANCHOR = "! MODULE_PERSISTENT_CONFIG";
     public static final String OUTPUT_ANCHOR = "! MODULE_OUTPUTS";
     public static final String INI_ANCHOR_PREFIX = "; MODULE_INI ";
 
-    private static final Set<String> INI_SECTIONS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
-            "CurveEditor",
-            "GaugeConfigurations",
-            "FrontPage",
-            "Menu",
-            "ControllerCommands",
-            "UserDefined"
-    )));
+    private static final Pattern INI_CONTEXT = Pattern.compile("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)?");
 
     private ModuleFragments() {
     }
 
     public static String composeConfig(String coreFile, List<String> fragmentFiles) throws IOException {
-        return composeSingleAnchor(coreFile, fragmentFiles, CONFIG_ANCHOR);
+        return composeConfig(coreFile, fragmentFiles, Collections.emptyList());
+    }
+
+    public static String composeConfig(String coreFile, List<String> fragmentFiles,
+                                       List<String> persistentFragmentFiles) throws IOException {
+        Map<String, List<String>> fragmentsByAnchor = new LinkedHashMap<>();
+        fragmentsByAnchor.put(CONFIG_ANCHOR, fragmentFiles);
+        fragmentsByAnchor.put(PERSISTENT_CONFIG_ANCHOR, persistentFragmentFiles);
+        return composeAnchors(coreFile, fragmentsByAnchor);
     }
 
     public static String composeOutput(String coreFile, List<String> fragmentFiles) throws IOException {
@@ -48,10 +51,24 @@ public final class ModuleFragments {
         List<String> templateLines = Files.readAllLines(Paths.get(templateFile), StandardCharsets.UTF_8);
 
         Map<String, Integer> markerCounts = new LinkedHashMap<>();
-        for (String line : templateLines) {
-            String section = iniMarkerSection(line, templateFile);
+        String currentSection = null;
+        for (int i = 0; i < templateLines.size(); i++) {
+            String line = templateLines.get(i);
+            String section = sectionHeader(line, templateFile, i + 1);
             if (section != null) {
-                markerCounts.put(section, markerCounts.getOrDefault(section, 0) + 1);
+                currentSection = validateIniContext(section, templateFile, i + 1);
+            }
+
+            String markerSection = iniMarkerSection(line, templateFile);
+            if (markerSection != null) {
+                markerSection = validateIniContext(markerSection, templateFile, i + 1);
+                String baseSection = markerSection.split("\\.", 2)[0];
+                if (!baseSection.equals(currentSection)) {
+                    throw new IllegalArgumentException("Module INI marker for [" + markerSection
+                            + "] must appear inside [" + baseSection + "] in " + templateFile
+                            + ":" + (i + 1) + ", not [" + currentSection + "]");
+                }
+                markerCounts.put(markerSection, markerCounts.getOrDefault(markerSection, 0) + 1);
             }
         }
 
@@ -139,6 +156,7 @@ public final class ModuleFragments {
                 String section = sectionHeader(line, fragmentFile, i + 1);
 
                 if (section != null) {
+                    section = validateIniContext(section, fragmentFile, i + 1);
                     if (!sectionsInFile.add(section)) {
                         throw new IllegalArgumentException("Duplicate [" + section + "] section in "
                                 + fragmentFile + ":" + (i + 1));
@@ -171,10 +189,6 @@ public final class ModuleFragments {
         }
 
         String section = trimmed.substring(1, close);
-        if (!INI_SECTIONS.contains(section)) {
-            throw new IllegalArgumentException("Unknown TunerStudio section [" + section + "] in "
-                    + fragmentFile + ":" + lineNumber);
-        }
         return section;
     }
 
@@ -187,12 +201,60 @@ public final class ModuleFragments {
             throw new IllegalArgumentException("Malformed module INI marker in " + templateFile + ": " + line);
         }
 
-        String section = trimmed.substring(INI_ANCHOR_PREFIX.length()).trim();
-        if (!INI_SECTIONS.contains(section)) {
-            throw new IllegalArgumentException("Unknown module INI marker section [" + section + "] in "
-                    + templateFile);
+        return trimmed.substring(INI_ANCHOR_PREFIX.length()).trim();
+    }
+
+    private static String validateIniContext(String context, String fileName, int lineNumber) {
+        if (!INI_CONTEXT.matcher(context).matches()) {
+            throw new IllegalArgumentException("Invalid TunerStudio composition key [" + context + "] in "
+                    + fileName + ":" + lineNumber + "; expected Section or Section.Context");
         }
-        return section;
+        return context;
+    }
+
+    private static String composeAnchors(String coreFile, Map<String, List<String>> fragmentsByAnchor)
+            throws IOException {
+        String coreText = new String(Files.readAllBytes(Paths.get(coreFile)), StandardCharsets.UTF_8);
+        List<String> lines = splitLines(coreText);
+
+        Map<String, Integer> anchorCounts = new LinkedHashMap<>();
+        for (String anchor : fragmentsByAnchor.keySet()) {
+            anchorCounts.put(anchor, 0);
+        }
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (anchorCounts.containsKey(trimmed)) {
+                anchorCounts.put(trimmed, anchorCounts.get(trimmed) + 1);
+            }
+        }
+
+        Map<String, List<String>> fragmentLinesByAnchor = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : fragmentsByAnchor.entrySet()) {
+            String anchor = entry.getKey();
+            List<String> fragmentFiles = entry.getValue();
+            int anchorCount = anchorCounts.get(anchor);
+
+            if (!fragmentFiles.isEmpty()) {
+                if (anchorCount == 0) {
+                    throw new IllegalArgumentException("Missing '" + anchor + "' anchor in " + coreFile);
+                }
+                if (anchorCount > 1) {
+                    throw new IllegalArgumentException("Duplicate '" + anchor + "' anchor in " + coreFile);
+                }
+                fragmentLinesByAnchor.put(anchor, readFragmentLines(fragmentFiles));
+            }
+        }
+
+        List<String> result = new ArrayList<>();
+        for (String line : lines) {
+            String anchor = line.trim();
+            if (fragmentsByAnchor.containsKey(anchor)) {
+                result.addAll(fragmentLinesByAnchor.getOrDefault(anchor, Collections.emptyList()));
+            } else {
+                result.add(line);
+            }
+        }
+        return String.join("\n", result);
     }
 
     private static List<String> readFragmentLines(List<String> fragmentFiles) throws IOException {

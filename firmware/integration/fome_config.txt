@@ -1497,6 +1497,7 @@ pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
 	bit ignitionTimeBudget,"Time budget (experimental)","Legacy";Plan charge and fire timing from the bounded causal cycle profile for individual coils. Requires full cam phase sync and a supported rising-only missing-tooth crank wheel. Legacy timing remains the default and fallback. Experimental. Not a substitute for the independent physical dwell guard.
 
 ! end of engine_configuration_s
+! MODULE_CONFIG
 end_struct
 
 ! note that this magic field name is used by LiveDataParserPanel
@@ -1887,6 +1888,7 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 	uint16_t[CYLINDER_FUEL_TRIM_SIZE] autoscale alphaNCylinderFuelTrimTpsBins;;"% TPS", {1/@@TPS_2_BYTE_PACKING_MULT@@}, 0, 0, 100, 2
 	uint16_t[CYLINDER_FUEL_TRIM_SIZE] alphaNCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
 	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] alphaNCylinderFuelTrims
+! MODULE_PERSISTENT_CONFIG
 end_struct
 
 ! Pedal Position Sensor

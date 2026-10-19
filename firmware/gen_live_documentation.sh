@@ -26,7 +26,7 @@ while IFS= read -r fragment; do
 done < <("$PROFILE_READER" read "$PROFILE_FILE" output)
 
 FRAGMENT_ARGS=()
-for fragment in "${OUTPUT_FRAGMENTS[@]}"; do
+for fragment in ${OUTPUT_FRAGMENTS[@]+"${OUTPUT_FRAGMENTS[@]}"}; do
 	FRAGMENT_ARGS+=(-outputFragment "$fragment")
 done
 
@@ -40,8 +40,8 @@ java -DSystemOut.name=logs/gen_live_documentation \
  com.rusefi.ldmp.LiveDataProcessor integration/LiveData.yaml \
  -makefileDep .dep/fome_live_data.d \
  -modules "$SELECTED_MODULES" \
- "${FRAGMENT_ARGS[@]}" \
- "${STAMP_ARGS[@]}"
+ ${FRAGMENT_ARGS[@]+"${FRAGMENT_ARGS[@]}"} \
+ ${STAMP_ARGS[@]+"${STAMP_ARGS[@]}"}
 
 java -DSystemOut.name=logs/gen_java_enum -cp ../java_tools/enum2string.jar com.rusefi.ToJavaEnum -enumInputFile generated/live_data_ids.h -outputPath ../java_console/io/src/main/java/com/rusefi/enums
 

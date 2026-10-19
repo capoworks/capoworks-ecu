@@ -23,6 +23,7 @@ import java.util.*;
 public class ConfigDefinition {
     private static final String KEY_DEFINITION = "-definition";
     private static final String KEY_CONFIG_FRAGMENT = "-configFragment";
+    private static final String KEY_PERSISTENT_CONFIG_FRAGMENT = "-persistentConfigFragment";
     private static final String KEY_TS_TEMPLATE = "-ts_template";
     private static final String KEY_TS_FRAGMENT = "-tsFragment";
     private static final String KEY_C_DESTINATION = "-c_destination";
@@ -78,6 +79,7 @@ public class ConfigDefinition {
         List<String> enumInputFiles = new ArrayList<>();
         List<String> outputFiles = new ArrayList<>();
         final List<String> configFragmentFiles = new ArrayList<>();
+        final List<String> persistentConfigFragmentFiles = new ArrayList<>();
         final List<String> tsFragmentFiles = new ArrayList<>();
         PinoutLogic pinoutLogic = null;
         String branchName = null;
@@ -97,6 +99,10 @@ public class ConfigDefinition {
                     break;
                 case KEY_CONFIG_FRAGMENT:
                     configFragmentFiles.add(args[i + 1]);
+                    inputFiles.add(args[i + 1]);
+                    break;
+                case KEY_PERSISTENT_CONFIG_FRAGMENT:
+                    persistentConfigFragmentFiles.add(args[i + 1]);
                     inputFiles.add(args[i + 1]);
                     break;
                 case KEY_TS_TEMPLATE:
@@ -221,7 +227,8 @@ public class ConfigDefinition {
                 // don't allow duplicates in the main file
                 parseState.setDefinitionPolicy(Definition.OverwritePolicy.NotAllowed);
                 RusefiParseErrorStrategy.parseDefinitionString(parseState.getListener(),
-                        ModuleFragments.composeConfig(definitionFile, configFragmentFiles));
+                        ModuleFragments.composeConfig(definitionFile, configFragmentFiles,
+                                persistentConfigFragmentFiles));
             }
 
             // Write C structs

@@ -73,16 +73,24 @@ while IFS= read -r fragment; do
 	CONFIG_FRAGMENTS+=("$fragment")
 done < <("$PROFILE_READER" read "$PROFILE_FILE" config)
 
+PERSISTENT_CONFIG_FRAGMENTS=()
+while IFS= read -r fragment; do
+	PERSISTENT_CONFIG_FRAGMENTS+=("$fragment")
+done < <("$PROFILE_READER" read "$PROFILE_FILE" persistent)
+
 TS_FRAGMENTS=()
 while IFS= read -r fragment; do
 	TS_FRAGMENTS+=("$fragment")
 done < <("$PROFILE_READER" read "$PROFILE_FILE" ini)
 
 FRAGMENT_ARGS=()
-for fragment in "${CONFIG_FRAGMENTS[@]}"; do
+for fragment in ${CONFIG_FRAGMENTS[@]+"${CONFIG_FRAGMENTS[@]}"}; do
 	FRAGMENT_ARGS+=(-configFragment "$fragment")
 done
-for fragment in "${TS_FRAGMENTS[@]}"; do
+for fragment in ${PERSISTENT_CONFIG_FRAGMENTS[@]+"${PERSISTENT_CONFIG_FRAGMENTS[@]}"}; do
+	FRAGMENT_ARGS+=(-persistentConfigFragment "$fragment")
+done
+for fragment in ${TS_FRAGMENTS[@]+"${TS_FRAGMENTS[@]}"}; do
 	FRAGMENT_ARGS+=(-tsFragment "$fragment")
 done
 
@@ -106,7 +114,7 @@ echo "BOARD_SPECIFIC_URL=[$BOARD_SPECIFIC_URL]"
 java \
 	-DSystemOut.name=logs/gen_config_${SHORT_BOARDNAME} \
 	-jar ../java_tools/ConfigDefinition.jar \
-	"${FRAGMENT_ARGS[@]}" \
+	${FRAGMENT_ARGS[@]+"${FRAGMENT_ARGS[@]}"} \
 	-readfile OUTPUTS_SECTION_FROM_FILE generated/output_channels.ini \
 	-readfile DATALOG_SECTION_FROM_FILE generated/data_logs.ini \
 	-triggerInputFolder ../unit_tests \
@@ -128,7 +136,7 @@ java \
 	-c_defines        generated/rusefi_generated.h \
 	-c_destination    generated/engine_configuration_generated_structures.h \
 	-makefileDep      .dep/fome_generated.d \
-	"${STAMP_ARGS[@]}"
+	${STAMP_ARGS[@]+"${STAMP_ARGS[@]}"}
 
 
 [ $? -eq 0 ] || { echo "ERROR generating TunerStudio config for ${BOARD_DIR}"; exit 1; }
