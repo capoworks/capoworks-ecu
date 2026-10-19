@@ -90,7 +90,7 @@ private:
 	size_t m_bytesSinceEop = 0;
 };
 
-static CCM_OPTIONAL UsbDirectChannel usbChannel;
+static CCM_OPTIONAL_BACKGROUND UsbDirectChannel usbChannel;
 
 class UsbRxPumpThread : public ThreadController<512> {
 public:

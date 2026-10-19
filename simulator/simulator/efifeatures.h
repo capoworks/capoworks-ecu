@@ -106,8 +106,9 @@
 
 #define EFI_LUA TRUE
 
-#undef LUA_USER_HEAP
+#ifndef LUA_USER_HEAP
 #define LUA_USER_HEAP 100000
+#endif
 
 #define EFI_CAN_SERIAL FALSE
 #define EFI_USE_OPENBLT FALSE

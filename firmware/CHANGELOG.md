@@ -67,7 +67,10 @@ or
 
 
 ### Changed
- - On Core8, keep the 5 KiB main working stack and full SD/USB mass-storage support for the expanded cylinder-model calibration by reducing the Lua heap from 30,000 to 26,000 bytes.
+ - On STM32F407 boards, move background CAN, USB console and USB mass-storage objects from CCM to ordinary SRAM, preserving CCM for calibration, engine state and the main-loop stack. The common F407 Lua heap is now 20,000 bytes, down from 30,000, reducing available Lua script capacity; runtime behavior at this smaller heap has not yet been validated on hardware.
+ - The embedded compressed INI drive now uses a 16 KiB DEFLATE dictionary, reducing firmware RAM use by 16 KiB.
+ - STM32F7 function alignment now uses 4-byte words instead of 16-byte cache lines to reduce inter-function flash padding; timing has not been benchmarked.
+ - Firmware CI now runs on master pushes and cancels superseded runs, while hardware CI is manual-dispatch only because it flashes connected ECUs.
  - Cylinder count is now derived automatically from the firing order instead of being a separate setting, so the two can no longer disagree.
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 

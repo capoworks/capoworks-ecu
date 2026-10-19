@@ -30,7 +30,7 @@ $(LIVE_DATA_STAMP) : $(JAVA_TOOLS) $(PROJECT_DIR)/integration/LiveData.yaml
 
 # Stage 2: persistent config + TunerStudio ini. Depends on the live-data stamp because it
 # consumes stage 1 outputs. Extra prerequisites come from .dep/fome_generated.d.
-$(CONFIG_STAMP) : $(JAVA_TOOLS) $(LIVE_DATA_STAMP) $(PROJECT_DIR)/integration/fome_config.txt
+$(CONFIG_STAMP) : $(JAVA_TOOLS) $(LIVE_DATA_STAMP) $(PROJECT_DIR)/integration/fome_config.txt $(PROJECT_DIR)/hw_layer/mass_storage/create_ini_image_compressed.sh
 	@echo Generating config files...
 	cd $(PROJECT_DIR) && ./gen_config_board.sh $(realpath $(BOARD_DIR)) $(SHORT_BOARD_NAME) $(CONFIG_STAMP)
 	@touch $@

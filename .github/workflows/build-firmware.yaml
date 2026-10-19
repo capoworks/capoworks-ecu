@@ -2,6 +2,8 @@ name: Firmware at GHA
 
 on:
   push:
+    branches:
+      - master
   pull_request:
   workflow_dispatch:
     inputs:
@@ -13,6 +15,10 @@ on:
         description: 'Release Build Name'
         required: false
         type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-firmware:

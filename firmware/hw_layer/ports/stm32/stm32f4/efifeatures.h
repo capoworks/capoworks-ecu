@@ -197,7 +197,7 @@
 #define ENABLE_PERF_TRACE FALSE
 
 #ifndef LUA_USER_HEAP
-#define LUA_USER_HEAP 30000
+#define LUA_USER_HEAP 20000
 #endif
 #endif
 
