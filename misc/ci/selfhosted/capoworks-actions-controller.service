@@ -1,0 +1,22 @@
+[Unit]
+Description=Capoworks ephemeral Jellyfin GitHub Actions controller
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/deffie/.local/share/capoworks-actions-controller
+ExecStart=/usr/bin/python3 /home/deffie/.local/share/capoworks-actions-controller/controller.py
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Restart=always
+RestartSec=10
+TimeoutStopSec=60
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
