@@ -531,16 +531,20 @@ static void setDefaultEngineConfiguration() {
 	engineConfiguration->baroSensor.lowValue = 0;
 	engineConfiguration->baroSensor.highValue = 500;
 
+#if EFI_ENGINE_SNIFFER
 #if EFI_PROD_CODE
 	engineConfiguration->engineChartSize = 300;
 #else
 	// need more events for automated test
 	engineConfiguration->engineChartSize = 400;
 #endif
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->isMapAveragingEnabled = true;
 	engineConfiguration->mapAveragingCylinderBalanceMinRpm = 1500;
+#if EFI_ENGINE_SNIFFER
 	engineConfiguration->isWaveAnalyzerEnabled = true;
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->acIdleRpmBump = 200;
 

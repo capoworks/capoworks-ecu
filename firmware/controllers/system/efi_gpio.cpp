@@ -8,7 +8,9 @@
 
 #include "pch.h"
 #include "spark_logic.h"
+#if EFI_ENGINE_SNIFFER
 #include "engine_sniffer.h"
+#endif // EFI_ENGINE_SNIFFER
 
 #include "drivers/gpio/gpio_ext.h"
 

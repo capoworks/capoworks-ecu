@@ -350,7 +350,9 @@ public:
 	 */
 	bool isFunctionalTestMode = false;
 
+#if EFI_ENGINE_SNIFFER
 	void resetEngineSnifferIfInTestMode();
+#endif // EFI_ENGINE_SNIFFER
 
 	EngineState engineState;
 	AirmassInjectionState airmassInjectionState;

@@ -38,6 +38,7 @@ or
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
 
 ### Added
+ - Add an optional Engine Sniffer event recorder while preserving the shared RPM guard for the binary tooth logger and verbose trigger logging.
  - Add separate per-cylinder Speed Density (MAP kPa/RPM) and Alpha-N (TPS/RPM) model fuel trims with shared axes and neutral defaults.
  - Add an SD + Alpha-N airmass blend authority table with selectable TPS or measured-MAP load axes.
  - Add opt-in full-engine-cycle RPM feedback for closed-loop idle air and ignition timing, with instantaneous fallback until a complete cycle is valid and a `rollingCycleRpm` diagnostic channel. Instantaneous feedback remains the default.

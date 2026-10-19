@@ -18,7 +18,9 @@
 
 #include "main_trigger_callback.h"
 #include "status_loop.h"
+#if EFI_ENGINE_SNIFFER
 #include "engine_sniffer.h"
+#endif // EFI_ENGINE_SNIFFER
 #include "auto_generated_sync_edge.h"
 
 #if EFI_TUNER_STUDIO
@@ -221,7 +223,9 @@ static angle_t wrapVvtForCamType(angle_t vvtPosition, vvt_mode_e mode) {
 
 static void logVvtFront(bool isRising, efitick_t nowNt, int index) {
 	// If we care about both edges OR displayLogicLevel is set, log every front exactly as it is
+#if EFI_ENGINE_SNIFFER
 	addEngineSnifferVvtEvent(nowNt, index, isRising);
+#endif // EFI_ENGINE_SNIFFER
 
 #if EFI_TOOTH_LOGGER
 	LogCamTriggerTooth(nowNt, index, isRising);
@@ -446,6 +450,7 @@ void TriggerCentral::resetCounters() {
 	}
 }
 
+#if EFI_ENGINE_SNIFFER
 static const int wheelIndeces[4] = {0, 0, 1, 1};
 
 static void
@@ -465,6 +470,7 @@ reportEventToWaveChart(efitick_t timestamp, TriggerEvent ckpSignalType, int trig
 		addEngineSnifferCrankEvent(timestamp, wheelIndex, triggerEventIndex, !isUp);
 	}
 }
+#endif // EFI_ENGINE_SNIFFER
 
 void TriggerCentral::decodeMapCam(efitick_t timestamp, EngPhase currentPhase) {
 	if (engineConfiguration->vvtMode[0] == VVT_MAP_V_TWIN &&
@@ -608,7 +614,9 @@ void TriggerCentral::handleShaftSignal(TriggerEvent signal, efitick_t timestamp)
 	if (!decodeResult) {
 		instantRpm.ignitionProfile.reset();
 		// We don't have sync, but report to the wave chart anyway as index 0.
+#if EFI_ENGINE_SNIFFER
 		reportEventToWaveChart(timestamp, signal, 0, triggerShape.useOnlyRisingEdges);
+#endif // EFI_ENGINE_SNIFFER
 
 		expectedNextPhase = unexpected;
 
@@ -625,7 +633,9 @@ void TriggerCentral::handleShaftSignal(TriggerEvent signal, efitick_t timestamp)
 	int crankInternalIndex = triggerState.getCrankSynchronizationCounter() % crankDivider;
 	int triggerIndexForListeners = decodeResult.Value.CurrentIndex + (crankInternalIndex * triggerShape.getSize());
 
+#if EFI_ENGINE_SNIFFER
 	reportEventToWaveChart(timestamp, signal, triggerIndexForListeners, triggerShape.useOnlyRisingEdges);
+#endif // EFI_ENGINE_SNIFFER
 
 	// Look up this tooth's angle from the sync point. If this tooth is the sync point, we'll get 0 here.
 	TrgPhase currentTrgPhase{getTriggerCentral()->triggerFormDetails.eventAngles[triggerIndexForListeners]};

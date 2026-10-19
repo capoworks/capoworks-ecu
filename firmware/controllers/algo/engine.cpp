@@ -49,15 +49,15 @@
 extern WaveChart waveChart;
 #endif /* EFI_ENGINE_SNIFFER */
 
-void Engine::resetEngineSnifferIfInTestMode() {
 #if EFI_ENGINE_SNIFFER
+void Engine::resetEngineSnifferIfInTestMode() {
 	if (isFunctionalTestMode) {
 		// TODO: what is the exact reasoning for the exact engine sniffer pause time I wonder
 		waveChart.pauseEngineSnifferUntilNt = getTimeNowNt() + MS2NT(300);
 		waveChart.reset();
 	}
-#endif /* EFI_ENGINE_SNIFFER */
 }
+#endif /* EFI_ENGINE_SNIFFER */
 
 void Engine::updateTriggerWaveform() {
 #if EFI_ENGINE_CONTROL && EFI_SHAFT_POSITION_INPUT

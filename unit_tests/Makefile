@@ -39,7 +39,6 @@ CPPSRC += $(ALLCPPSRC) \
 	$(HW_LAYER_DRIVERS_CORE_CPP) \
 	$(FRAMEWORK_SRC_CPP) \
 	$(TESTS_SRC_CPP) \
-	$(DEVELOPMENT_DIR)/engine_sniffer.cpp \
 	$(CONSOLE_COMMON_SRC_CPP) \
 	$(PROJECT_DIR)/config/boards/hellen/hellen_board_id.cpp \
 	$(PROJECT_DIR)/hw_layer/drivers/can/can_hw.cpp \

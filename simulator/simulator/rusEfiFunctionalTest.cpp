@@ -13,7 +13,9 @@
 #include "eficonsole.h"
 #include "trigger_central.h"
 #include "datalogging.h"
+#if EFI_ENGINE_SNIFFER
 #include "engine_sniffer.h"
+#endif // EFI_ENGINE_SNIFFER
 #include "status_loop.h"
 #include "trigger_emulator_algo.h"
 #include "main_trigger_callback.h"

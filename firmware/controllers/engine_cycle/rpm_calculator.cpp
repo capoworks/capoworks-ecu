@@ -17,7 +17,9 @@
 
 #include "trigger_central.h"
 
+#if EFI_ENGINE_SNIFFER
 #include "engine_sniffer.h"
+#endif // EFI_ENGINE_SNIFFER
 
 // See RpmCalculator::checkIfSpinning()
 #ifndef NO_RPM_EVENTS_TIMEOUT_SECS
@@ -473,11 +475,12 @@ static void onTdcCallback(void*) {
 	}
 #endif /* EFI_UNIT_TEST */
 
-	float rpm = Sensor::getOrZero(SensorType::Rpm);
-
 	auto nowNt = getTimeNowNt();
 
+#if EFI_ENGINE_SNIFFER
+	float rpm = Sensor::getOrZero(SensorType::Rpm);
 	addEngineSnifferTdcEvent(nowNt, rpm);
+#endif // EFI_ENGINE_SNIFFER
 #if EFI_TOOTH_LOGGER
 	LogTriggerTopDeadCenter(nowNt);
 #endif /* EFI_TOOTH_LOGGER */

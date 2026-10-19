@@ -101,13 +101,17 @@ static void setTriggerType(int value) {
 	engineConfiguration->trigger.type = (trigger_type_e)value;
 	incrementGlobalConfigurationVersion();
 	efiPrintf("Do you need to also invoke set operation_mode X?");
+#if EFI_ENGINE_SNIFFER
 	engine->resetEngineSnifferIfInTestMode();
+#endif // EFI_ENGINE_SNIFFER
 }
 
 static void setWholeTimingMapCmd(float value) {
 	efiPrintf("Setting whole timing advance map to %.2f", value);
 	setWholeTimingTable(value);
+#if EFI_ENGINE_SNIFFER
 	engine->resetEngineSnifferIfInTestMode();
+#endif // EFI_ENGINE_SNIFFER
 }
 
 #if EFI_PROD_CODE
@@ -308,8 +312,10 @@ static void enableOrDisable(const char* param, bool isEnabled) {
 #endif // EFI_EMULATE_POSITION_SENSORS
 	} else if (strEqualCaseInsensitive(param, "map_avg")) {
 		engineConfiguration->isMapAveragingEnabled = isEnabled;
+#if EFI_ENGINE_SNIFFER
 	} else if (strEqualCaseInsensitive(param, "logic_analyzer")) {
 		engineConfiguration->isWaveAnalyzerEnabled = isEnabled;
+#endif // EFI_ENGINE_SNIFFER
 	} else if (strEqualCaseInsensitive(param, "cylinder_cleanup")) {
 		engineConfiguration->isCylinderCleanupEnabled = isEnabled;
 	} else {
@@ -440,7 +446,9 @@ static void setValue(const char* paramStr, const char* valueStr) {
 		setDateTime(valueStr);
 	}
 
+#if EFI_ENGINE_SNIFFER
 	engine->resetEngineSnifferIfInTestMode();
+#endif // EFI_ENGINE_SNIFFER
 }
 
 void initSettings() {
@@ -542,7 +550,9 @@ void setEngineType(engine_type_e value) {
 
 		engineConfiguration->engineType = value;
 		resetConfigurationExt(value);
+#if EFI_ENGINE_SNIFFER
 		engine->resetEngineSnifferIfInTestMode();
+#endif // EFI_ENGINE_SNIFFER
 	}
 
 #if EFI_INTERNAL_FLASH
