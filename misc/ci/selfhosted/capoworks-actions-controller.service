@@ -1,0 +1,22 @@
+[Unit]
+Description=Capoworks ephemeral self-hosted Actions runner controller
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/capoworks-actions-controller
+ExecStart=/usr/bin/python3 %h/.local/share/capoworks-actions-controller/controller.py
+EnvironmentFile=%h/.config/capoworks-actions-runner.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
