@@ -27,8 +27,9 @@ private:
 	Timer m_stallTimer;
 };
 
-#if defined(EFI_IS_F42x)
-// The F429 needs ordinary SRAM for its main-loop stack to keep CCM within budget.
+#if defined(EFI_IS_F42x) && !MODULE_ETHERNET_CONSOLE
+// Non-Ethernet F429 builds need ordinary SRAM for the main-loop stack to keep CCM within budget.
+// Ethernet builds retain the existing CCM placement.
 static MainLoop mainLoop;
 #else
 static MainLoop mainLoop CCM_OPTIONAL;

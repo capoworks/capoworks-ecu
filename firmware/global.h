@@ -95,8 +95,9 @@ typedef unsigned int time_t;
  *
  * On STM32F4xx boards, these background working areas use ordinary SRAM while
  * calibration and engine state remain in CCM. The STM32F407 main loop remains
- * in CCM, while the STM32F429 main loop uses ordinary SRAM. Other MCUs keep
- * their existing placement.
+ * in CCM. Non-Ethernet STM32F429 builds place the main loop in ordinary SRAM,
+ * while Ethernet-console builds retain the existing CCM placement. Other MCUs
+ * keep their existing placement.
  */
 #if defined(STM32F4XX)
 #define CCM_OPTIONAL_BACKGROUND
