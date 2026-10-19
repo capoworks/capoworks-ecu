@@ -93,9 +93,10 @@ typedef unsigned int time_t;
  * need ordinary SRAM: they are CPU-only, DMA cannot reach CCM either way, and
  * nothing about them depends on the CCM bus.
  *
- * The main loop stays in CCM. STM32F4xx boards keep their 64k CCM reserved for
- * calibration, engine state and stack by placing only these background working
- * areas in regular SRAM. Other MCUs keep their existing placement.
+ * On STM32F4xx boards, these background working areas use ordinary SRAM while
+ * calibration and engine state remain in CCM. The STM32F407 main loop remains
+ * in CCM, while the STM32F429 main loop uses ordinary SRAM. Other MCUs keep
+ * their existing placement.
  */
 #if defined(STM32F4XX)
 #define CCM_OPTIONAL_BACKGROUND
