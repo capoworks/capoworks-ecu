@@ -3,9 +3,11 @@
 
 FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst
 
-# An omitted selection means the complete catalog, matching the historical build
-# behavior. An explicitly empty selection remains empty.
-FOME_MODULES ?= $(FOME_MODULE_CATALOG)
+# The default selection includes available modules, with named opt-ins disabled.
+# An explicit FOME_MODULES selection can enable any available module.
+# An explicitly empty selection remains empty.
+FOME_MODULES_DEFAULT := $(filter-out hella_opst,$(FOME_MODULE_CATALOG))
+FOME_MODULES ?= $(FOME_MODULES_DEFAULT)
 FOME_MODULES_UNKNOWN := $(filter-out $(FOME_MODULE_CATALOG),$(FOME_MODULES))
 
 ifneq ($(strip $(FOME_MODULES_UNKNOWN)),)
