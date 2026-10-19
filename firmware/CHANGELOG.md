@@ -67,7 +67,7 @@ or
 
 
 ### Changed
- - On STM32F407 boards, move background CAN, USB console and USB mass-storage objects from CCM to ordinary SRAM, preserving CCM for calibration, engine state and the main-loop stack. The common F407 Lua heap is now 20,000 bytes, down from 30,000, reducing available Lua script capacity; runtime behavior at this smaller heap has not yet been validated on hardware.
+ - On STM32F4 boards, move background CAN, USB console and USB mass-storage objects from CCM to ordinary SRAM. On STM32F429, also move the main loop to ordinary SRAM and reduce the common non-Ethernet Lua heap from 65,000 to 60,000 bytes; the 25,000-byte Ethernet Lua heap is unchanged. The F407 Lua heap is now 20,000 bytes, down from 30,000, reducing available Lua script capacity. Runtime behavior at these smaller heaps and timing with the new memory placement have not yet been validated on hardware.
  - The embedded compressed INI drive now uses a 16 KiB DEFLATE dictionary, reducing firmware RAM use by 16 KiB.
  - STM32F7 function alignment now uses 4-byte words instead of 16-byte cache lines to reduce inter-function flash padding; timing has not been benchmarked.
  - Firmware CI now runs on master pushes and cancels superseded runs, while hardware CI is manual-dispatch only because it flashes connected ECUs.
