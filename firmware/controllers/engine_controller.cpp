@@ -39,7 +39,9 @@
 #include "fuel_math.h"
 #include "spark_logic.h"
 #include "vvt.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #include "fan_control.h"
 #include "launch_control.h"
 #include "speedometer.h"
@@ -304,8 +306,10 @@ void commonInitEngineController() {
 	initMapAveraging();
 #endif /* MODULE_MAP_AVERAGING */
 
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 	initBoostCtrl();
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
+#if EFI_ENGINE_CONTROL
 	initFanControl();
 #endif /* EFI_ENGINE_CONTROL */
 
@@ -430,6 +434,7 @@ bool validateConfig() {
 	}
 
 	// Boost
+#ifdef MODULE_BOOST
 	if (engineConfiguration->isBoostControlEnabled) {
 		ensureArrayIsAscending("Boost open loop Y axis", config->boostTpsBins);
 		ensureArrayIsAscending("Boost open loop X axis", config->boostRpmBins);
@@ -439,6 +444,7 @@ bool validateConfig() {
 			ensureArrayIsAscending("Boost closed loop Y axis", config->boostClosedLoopYAxisBins);
 		}
 	}
+#endif // MODULE_BOOST
 
 #if EFI_ANTILAG_SYSTEM
 	// ALS

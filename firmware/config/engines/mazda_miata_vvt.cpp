@@ -740,7 +740,9 @@ void setMiataNB_MSM_Polygonus() {
 	engineConfiguration->isForcedInduction = true;
 
 	// MSM has boost control!
+#ifdef MODULE_BOOST
 	engineConfiguration->boostControlPin = PROTEUS_HS_3;
+#endif // MODULE_BOOST
 
 	// MSM gets a different IAT from the other NBs
 	engineConfiguration->iat.config = {0, 40, 60, 112000, 17000, 8000, 0};

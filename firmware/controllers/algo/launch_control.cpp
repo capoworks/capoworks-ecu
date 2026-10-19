@@ -8,7 +8,6 @@
 #include "pch.h"
 
 #if EFI_LAUNCH_CONTROL
-#include "boost_control.h"
 #include "launch_control.h"
 #include "engine_state.h"
 #include "tinymt32.h"

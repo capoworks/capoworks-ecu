@@ -33,7 +33,9 @@
 #include "main_relay.h"
 #include "ac_control.h"
 #include "type_list.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #include "ignition_controller.h"
 #include "alternator_controller.h"
 #include "harley_acr.h"
@@ -222,9 +224,9 @@ public:
 			VvtController3,
 			VvtController4,
 #endif // EFI_VVT_PID
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 			BoostController,
-#endif // EFI_ENGINE_CONTROL
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 			LedBlinkingTask,
 			TpsAccelEnrichment,
 

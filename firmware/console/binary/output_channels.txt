@@ -276,7 +276,6 @@ struct_no_prefix output_channels_s
 	pid_status_s alternatorStatus
 	pid_status_s idleStatus
 	pid_status_s etbStatus
-	pid_status_s boostStatus
 	pid_status_s wastegateDcStatus
 
 	uint8_t[4 iterate] autoscale gppwmOutput;GPPWM Output;"%", 0.5, 0, 0, 100, 2

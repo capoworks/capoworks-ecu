@@ -23,7 +23,9 @@
 #include "idle_hardware.h"
 #include "gppwm.h"
 #include "speedometer.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #include "ac_control.h"
 #include "vr_pwm.h"
 #include "can_vss.h"
@@ -232,7 +234,9 @@ void Engine::resetLua() {
 	engineState.lua.fuelMult = 1;
 	engineState.lua.luaDisableEtb = false;
 	engineState.lua.luaIgnCut = false;
+#ifdef MODULE_BOOST
 	module<BoostController>().unmock().resetLua();
+#endif // MODULE_BOOST
 	ignitionState.luaTimingAdd = 0;
 	ignitionState.luaTimingMult = 1;
 #if EFI_IDLE_CONTROL

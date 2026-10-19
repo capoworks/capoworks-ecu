@@ -391,7 +391,9 @@ static void mreBoardOldTest() {
  */
 
 void proteusDcWastegateTest() {
+#ifdef MODULE_BOOST
 	engineConfiguration->isBoostControlEnabled = true;
+#endif // MODULE_BOOST
 	engineConfiguration->etbFunctions[0] = DC_Wastegate;
 	engineConfiguration->etbFunctions[1] = DC_None;
 	engineConfiguration->map.sensor.hwChannel = EFI_ADC_NONE;

@@ -118,7 +118,9 @@ public:
 	OutputPin runningLedPin;	   // green LED on brain board by default
 
 	OutputPin debugTriggerSync;
+#ifdef MODULE_BOOST
 	RegisteredOutputPin boostPin;
+#endif // MODULE_BOOST
 	RegisteredOutputPin idleSolenoidPin;
 	RegisteredOutputPin secondIdleSolenoidPin;
 	RegisteredOutputPin alternatorPin;

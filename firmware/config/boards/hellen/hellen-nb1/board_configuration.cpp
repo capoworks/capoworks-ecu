@@ -96,7 +96,9 @@ void setBoardDefaultConfiguration() {
 
 	engineConfiguration->enableSoftwareKnock = true;
 
+#ifdef MODULE_BOOST
 	engineConfiguration->boostControlPin = H144_LS_6;
+#endif // MODULE_BOOST
 	engineConfiguration->acSwitch = H144_IN_D_AUX3;
 	engineConfiguration->acRelayPin = H144_OUT_IO6;
 	engineConfiguration->fuelPumpPin = Gpio::G2;	   // OUT_IO9

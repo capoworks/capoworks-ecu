@@ -120,7 +120,9 @@ void setBoardDefaultConfiguration() {
 
 	engineConfiguration->luaOutputPins[0] = H144_OUT_IO6; // starter relay
 
+#ifdef MODULE_BOOST
 	engineConfiguration->boostControlPin = H144_OUT_PWM5;
+#endif // MODULE_BOOST
 	engineConfiguration->brakePedalPin = H144_IN_RES2;
 	//	engineConfiguration->acSwitch =
 	//	engineConfiguration->acRelayPin =
