@@ -35,25 +35,25 @@ def api(method, path, fields=()):
 
 def remove_orphan(name, runner_id=None):
     try:
-        if runner_id is None:
-            data = json.loads(api("GET", f"{REPO}/actions/runners?per_page=100"))
-            matches = [
-                runner for runner in data.get("runners", [])
-                if runner.get("name") == name
-            ]
-            if not matches:
-                return
-            if len(matches) != 1:
-                raise RuntimeError("multiple runner records matched the unique name")
-            runner_id = matches[0].get("id")
+        data = json.loads(api("GET", f"{REPO}/actions/runners?per_page=100"))
+        matches = [
+            runner for runner in data.get("runners", [])
+            if runner.get("name") == name
+        ]
+        if not matches:
+            return
+        if len(matches) != 1:
+            raise RuntimeError("multiple runner records matched the unique name")
+        matched_id = matches[0].get("id")
         if (
-            not isinstance(runner_id, int)
-            or isinstance(runner_id, bool)
-            or runner_id <= 0
+            not isinstance(matched_id, int)
+            or isinstance(matched_id, bool)
+            or matched_id <= 0
         ):
             raise RuntimeError("runner response did not contain a valid ID")
-        api("GET", f"{REPO}/actions/runners/{runner_id}")
-        api("DELETE", f"{REPO}/actions/runners/{runner_id}")
+        if runner_id is not None and runner_id != matched_id:
+            raise RuntimeError("runner ID did not match the unique name")
+        api("DELETE", f"{REPO}/actions/runners/{matched_id}")
         print(f"removed orphan runner record {name}", flush=True)
     except (RuntimeError, json.JSONDecodeError, AttributeError, TypeError):
         print(f"orphan cleanup failed for {name}", flush=True)
