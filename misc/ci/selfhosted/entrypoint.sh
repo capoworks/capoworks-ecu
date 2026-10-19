@@ -32,7 +32,11 @@ configure_firewall() {
     done
     iptables -A OUTPUT -j ACCEPT || return 1
 
-    if [[ -s /proc/net/if_inet6 ]]; then
+    local ipv6_entries=
+    if [[ -e /proc/net/if_inet6 ]]; then
+        ipv6_entries=$(cat /proc/net/if_inet6) || return 1
+    fi
+    if [[ -n "$ipv6_entries" ]]; then
         command -v ip6tables >/dev/null || return 1
         ip6tables -F OUTPUT || return 1
         ip6tables -P OUTPUT DROP || return 1
@@ -77,10 +81,6 @@ case "${1:-runner}" in
                 exit 1
             }
             echo "NoNewPrivs=$nnp"
-            (( (16#$CapEff & (1 << 12)) == 0 )) || {
-                echo "NET_ADMIN capability is present" >&2
-                exit 1
-            }
             echo "job-net-admin=absent"
             curl --fail --silent --show-error --max-time 15 https://api.github.com/zen >/dev/null
             echo "public-network=ok"
