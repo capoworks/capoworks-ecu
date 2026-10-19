@@ -149,3 +149,8 @@ TESTS_SRC_CPP += \
 	tests/lua/test_lua_Leiderman_Khlystov.cpp \
 	tests/lua/test_can_filter.cpp
 endif
+
+ifneq ($(filter emp_pump,$(FOME_MODULES_RESOLVED)),)
+TESTS_SRC_CPP += \
+	tests/test_emp_pump.cpp
+endif

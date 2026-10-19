@@ -16,6 +16,9 @@
 #include "obd2.h"
 #include "can_sensor.h"
 #include "rusefi_wideband.h"
+#if defined(MODULE_EMP_PUMP)
+#include "emp_pump.h"
+#endif
 
 CanWrite::CanWrite(CanBusIndex bus)
 	: PeriodicController(bus == CanBusIndex::Bus0 ? "CAN TX 0" : "CAN TX 1", PRIO_CAN_TX, CAN_CYCLE_FREQ)
@@ -64,6 +67,9 @@ void CanWrite::PeriodicTask(efitick_t) {
 	if (m_bus == CanBusIndex::Bus0) {
 		updateDash(cycle);
 	}
+#if defined(MODULE_EMP_PUMP)
+	engine->module<EmpPump>()->pollTx(m_bus);
+#endif
 
 #if EFI_WIDEBAND_FIRMWARE_UPDATE
 	if (engineConfiguration->widebandMode == WidebandMode::FOMEInternal && cycle.isInterval(CI::_50ms)) {

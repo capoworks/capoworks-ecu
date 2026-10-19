@@ -1,0 +1,52 @@
+	bit enableEmpPump;Enable the Caponord EMP coolant pump controller. The pump is disabled by default.
+
+	! EMP coolant pump module configuration over J1939 extended CAN.
+	struct emp_pump_cfg
+		bit afterRunEnabled;Enable cooling after engine stop.
+		bit powerHoldEnabled;Request the EMP controller Power Hold while after-run is active.
+		bit runDuringCranking;Run the pump while the engine is cranking.
+		bit hotBootRecovery;Start after-run after an ECU hot reboot when CLT is hot.
+		bit closedLoopEnabled,"CLT closed loop","CLT curve";Use the CLT PI controller while engine is running.
+		bit serviceAllowedWhileRunning;Allow service test while the engine is running. Keep disabled for normal use.
+
+		uint8_t canBus;EMP CAN bus (0 = CAN1/Bus0, 1 = CAN2/Bus1).;"", 1, 0, 0, 1, 0
+		uint8_t controllerAddress;EMP controller J1939 source address.;"", 1, 0, 0, 240, 0
+		uint8_t sourceAddress;ECU J1939 source address for EMP commands.;"", 1, 0, 0, 240, 0
+		uint8_t stopDebounce100ms;Engine-stop debounce.;"s", 0.1, 0, 0, 25.5, 1
+		uint8_t statusTimeoutSeconds;Maximum age of EMP main status while active.;"s", 1, 0, 1, 30, 0
+		uint8_t batteryCutoff10;After-run stops below this battery voltage.;"V", 0.1, 0, 0, 25.5, 1
+		uint8_t batteryResume10;After-run resumes above this battery voltage.;"V", 0.1, 0, 0, 25.5, 1
+		uint8_t manualTestSeconds;Service-test maximum duration.;"s", 1, 0, 1, 60, 0
+
+		uint16_t minimumRunRpm;EMP minimum running speed.;"RPM", 1, 0, 0, 12000, 0
+		uint16_t maximumRpm;EMP maximum speed.;"RPM", 1, 0, 0, 12000, 0
+		uint16_t afterRunMinimumRpm;EMP minimum after-run speed.;"RPM", 1, 0, 0, 12000, 0
+		uint16_t failsafeRpm;EMP speed used with invalid CLT.;"RPM", 1, 0, 0, 12000, 0
+		uint16_t rampRpmPerSecond;EMP command ramp. Zero disables ramping.;"RPM/s", 1, 0, 0, 12000, 0
+		uint16_t afterRunMaximumSeconds;Maximum after-run duration.;"s", 1, 0, 0, 3600, 0
+		uint16_t manualTestRpm;Service-test pump speed.;"RPM", 1, 0, 0, 12000, 0
+		int16_t autotemp afterRunStartTemperature;Start after-run above this CLT.;"C", 1, 0, -40, 150, 0
+		int16_t autotemp afterRunStopTemperature;Stop after-run below this CLT.;"C", 1, 0, -40, 150, 0
+		int16_t autotemp targetTemperature;Closed-loop CLT target.;"C", 1, 0, -40, 150, 0
+		int16_t autotemp iatReferenceTemperature;IAT feed-forward reference.;"C", 1, 0, -40, 100, 0
+		uint8_t temperatureDeadband;CLT PI deadband.;"C", 1, 0, 0, 20, 0
+		uint16_t proportionalGain;EMP proportional gain.;"RPM/C", 1, 0, 0, 2000, 0
+		uint16_t integralGain;EMP integral gain.;"RPM/C/s", 1, 0, 0, 1000, 0
+		uint16_t integralLimitRpm;Maximum integral correction.;"RPM", 1, 0, 0, 12000, 0
+		uint16_t derivativeGain;Positive CLT slope feed-forward gain.;"RPM/(C/min)", 1, 0, 0, 1000, 0
+		uint16_t loadFeedForwardGain;MAP x RPM feed-forward gain.;"RPM", 1, 0, 0, 2000, 0
+		uint16_t iatCompensationGain;IAT compensation gain.;"RPM/C", 1, 0, 0, 500, 0
+		uint8_t airflowFullSpeedKph;Ram-air full relief speed.;"kph", 1, 0, 1, 255, 0
+		uint16_t airflowReliefRpm;Pump RPM relief at full ram-air.;"RPM", 1, 0, 0, 12000, 0
+		uint8_t fanEquivalentSpeedKph;Equivalent airflow with radiator fan on.;"kph", 1, 0, 0, 255, 0
+		uint8_t coolingLimitedDelta;CLT delta which reports cooling limited.;"C", 1, 0, 0, 50, 0
+		uint8_t overloadDelta;CLT delta which starts thermal overload timing.;"C", 1, 0, 0, 50, 0
+		uint8_t overloadDelaySeconds;Time above overload delta before fault.;"s", 1, 0, 0, 255, 0
+
+		int16_t[6] autotemp temperatureBins;EMP CLT fallback curve axis.;"C", 1, 0, -40, 150, 0
+		uint16_t[6] rpmBins;EMP CLT fallback curve speed.;"RPM", 1, 0, 0, 12000, 0
+		uint16_t[4] engineRpmBins;EMP minimum-flow engine RPM axis.;"RPM", 1, 0, 0, 20000, 0
+		uint16_t[4] minimumFlowRpmBins;EMP minimum safe pump flow.;"RPM", 1, 0, 0, 12000, 0
+	end_struct
+
+	emp_pump_cfg empPump;

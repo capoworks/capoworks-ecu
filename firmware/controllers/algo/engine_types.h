@@ -464,7 +464,15 @@ typedef enum {
 	TS_SET_ENGINE_TYPE = 30,
 	TS_SET_DEFAULT_ENGINE = 31,
 	TS_LUA_OUTPUT_CATEGORY = 32,
+	// Reserved by the next optional shock-preload module.
+	TS_SHOCK_PRELOAD_CATEGORY = 33,
+	TS_EMP_PUMP_CATEGORY = 34,
 } ts_command_e;
+
+typedef enum {
+	EMP_PUMP_SERVICE_START,
+	EMP_PUMP_SERVICE_STOP,
+} emp_pump_ts_command_e;
 
 typedef enum {
 	BENCH_MAIN_RELAY,

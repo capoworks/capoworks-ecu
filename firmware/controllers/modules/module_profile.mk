@@ -1,7 +1,7 @@
 # Shared resolved module profile. This file intentionally defines no build rules:
 # it is included while Make is still discovering its default goal.
 
-FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua
+FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump
 
 # The default selection includes available modules, with named opt-ins disabled.
 # An explicit FOME_MODULES selection can enable any available module.
@@ -19,6 +19,13 @@ FOME_MODULES_RESOLVED := $(filter $(FOME_MODULES),$(FOME_MODULE_CATALOG))
 
 ifneq ($(strip $(NO_MAP_AVERAGING)),)
   FOME_MODULES_RESOLVED := $(filter-out map_averaging,$(FOME_MODULES_RESOLVED))
+endif
+
+# EMP derives cooling demand from both fan-controller states.
+ifneq ($(filter emp_pump,$(FOME_MODULES_RESOLVED)),)
+  ifeq ($(filter fan,$(FOME_MODULES_RESOLVED)),)
+    $(error FOME_MODULES emp_pump requires fan)
+  endif
 endif
 
 MODULE_NAMES := $(strip $(FOME_MODULES_RESOLVED))

@@ -7,7 +7,7 @@ Firmware modules are selected at compile time. `firmware/controllers/modules/mod
 The canonical catalog is:
 
 ```text
-fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua
+fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump
 ```
 
 Set `FOME_MODULES` to a whitespace-separated list of these exact, lowercase tokens. An omitted value defaults to the full catalog. Unknown tokens fail during Make configuration, and selections are deduplicated and resolved in catalog order. An explicitly empty value remains empty. The existing `NO_MAP_AVERAGING` switch still removes `map_averaging`.
@@ -20,15 +20,16 @@ Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in eve
 | Boost | `boost` |
 | Engine Sniffer | `engine_sniffer` |
 | Lua | `lua` |
+| EMP coolant pump | `emp_pump` (requires `fan`) |
 
-Other legacy modules have not been newly audited for removal. A supported Core8 build excluding only Lua (the base modules plus Hella OPS-T, Boost, and Engine Sniffer) is:
+Other legacy modules have not been newly audited for removal. `emp_pump` reads both fan-controller states for ram-air relief, so selecting it without `fan` is rejected during Make configuration. A supported Core8 build excluding only Lua (the base modules plus Hella OPS-T, Boost, Engine Sniffer, and EMP pump) is:
 
 ```bash
 cd firmware/config/boards/core8
-FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer" bash compile_core8.sh
+FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer emp_pump" bash compile_core8.sh
 ```
 
-A base-only Core8 build excluding all four optional modules is:
+A base-only Core8 build excluding all five optional modules is:
 
 ```bash
 cd firmware/config/boards/core8
@@ -59,7 +60,13 @@ Each module may provide four conventional fragments, without another registry:
 
 TunerStudio fragments use section names such as `[Menu.Advanced]`; the generator places each section body at the matching `; MODULE_INI Menu.Advanced` marker in the template. A module's `.mk` owns its source files, include paths, defines, and generated module tuples. Shared code adds ownership guards only where an external call would otherwise reference module-owned code or types; broad per-function or hot-path guards are not a module pattern.
 
+The EMP pump owns its CAN protocol, mailbox and queue state machine, configuration block and tables, output channels, TunerStudio contexts, defaults, and unit test. Shared code retains only guarded integration seams: `setDefaultEmpPump()` at base-default setup, EMP CAN polling on the selected bus's existing TX thread, status output-channel assignments, and TunerStudio service-command dispatch. The CAN listener bus-aware decode bridge is compiled only with `emp_pump`; without it, listeners retain the original single decode dispatch. Runtime `enableEmpPump` remains false by default.
+
 `integration/LiveData.yaml` owns live-data usage declarations and marks module-specific usages with `module:`. YAML order fixes `LDS_<usage>` IDs, so an unselected module keeps its declaration and IDs while its fragment and packed output usage disappear. Do not reorder or duplicate usages just to change a profile.
+
+## Core8 memory placement
+
+Full Core8 builds place the Lua CAN filter table in ordinary SRAM so CCM remains available for engine state. The filter table remains one statically allocated 48-entry array. Ordinary SRAM may add a small read-latency cost to CAN filter lookups; hardware timing and exact memory margins require validation from an actual build.
 
 ## Generated configuration
 
