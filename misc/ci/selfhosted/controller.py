@@ -24,7 +24,7 @@ def api(method, path, fields=()):
     try:
         result = subprocess.run(
             ["gh", "api", "--method", method, path, *fields],
-            text=True, capture_output=True, timeout=30, check=False,
+            text=True, capture_output=True, timeout=20, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise RuntimeError(f"gh api {method} {path} failed; response redacted") from None
@@ -33,36 +33,62 @@ def api(method, path, fields=()):
     return result.stdout
 
 
-def remove_orphan(name, runner_id):
+def remove_orphan(name, runner_id=None):
     try:
+        if runner_id is None:
+            data = json.loads(api("GET", f"{REPO}/actions/runners?per_page=100"))
+            matches = [
+                runner for runner in data.get("runners", [])
+                if runner.get("name") == name
+            ]
+            if not matches:
+                return
+            if len(matches) != 1:
+                raise RuntimeError("multiple runner records matched the unique name")
+            runner_id = matches[0].get("id")
+        if (
+            not isinstance(runner_id, int)
+            or isinstance(runner_id, bool)
+            or runner_id <= 0
+        ):
+            raise RuntimeError("runner response did not contain a valid ID")
         api("GET", f"{REPO}/actions/runners/{runner_id}")
-    except RuntimeError:
-        return
-    try:
         api("DELETE", f"{REPO}/actions/runners/{runner_id}")
         print(f"removed orphan runner record {name}", flush=True)
-    except RuntimeError:
+    except (RuntimeError, json.JSONDecodeError, AttributeError, TypeError):
         print(f"orphan cleanup failed for {name}", flush=True)
 
 
 def run_job():
     token = time.strftime("%Y%m%d%H%M%S", time.gmtime()) + "-" + secrets.token_hex(4)
     name = f"capoworks-jellyfin-{token}"
-    fields = (
-        "-f", f"name={name}", "-F", "runner_group_id=1",
-        "-f", "work_folder=_work", "-f", "labels[]=self-hosted",
-        "-f", "labels[]=Linux", "-f", "labels[]=X64",
-        "-f", "labels[]=ubuntu-latest-selfhost",
-    )
-    data = json.loads(api(
-        "POST", f"{REPO}/actions/runners/generate-jitconfig", fields
-    ))
-    encoded = data["encoded_jit_config"]
-    runner_id = data["runner"]["id"]
-
+    runner_id = None
     proc = None
     try:
-        if not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded):
+        if STOP:
+            return
+        fields = (
+            "-f", f"name={name}", "-F", "runner_group_id=1",
+            "-f", "work_folder=_work", "-f", "labels[]=self-hosted",
+            "-f", "labels[]=Linux", "-f", "labels[]=X64",
+            "-f", "labels[]=ubuntu-latest-selfhost",
+        )
+        data = json.loads(api(
+            "POST", f"{REPO}/actions/runners/generate-jitconfig", fields
+        ))
+        encoded = data["encoded_jit_config"]
+        received_id = data["runner"]["id"]
+        if (
+            not isinstance(received_id, int)
+            or isinstance(received_id, bool)
+            or received_id <= 0
+        ):
+            raise RuntimeError("GitHub returned an invalid runner ID")
+        runner_id = received_id
+        if (
+            not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded)
+            or len(encoded) > 262144
+        ):
             raise RuntimeError("GitHub returned an invalid JIT configuration")
         if STOP:
             return

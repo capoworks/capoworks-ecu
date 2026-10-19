@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 
-readonly image=capoworks-actions-runner:2.329.0
+readonly image=capoworks-actions-runner:2.338.0
 readonly state="${HOME:?}/.local/share/capoworks-actions-runner"
 readonly mode=${1:-}
 readonly token=${2:-}
@@ -18,8 +18,6 @@ esac
 
 mkdir -p "$state"
 chmod 0700 "$state"
-exec 9>"$state/launch.lock"
-flock 9
 
 container="capoworks-jit-$token"
 cleanup() {
@@ -27,15 +25,19 @@ cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
     exit "$status"
 }
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 if [[ "$mode" == cleanup ]]; then
     docker rm -f "$container" >/dev/null 2>&1 || true
     exit 0
 fi
+
+exec 9>"$state/launch.lock"
+flock 9
+
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 IFS= read -r encoded_jit
 if IFS= read -r extra; then

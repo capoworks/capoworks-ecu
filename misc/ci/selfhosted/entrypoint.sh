@@ -7,11 +7,11 @@ readonly runner_dir=/opt/actions-runner
 configure_firewall() {
     # The container has a fresh network namespace. Do not permit private,
     # link-local, multicast, CGNAT, documentation, or reserved destinations.
-    iptables -F OUTPUT
-    iptables -P OUTPUT DROP
-    iptables -A OUTPUT -o lo -j ACCEPT
-    iptables -A OUTPUT -d 127.0.0.11/32 -p udp --dport 53 -j ACCEPT
-    iptables -A OUTPUT -d 127.0.0.11/32 -p tcp --dport 53 -j ACCEPT
+    iptables -F OUTPUT || return 1
+    iptables -P OUTPUT DROP || return 1
+    iptables -A OUTPUT -o lo -j ACCEPT || return 1
+    iptables -A OUTPUT -d 127.0.0.11/32 -p udp --dport 53 -j ACCEPT || return 1
+    iptables -A OUTPUT -d 127.0.0.11/32 -p tcp --dport 53 -j ACCEPT || return 1
 
     for network in \
         0.0.0.0/8 \
@@ -28,16 +28,17 @@ configure_firewall() {
         224.0.0.0/4 \
         240.0.0.0/4 \
         255.255.255.255/32; do
-        iptables -A OUTPUT -d "$network" -j REJECT
+        iptables -A OUTPUT -d "$network" -j REJECT || return 1
     done
-    iptables -A OUTPUT -j ACCEPT
+    iptables -A OUTPUT -j ACCEPT || return 1
 
-    if command -v ip6tables >/dev/null && ip6tables -L OUTPUT >/dev/null 2>&1; then
-        ip6tables -F OUTPUT
-        ip6tables -P OUTPUT DROP
-        ip6tables -A OUTPUT -o lo -j ACCEPT
-        ip6tables -A OUTPUT -d ::1/128 -j ACCEPT
-        ip6tables -A OUTPUT -j REJECT
+    if [[ -s /proc/net/if_inet6 ]]; then
+        command -v ip6tables >/dev/null || return 1
+        ip6tables -F OUTPUT || return 1
+        ip6tables -P OUTPUT DROP || return 1
+        ip6tables -A OUTPUT -o lo -j ACCEPT || return 1
+        ip6tables -A OUTPUT -d ::1/128 -j ACCEPT || return 1
+        ip6tables -A OUTPUT -j REJECT || return 1
     fi
 }
 
@@ -53,24 +54,60 @@ drop_privileges() {
         -- "$@"
 }
 
-configure_firewall
+configure_firewall || {
+    echo "could not configure fail-closed network policy" >&2
+    exit 1
+}
 
 case "${1:-runner}" in
     probe)
         drop_privileges /bin/bash -ceu '
             echo "uid=$(id -u) gid=$(id -g)"
-            caps=$(awk "/^CapEff:/ {print \$2}" /proc/self/status)
-            [[ "$caps" =~ ^0+$ ]] || { echo "effective capabilities are not zero: $caps" >&2; exit 1; }
-            echo "CapEff=$caps"
+            for cap in CapInh CapPrm CapEff CapBnd CapAmb; do
+                value=$(awk -v key="$cap:" "\$1 == key {print \$2}" /proc/self/status)
+                [[ -n "$value" && "$value" =~ ^0+$ ]] || {
+                    echo "$cap is not zero: ${value:-missing}" >&2
+                    exit 1
+                }
+                printf "%s=%s\n" "$cap" "$value"
+            done
+            nnp=$(awk "\$1 == \"NoNewPrivs:\" {print \$2}" /proc/self/status)
+            [[ "$nnp" == 1 ]] || {
+                echo "NoNewPrivs is not enabled: ${nnp:-missing}" >&2
+                exit 1
+            }
+            echo "NoNewPrivs=$nnp"
+            (( (16#$CapEff & (1 << 12)) == 0 )) || {
+                echo "NET_ADMIN capability is present" >&2
+                exit 1
+            }
+            echo "job-net-admin=absent"
             curl --fail --silent --show-error --max-time 15 https://api.github.com/zen >/dev/null
             echo "public-network=ok"
-            if curl --fail --silent --connect-timeout 3 --max-time 5 http://192.168.0.1/ >/dev/null 2>&1; then
-                echo "private-network was reachable" >&2
-                exit 1
-            fi
-            echo "private-network=blocked"
+            probe_blocked() {
+                local address=$1 label=$2
+                if curl --silent --show-error --noproxy "*" \
+                    --connect-timeout 3 --max-time 5 \
+                    --output /dev/null "http://$address/" 2>/dev/null; then
+                    echo "$label was reachable at $address" >&2
+                    exit 1
+                fi
+                echo "$label=blocked"
+            }
+            probe_blocked 172.17.0.1 host-gateway
+            probe_blocked 192.168.0.1 private-network
             echo "make=$(command -v make) JOBS=$JOBS NUMJOBS=$NUMJOBS"
-            make -j20 -C /tmp --no-print-directory --eval='all:; @:' all >/dev/null
+            make_flags=$(make -j20 -C /tmp --no-print-directory \
+                --eval='\''all:; @printf "%s\n" "$$MAKEFLAGS"'\'' all)
+            last_jobs=
+            for flag in $make_flags; do
+                [[ "$flag" == -j* ]] && last_jobs=$flag
+            done
+            [[ "$last_jobs" == -j2 ]] || {
+                echo "make did not cap jobs last at -j2: $make_flags" >&2
+                exit 1
+            }
+            echo "make-flags=$make_flags"
             echo "make-cap=ok"
         '
         ;;

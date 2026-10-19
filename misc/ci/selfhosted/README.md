@@ -24,9 +24,9 @@ directory to a build context on Jellyfin, then supply both a digest-pinned
 Ubuntu 24.04 base and the Actions runner version plus its published SHA-256.
 
 ```bash
-UBUNTU_DIGEST=<ubuntu-24.04-index-sha256>
-RUNNER_VERSION=<runner-version>
-RUNNER_SHA256=<actions-runner-linux-x64-archive-sha256>
+UBUNTU_DIGEST=68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+RUNNER_VERSION=2.338.0
+RUNNER_SHA256=af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32
 docker build \
   --build-arg UBUNTU_DIGEST="$UBUNTU_DIGEST" \
   --build-arg RUNNER_VERSION="$RUNNER_VERSION" \
@@ -36,9 +36,9 @@ docker build \
 
 The Dockerfile rejects an unpinned or malformed base digest, a malformed
 version/checksum, and a downloaded archive whose `sha256sum` does not match.
-The launcher currently expects tag `capoworks-actions-runner:2.329.0`; either
-build that exact version or update the `image=` line in `launch.sh` together
-with the build tag.
+The launcher expects tag `capoworks-actions-runner:2.338.0`. The Ubuntu 24.04
+base index digest and official runner archive checksum above are the verified
+inputs for that tag.
 
 The image is Ubuntu 24.04 with Java 21, the firmware cross-build packages,
 GitHub runner native libraries, and `/opt/ci-bin/make`. The wrapper appends
@@ -56,13 +56,15 @@ ssh jellyfin-ts 'chmod 700 ~/.local/share/capoworks-actions-runner/launch.sh'
 
 The launcher creates a container without host mounts, the Docker socket, ports,
 host networking, devices, or privileged mode. It uses the default bridge with
-2 CPUs, 4 GiB RAM, 8 GiB RAM plus swap, and 512 PIDs. The entrypoint is root only
-long enough to install fail-closed output rules, then drops to UID/GID 1001 with
-all bounding, inheritable, and ambient capabilities removed and no-new-privs
-set. Docker adds only `NET_ADMIN`, `SETUID`, `SETGID`, and `SETPCAP` to the
-entrypoint; they are absent during the job. Private IPv4 ranges, CGNAT,
-link-local, multicast, documentation, and reserved destinations are rejected;
-loopback and Docker DNS are allowed. If IPv6 is enabled, only `::1` is allowed.
+2 CPUs, an 8 GiB total RAM-plus-swap limit (4 GiB RAM and 4 GiB swap), and 512
+PIDs. The entrypoint is root only long enough to install fail-closed output
+rules, then drops to UID/GID 1001 with all bounding, inheritable, permitted,
+effective, and ambient capabilities removed and no-new-privs set. Docker adds
+only `NET_ADMIN`, `SETUID`, `SETGID`, and `SETPCAP` to the entrypoint; they are
+absent during the job. Private IPv4 ranges, CGNAT, link-local, multicast,
+documentation, and reserved destinations are rejected; loopback and Docker DNS
+are allowed. If IPv6 is enabled, only `::1` is allowed; startup fails closed if
+the IPv6 output policy cannot be installed.
 
 Run the built-in post-drop probe:
 
@@ -71,17 +73,20 @@ docker run --rm --cap-drop ALL \
   --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID --cap-add SETPCAP \
   --cpus 2 --memory 4g --memory-swap 8g --pids-limit 512 \
   --network bridge \
-  capoworks-actions-runner:2.329.0 probe
+  capoworks-actions-runner:2.338.0 probe
 ```
 
-It must report UID/GID 1001, zero effective capabilities, public network OK,
-private network blocked, and the capped make wrapper. Hardware actions are not
-part of this runner.
+It must report UID/GID 1001, zero inheritable/permitted/effective/bounding/
+ambient capabilities, `NoNewPrivs=1`, no job `NET_ADMIN` capability, public
+network OK, both the bridge gateway and private network blocked, and `-j2` as
+the last job flag in `MAKEFLAGS`. Hardware actions are not part of this runner.
 
 ## Install and start the local controller
 
 The coordinator needs an authenticated `gh` profile with repository
-administration access and a non-interactive SSH alias named `jellyfin-ts`.
+administration access and a non-interactive SSH alias named `jellyfin-ts`. The
+local controller remains a runtime dependency: the image and launcher alone
+cannot mint JIT configurations or start jobs.
 
 ```bash
 install -d -m 700 ~/.local/share/capoworks-actions-controller ~/.config/systemd/user
@@ -101,7 +106,7 @@ capoworks-actions-controller.service`. Do not enable shell tracing.
 ```bash
 systemctl --user disable --now capoworks-actions-controller.service
 ssh jellyfin-ts 'docker ps -aq --filter name=capoworks-jit- | xargs -r docker rm -f'
-ssh jellyfin-ts 'docker image rm capoworks-actions-runner:2.329.0'
+ssh jellyfin-ts 'docker image rm capoworks-actions-runner:2.338.0'
 rm -f ~/.config/systemd/user/capoworks-actions-controller.service
 rm -rf ~/.local/share/capoworks-actions-controller
 ssh jellyfin-ts 'rm -rf ~/.local/share/capoworks-actions-runner'
