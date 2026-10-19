@@ -60,7 +60,9 @@ void stopSensors() {
 	deinitThermistors();
 	deinitLambda();
 	deInitFlexSensor();
+#ifdef MODULE_HELLA_OPST
 	deinitHellaOpsT();
+#endif // MODULE_HELLA_OPST
 	deinitAuxSensors();
 	deInitVehicleSpeedSensor();
 	deinitTurbochargerSpeedSensor();
@@ -80,7 +82,9 @@ void reconfigureSensors() {
 	initThermistors();
 	initLambda();
 	initFlexSensor();
+#ifdef MODULE_HELLA_OPST
 	initHellaOpsT();
+#endif // MODULE_HELLA_OPST
 	initAuxSensors();
 	initVehicleSpeedSensor();
 	initTurbochargerSpeedSensor();

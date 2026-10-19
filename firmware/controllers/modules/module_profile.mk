@@ -1,7 +1,7 @@
 # Shared resolved module profile. This file intentionally defines no build rules:
 # it is included while Make is still discovering its default goal.
 
-FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging
+FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst
 
 # An omitted selection means the complete catalog, matching the historical build
 # behavior. An explicitly empty selection remains empty.

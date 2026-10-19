@@ -1,5 +1,7 @@
 #include "pch.h"
 
+#ifdef MODULE_HELLA_OPST
+
 #include "hella_opst.h"
 
 namespace {
@@ -188,3 +190,5 @@ TEST(HellaOpsTInit, ExistingProvidersSkipRegistrationAndReinitIsSafe) {
 	EXPECT_EQ(nullptr, Sensor::getSensorOfType(SensorType::OilPressure));
 	EXPECT_EQ(nullptr, Sensor::getSensorOfType(SensorType::OilTemperature));
 }
+
+#endif // MODULE_HELLA_OPST

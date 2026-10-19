@@ -13,5 +13,4 @@ INIT_SRC_CPP =	$(PROJECT_DIR)/init/sensor/init_sensors.cpp \
 				$(PROJECT_DIR)/init/sensor/init_aux.cpp \
 				$(PROJECT_DIR)/init/sensor/init_vehicle_speed_sensor.cpp \
 				$(PROJECT_DIR)/init/sensor/init_aux_speed_sensor.cpp \
-				$(PROJECT_DIR)/init/sensor/init_turbocharger_speed_sensor.cpp \
-				$(PROJECT_DIR)/init/sensor/init_hella_opst.cpp \
+				$(PROJECT_DIR)/init/sensor/init_turbocharger_speed_sensor.cpp
