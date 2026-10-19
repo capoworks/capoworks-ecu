@@ -18,6 +18,8 @@ fi
 
 "$PROFILE_READER" check "$PROFILE_FILE"
 
+SELECTED_MODULES=$("$PROFILE_READER" read "$PROFILE_FILE" modules)
+
 OUTPUT_FRAGMENTS=()
 while IFS= read -r fragment; do
 	OUTPUT_FRAGMENTS+=("$fragment")
@@ -37,6 +39,7 @@ java -DSystemOut.name=logs/gen_live_documentation \
  -cp ../java_tools/ConfigDefinition.jar \
  com.rusefi.ldmp.LiveDataProcessor integration/LiveData.yaml \
  -makefileDep .dep/fome_live_data.d \
+ -modules "$SELECTED_MODULES" \
  "${FRAGMENT_ARGS[@]}" \
  "${STAMP_ARGS[@]}"
 
