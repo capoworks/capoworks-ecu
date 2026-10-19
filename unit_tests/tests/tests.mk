@@ -154,3 +154,8 @@ ifneq ($(filter emp_pump,$(FOME_MODULES_RESOLVED)),)
 TESTS_SRC_CPP += \
 	tests/test_emp_pump.cpp
 endif
+
+ifneq ($(filter shock_preload,$(FOME_MODULES_RESOLVED)),)
+TESTS_SRC_CPP += \
+	tests/test_shock_preload.cpp
+endif

@@ -38,6 +38,7 @@ or
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
 
 ### Added
+ - Add an optional Caponord electronic shock preload controller on CAN2, including preset, position, target, alarm and current telemetry, command service controls, and a default-off `enableShockPreload` runtime setting. The module is default-on in the build catalog.
  - Add an optional EMP coolant pump module with its Caponord J1939 state machine, configuration and fallback tables, telemetry, service controls, after-run power hold, and CAN TX-thread queue. It is default-on in the module catalog but remains disabled at runtime by `enableEmpPump`; selecting it requires the fan module.
  - Add an optional Engine Sniffer event recorder while preserving the shared RPM guard for the binary tooth logger and verbose trigger logging.
  - Lua core support is now a default-on build module, with its VM, tune fields, gauges, bench outputs, and digital inputs omitted when the module is not selected.
