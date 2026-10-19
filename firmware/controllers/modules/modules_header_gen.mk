@@ -14,3 +14,5 @@ modules_list_generated.h : modules_list_generated.h.gen
 # All objects could depend on module list
 $(OBJS) : engine_modules_generated.h
 $(OBJS) : modules_list_generated.h
+$(PCHOBJ) : engine_modules_generated.h
+$(PCHOBJ) : modules_list_generated.h

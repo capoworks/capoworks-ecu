@@ -33,6 +33,7 @@ or
 
 ### Breaking Changes
  - Advance the flash data version to `20032` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, per-model 16x16 cylinder fuel trims, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI, recreating former 4x4 fuel-trim values in the new model families.
+ - Tune images now carry a static configuration-layout identity for module-aware snapshots. Binary tunes with an incompatible layout are intentionally rejected and defaults are restored; export and re-import values with matching definitions because binary migration is not provided. Default behavior is unchanged until module-selection features are enabled in follow-up PRs.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
 

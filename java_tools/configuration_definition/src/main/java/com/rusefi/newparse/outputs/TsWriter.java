@@ -11,6 +11,8 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,13 +33,40 @@ public class TsWriter {
         ps.close();
     }
 
+    public void writeTunerstudio(ParseState parser, String inputFile, String outputFile,
+                                 List<String> fragmentFiles) throws IOException {
+        PrintStream ps = new PrintStreamAlwaysUnix(new LazyOutputStream(outputFile));
+        writeTunerstudio(parser, inputFile, ps, fragmentFiles);
+        ps.close();
+    }
+
     public void writeTunerstudio(ParseState parser, String inputFile, PrintStream ps) throws IOException {
+        writeTunerstudioLines(parser, inputFile, ps, null);
+    }
+
+    public void writeTunerstudio(ParseState parser, String inputFile, PrintStream ps,
+                                 List<String> fragmentFiles) throws IOException {
+        writeTunerstudioLines(parser, inputFile, ps, fragmentFiles);
+    }
+
+    private void writeTunerstudioLines(ParseState parser, String inputFile, PrintStream ps,
+                                       List<String> fragmentFiles) throws IOException {
         TsConfigProtection protection = new TsConfigProtection(parser);
         TsMetadata metadata = new TsMetadata();
-        try (BufferedReader is = new BufferedReader(new FileReader(inputFile))) {
+        List<String> lines;
+        if (fragmentFiles == null) {
+            lines = new ArrayList<>();
+            try (BufferedReader is = new BufferedReader(new FileReader(inputFile))) {
+                String line;
+                while ((line = is.readLine()) != null) {
+                    lines.add(line);
+                }
+            }
+        } else {
+            lines = ModuleFragments.composeIniTemplate(inputFile, fragmentFiles);
+        }
 
-        while (is.ready()) {
-            String line = is.readLine();
+        for (String line : lines) {
 
             if (line.contains("CONFIG_DEFINITION_START")) {
                 metadata = writeLayoutAndComments(parser, ps);
@@ -113,8 +142,6 @@ public class TsWriter {
             // Copy the line to the output stream
             ps.println(protection.protectField(line));
         }
-
-        } // try
     }
 
     /**

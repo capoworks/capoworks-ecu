@@ -33,6 +33,8 @@ mkdir -p deliver/temp
 if [ "${USE_OPENBLT-no}" = "yes" ]; then
   mkdir -p .dep
   mkdir -p build
+  # Remove stale shared PCH generated with main firmware defines before building the bootloader
+  rm -f pch/pch.h.gch/*
   echo "Calling make for the bootloader..."
   cd bootloader; make -j20 PROJECT_BOARD=$PROJECT_BOARD PROJECT_CPU=$PROJECT_CPU BOARD_DIR=$BOARD_DIR; cd ..
   [ -e bootloader/blbuild/fome_bl.hex ] || { echo "FAILED to compile OpenBLT by $SCRIPT_NAME with $PROJECT_BOARD"; exit 1; }

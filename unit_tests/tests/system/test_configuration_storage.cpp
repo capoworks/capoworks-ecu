@@ -5,6 +5,7 @@
 
 #include <array>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -27,6 +28,8 @@ struct FakeFlash {
 	std::vector<flashaddr_t> erases;
 	std::vector<flashaddr_t> programs;
 	std::vector<flashaddr_t> compares;
+	std::vector<std::pair<flashaddr_t, size_t>> reads;
+	std::array<size_t, 2> readableBytes{copySize, copySize};
 	Fault fault = Fault::None;
 	flashaddr_t faultyAddress = firstAddress;
 	flashaddr_t failingRead = 0;
@@ -58,8 +61,7 @@ FakeFlash* flash;
 
 void makeConfiguration(persistent_config_container_s& data, int fill) {
 	memset(&data, 0, sizeof(data));
-	data.version = FLASH_DATA_VERSION;
-	data.size = sizeof(data);
+	initializePersistentConfigHeader(data);
 	memset(&data.persistentConfiguration, fill, sizeof(data.persistentConfiguration));
 	data.value = singleCrc(&data.persistentConfiguration, sizeof(data.persistentConfiguration));
 }
@@ -139,6 +141,13 @@ int intFlashWrite(flashaddr_t address, const char* buffer, size_t size) {
 
 int intFlashRead(flashaddr_t source, char* destination, size_t size) {
 	if (flash->readFails(source)) {
+		return FLASH_RETURN_BAD_FLASH;
+	}
+	auto base = source >= secondAddress ? secondAddress : firstAddress;
+	size_t copyIndex = base == firstAddress ? 0 : 1;
+	size_t offset = source - base;
+	flash->reads.emplace_back(source, size);
+	if (offset > flash->readableBytes[copyIndex] || size > flash->readableBytes[copyIndex] - offset) {
 		return FLASH_RETURN_BAD_FLASH;
 	}
 	memcpy(destination, flash->at(source), size);
@@ -291,9 +300,61 @@ TEST_F(ConfigurationStorage, bootRejectsCorruptionAndVersionMismatch) {
 	persistent_config_container_s recovered;
 	EXPECT_EQ(readConfigurationCopies(firstAddress, 0, recovered), ConfigurationFlashState::CrcFailed);
 	EXPECT_EQ(readConfigurationCopies(firstAddress, secondAddress, recovered), ConfigurationFlashState::Ok);
-	oldData.version++;
+	oldData.header.version++;
 	memcpy(memory.at(firstAddress), &oldData, copySize);
 	EXPECT_EQ(readConfigurationCopies(firstAddress, 0, recovered), ConfigurationFlashState::IncompatibleVersion);
+}
+
+TEST_F(ConfigurationStorage, rejectsSameSizeCrcValidConfigurationWithDifferentLayoutBeforePayloadRead) {
+	newData.header.layoutIdLow ^= 1;
+	memcpy(memory.at(firstAddress), &newData, copySize);
+	memory.reads.clear();
+
+	persistent_config_container_s recovered;
+	EXPECT_EQ(readConfigurationCopies(firstAddress, 0, recovered), ConfigurationFlashState::IncompatibleVersion);
+	ASSERT_EQ(memory.reads.size(), 1u);
+	EXPECT_EQ(memory.reads.front(), (std::pair<flashaddr_t, size_t>{firstAddress, sizeof(persistent_config_header_s)}));
+}
+
+TEST_F(ConfigurationStorage, fallsBackToValidBackupWhenPrimaryLayoutDoesNotMatch) {
+	persistent_config_container_s expectedBackup = oldData;
+	oldData.header.layoutIdHigh ^= 1;
+	memcpy(memory.at(firstAddress), &oldData, copySize);
+
+	persistent_config_container_s recovered;
+	EXPECT_EQ(readConfigurationCopies(firstAddress, secondAddress, recovered), ConfigurationFlashState::Ok);
+	EXPECT_EQ(memcmp(&recovered, &expectedBackup, copySize), 0);
+}
+
+TEST_F(ConfigurationStorage, rejectsTruncatedHeaderWithoutReadingPayload) {
+	memory.readableBytes[0] = sizeof(persistent_config_header_s) - 1;
+	memory.reads.clear();
+
+	persistent_config_container_s recovered;
+	EXPECT_EQ(readConfigurationCopies(firstAddress, 0, recovered), ConfigurationFlashState::ReadFailed);
+	ASSERT_EQ(memory.reads.size(), 1u);
+	EXPECT_EQ(memory.reads.front(), (std::pair<flashaddr_t, size_t>{firstAddress, sizeof(persistent_config_header_s)}));
+}
+
+TEST_F(ConfigurationStorage, rejectsHeaderOnlyRecordWithoutReadingPastHeader) {
+	memory.readableBytes[0] = sizeof(persistent_config_header_s);
+	memory.reads.clear();
+
+	persistent_config_container_s recovered;
+	EXPECT_EQ(readConfigurationCopies(firstAddress, 0, recovered), ConfigurationFlashState::ReadFailed);
+	ASSERT_EQ(memory.reads.size(), 2u);
+	EXPECT_EQ(
+			memory.reads[1],
+			(std::pair<flashaddr_t, size_t>{
+					firstAddress + offsetof(persistent_config_container_s, persistentConfiguration),
+					sizeof(persistent_config_s)}));
+}
+
+TEST_F(ConfigurationStorage, rejectsTruncatedPayload) {
+	memory.readableBytes[0] = sizeof(persistent_config_header_s) + 10;
+
+	persistent_config_container_s recovered;
+	EXPECT_EQ(readConfigurationCopies(firstAddress, 0, recovered), ConfigurationFlashState::ReadFailed);
 }
 
 TEST_F(ConfigurationStorage, doesNotEraseUnreadableCopyWithoutAnotherVerifiedCopy) {

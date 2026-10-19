@@ -18,11 +18,78 @@ fi
 BOARD_DIR=$1
 SHORT_BOARDNAME=$2
 STAMP_FILE=${3:-}
+PROFILE_FILE=${4:-}
 INI="fome_${SHORT_BOARDNAME}.ini"
+PROFILE_READER=controllers/modules/module_profile.sh
+PROFILE_MAKE=controllers/modules/module_profile_host.mk
+LIVE_DATA_OUTPUTS=(
+	generated/live_data_ids.h
+	generated/live_data_fragments.h
+	generated/total_live_data_generated.h
+	generated/log_fields_generated.h
+	generated/output_lookup_generated.cpp
+	generated/output_channels.ini
+	generated/data_logs.ini
+)
 
 echo "BOARD_DIR=${BOARD_DIR} SHORT_BOARDNAME=${SHORT_BOARDNAME}"
 
 PREPEND_FILE=${BOARD_DIR}/prepend.txt
+
+if [ -z "$PROFILE_FILE" ]; then
+	PROFILE_FILE=generated/module_profile.txt
+	PROFILE_SNAPSHOT=$(mktemp)
+	trap 'rm -f "$PROFILE_SNAPSHOT"' EXIT
+	if [ -f "$PROFILE_FILE" ]; then
+		cp "$PROFILE_FILE" "$PROFILE_SNAPSHOT"
+	fi
+
+	make --no-print-directory -f "$PROFILE_MAKE" module-profile \
+		PROJECT_DIR="$PWD" \
+		BOARD_DIR="$BOARD_DIR"
+
+	LIVE_DATA_REFRESH=0
+	if ! cmp -s "$PROFILE_SNAPSHOT" "$PROFILE_FILE"; then
+		LIVE_DATA_REFRESH=1
+	fi
+	for output in "${LIVE_DATA_OUTPUTS[@]}"; do
+		if [ ! -f "$output" ]; then
+			LIVE_DATA_REFRESH=1
+		fi
+	done
+
+	if (( LIVE_DATA_REFRESH )); then
+		./gen_live_documentation.sh "" "$PROFILE_FILE"
+	fi
+
+	rm -f "$PROFILE_SNAPSHOT"
+	trap - EXIT
+fi
+
+"$PROFILE_READER" check "$PROFILE_FILE"
+
+CONFIG_FRAGMENTS=()
+while IFS= read -r fragment; do
+	CONFIG_FRAGMENTS+=("$fragment")
+done < <("$PROFILE_READER" read "$PROFILE_FILE" config)
+
+TS_FRAGMENTS=()
+while IFS= read -r fragment; do
+	TS_FRAGMENTS+=("$fragment")
+done < <("$PROFILE_READER" read "$PROFILE_FILE" ini)
+
+FRAGMENT_ARGS=()
+for fragment in "${CONFIG_FRAGMENTS[@]}"; do
+	FRAGMENT_ARGS+=(-configFragment "$fragment")
+done
+for fragment in "${TS_FRAGMENTS[@]}"; do
+	FRAGMENT_ARGS+=(-tsFragment "$fragment")
+done
+
+STAMP_ARGS=()
+if [ -n "$STAMP_FILE" ]; then
+	STAMP_ARGS=(-stampFile "$STAMP_FILE")
+fi
 
 # Allow the next command to fail, the board may not have a BOARD_SPECIFIC_URL
 set +e
@@ -39,6 +106,7 @@ echo "BOARD_SPECIFIC_URL=[$BOARD_SPECIFIC_URL]"
 java \
 	-DSystemOut.name=logs/gen_config_${SHORT_BOARDNAME} \
 	-jar ../java_tools/ConfigDefinition.jar \
+	"${FRAGMENT_ARGS[@]}" \
 	-readfile OUTPUTS_SECTION_FROM_FILE generated/output_channels.ini \
 	-readfile DATALOG_SECTION_FROM_FILE generated/data_logs.ini \
 	-triggerInputFolder ../unit_tests \
@@ -60,7 +128,7 @@ java \
 	-c_defines        generated/rusefi_generated.h \
 	-c_destination    generated/engine_configuration_generated_structures.h \
 	-makefileDep      .dep/fome_generated.d \
-	${STAMP_FILE:+-stampFile "$STAMP_FILE"}
+	"${STAMP_ARGS[@]}"
 
 
 [ $? -eq 0 ] || { echo "ERROR generating TunerStudio config for ${BOARD_DIR}"; exit 1; }

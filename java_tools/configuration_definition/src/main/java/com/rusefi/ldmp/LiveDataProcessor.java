@@ -45,6 +45,7 @@ public class LiveDataProcessor {
 
     private final ArrayList<String> inputFiles = new ArrayList<>();
     private final ArrayList<String> outputFiles = new ArrayList<>();
+    private final ArrayList<String> outputFragmentFiles = new ArrayList<>();
 
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
@@ -58,6 +59,7 @@ public class LiveDataProcessor {
         String yamlFileName = args[0];
         String makefileDepsDestination = null;
         String stampFile = null;
+        ArrayList<String> outputFragmentFiles = new ArrayList<>();
 
         // Parse optional arguments
         for (int i = 1; i < args.length - 1; i += 2) {
@@ -65,6 +67,8 @@ public class LiveDataProcessor {
                 makefileDepsDestination = args[i + 1];
             } else if ("-stampFile".equals(args[i])) {
                 stampFile = args[i + 1];
+            } else if ("-outputFragment".equals(args[i])) {
+                outputFragmentFiles.add(args[i + 1]);
             }
         }
 
@@ -73,6 +77,8 @@ public class LiveDataProcessor {
 
         LiveDataProcessor liveDataProcessor = new LiveDataProcessor();
         liveDataProcessor.inputFiles.add(yamlFileName);
+        liveDataProcessor.inputFiles.addAll(outputFragmentFiles);
+        liveDataProcessor.outputFragmentFiles.addAll(outputFragmentFiles);
 
         int sensorTsPosition = liveDataProcessor.handleYaml(data);
         liveDataProcessor.writeFiles();
@@ -126,7 +132,13 @@ public class LiveDataProcessor {
                     RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), prepend);
                 }
 
-                RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), definitionFile);
+                if (!outputFragmentFiles.isEmpty()
+                        && new File(definitionFile).getName().equals("output_channels.txt")) {
+                    RusefiParseErrorStrategy.parseDefinitionString(parseState.getListener(),
+                            ModuleFragments.composeOutput(definitionFile, outputFragmentFiles));
+                } else {
+                    RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), definitionFile);
+                }
 
                 CStructWriter cStructs = new CStructWriter();
                 cStructs.writeCStructs(parseState, cHeaderDestination);

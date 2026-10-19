@@ -26,6 +26,7 @@ static std::function<void()> duringWrite;
 static std::function<void()> duringRead;
 static std::function<void()> duringError;
 static ConfigurationWriteResult nextResult;
+static ConfigurationFlashState nextReadResult = ConfigurationFlashState::Ok;
 
 bool allowFlashWhileRunning() {
 	return concurrent;
@@ -60,13 +61,14 @@ auto readConfigurationCopies = [](flashaddr_t, flashaddr_t, persistent_config_co
 	if (duringRead) {
 		duringRead();
 	}
-	return ConfigurationFlashState::Ok;
+	return nextReadResult;
 };
 
 auto writeConfigurationCopies = [](flashaddr_t, flashaddr_t, const persistent_config_container_s& data) {
 	events.push_back('W');
-	EXPECT_EQ(data.version, FLASH_DATA_VERSION);
-	EXPECT_EQ(data.size, sizeof(data));
+	EXPECT_EQ(data.header.version, FLASH_DATA_VERSION);
+	EXPECT_EQ(data.header.size, sizeof(data));
+	EXPECT_EQ(getPersistentConfigLayoutId(data.header), CONFIG_LAYOUT_ID);
 	EXPECT_EQ(data.value, singleCrc(&data.persistentConfiguration, sizeof(data.persistentConfiguration)));
 	if (duringWrite) {
 		duringWrite();
@@ -96,14 +98,14 @@ protected:
 		duringRead = {};
 		duringError = {};
 		nextResult = {ConfigurationWritePhase::Complete, 0, FLASH_RETURN_SUCCESS, 2};
+		nextReadResult = ConfigurationFlashState::Ok;
 		configurationWriteState = {};
 		lastWriteResult = {ConfigurationWritePhase::Complete, 0, FLASH_RETURN_SUCCESS, 0};
 		burnWithoutFlash = false;
 
 		// The CRC covers the full object representation, including padding.
 		efi::clear(persistentState);
-		persistentState.size = sizeof(persistentState);
-		persistentState.version = FLASH_DATA_VERSION;
+		initializePersistentConfigHeader(persistentState);
 		persistentState.value =
 				singleCrc(&persistentState.persistentConfiguration, sizeof(persistentState.persistentConfiguration));
 	}
@@ -321,6 +323,16 @@ TEST_F(FlashWriteLifecycle, ReadInvalidatesGateAndCacheBeforeStorageAccess) {
 	EXPECT_EQ(flash_lifecycle_test::reads, 1u);
 	EXPECT_EQ(engine->airmassCalibration.Generation, generation + 1);
 	EXPECT_FALSE(gate.allowInjection());
+}
+
+TEST_F(FlashWriteLifecycle, IncompatibleHeaderResetsToDefaultEngineWithoutPreservingOldType) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	flash_lifecycle_test::nextReadResult = ConfigurationFlashState::IncompatibleVersion;
+
+	EXPECT_NE(engineConfiguration->engineType, engine_type_e::DEFAULT_ENGINE_TYPE);
+	flash_lifecycle_test::readFromFlash();
+
+	EXPECT_EQ(engineConfiguration->engineType, engine_type_e::DEFAULT_ENGINE_TYPE);
 }
 
 TEST_F(FlashWriteLifecycle, FailedAttemptRemainsPendingWithoutContinuousRetry) {
