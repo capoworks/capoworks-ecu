@@ -83,9 +83,14 @@ The Shock preload module owns its CAN2 protocol, runtime state, configuration, o
 
 `integration/LiveData.yaml` owns live-data usage declarations and marks module-specific usages with `module:`. YAML order fixes `LDS_<usage>` IDs, so an unselected module keeps its declaration and IDs while its fragment and packed output usage disappear. Do not reorder or duplicate usages just to change a profile.
 
-## Core8 memory placement
+## Resource budgets
 
-Full Core8 builds place the Lua CAN filter table in ordinary SRAM so CCM remains available for engine state. The filter table remains one statically allocated 48-entry array. Ordinary SRAM may add a small read-latency cost to CAN filter lookups; hardware timing and exact memory margins require validation from an actual build.
+These are compile-time defaults and placements, not calculated free-RAM margins. Board-specific `LUA_USER_HEAP` overrides can change the heap figures.
+
+- The default Lua heap is 20,000 bytes on F407, 60,000 bytes on non-Ethernet F429, and 25,000 bytes on Ethernet F429. The F7 and H7 defaults remain 200,000 and 100,000 bytes respectively. The F407 reduction from 30,000 to 20,000 bytes lowers script capacity. A 32-bit simulator check with a 572-byte script reported 14,085 bytes used across startup, execute, and reload; that is not a hardware or real-workload guarantee.
+- On all F4 boards, CAN and USB background objects use ordinary SRAM, and the Lua CAN filter table remains one static 48-entry array there (768 bytes at 16 bytes per entry). The main loop remains in CCM on F407. Non-Ethernet F429 builds move it to ordinary SRAM; Ethernet F429 builds retain CCM. The main-loop stack remains 5,120 bytes in every case.
+- Compressed embedded INI mass storage uses one shared 16 KiB DEFLATE dictionary. A static assertion enforces that the firmware dictionary is at least as large as the generated image's declared window.
+- F7 functions use 4-byte alignment and retain the default `-O2`; timing for these changes has not been benchmarked.
 
 ## Generated configuration
 
