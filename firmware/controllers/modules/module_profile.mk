@@ -3,11 +3,15 @@
 
 FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload
 
-# The default selection includes available modules, with named opt-ins disabled.
-# An explicit FOME_MODULES selection can enable any available module.
-# An explicitly empty selection remains empty.
+# These modules are available for explicit selection but are not part of the
+# default profile on any board.
 FOME_MODULES_DEFAULT := $(filter-out hella_opst emp_pump shock_preload,$(FOME_MODULE_CATALOG))
-FOME_MODULES ?= $(FOME_MODULES_DEFAULT)
+
+# An omitted selection uses the default profile, minus any modules the board
+# declares unsupported. An explicitly empty selection remains empty.
+ifeq ($(origin FOME_MODULES),undefined)
+  FOME_MODULES := $(filter-out $(FOME_MODULES_BOARD_UNSUPPORTED),$(FOME_MODULES_DEFAULT))
+endif
 FOME_MODULES_UNKNOWN := $(filter-out $(FOME_MODULE_CATALOG),$(FOME_MODULES))
 
 ifneq ($(strip $(FOME_MODULES_UNKNOWN)),)
@@ -16,6 +20,11 @@ endif
 
 # Resolve in catalog order and remove duplicates regardless of selection order.
 FOME_MODULES_RESOLVED := $(filter $(FOME_MODULES),$(FOME_MODULE_CATALOG))
+
+FOME_MODULES_BOARD_UNSUPPORTED_SELECTED := $(filter $(FOME_MODULES_RESOLVED),$(FOME_MODULES_BOARD_UNSUPPORTED))
+ifneq ($(strip $(FOME_MODULES_BOARD_UNSUPPORTED_SELECTED)),)
+  $(error Board $(notdir $(BOARD_DIR)) does not support FOME_MODULES module(s): $(FOME_MODULES_BOARD_UNSUPPORTED_SELECTED). Remove them from FOME_MODULES or select a supported board)
+endif
 
 ifneq ($(strip $(NO_MAP_AVERAGING)),)
   FOME_MODULES_RESOLVED := $(filter-out map_averaging,$(FOME_MODULES_RESOLVED))
