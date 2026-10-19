@@ -74,7 +74,8 @@ import sys
 import zlib
 
 source_path, output_path, window_bits = sys.argv[1:]
-compressor = zlib.compressobj(level=9, wbits=16 + int(window_bits))
+# memLevel changes host-side compression table allocation and output density, not the decoder window.
+compressor = zlib.compressobj(level=9, wbits=16 + int(window_bits), memLevel=6)
 
 with open(source_path, "rb") as source, open(output_path, "wb") as output:
     while True:
