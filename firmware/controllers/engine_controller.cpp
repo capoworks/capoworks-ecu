@@ -24,7 +24,9 @@
 #include "pch.h"
 
 #include "trigger_central.h"
+#ifdef MODULE_LUA
 #include "script_impl.h"
+#endif // MODULE_LUA
 #include "idle_thread.h"
 #include "main_trigger_callback.h"
 #include "flash_main.h"
@@ -287,7 +289,9 @@ void commonInitEngineController() {
 
 	initAccelEnrichment();
 
+#ifdef MODULE_LUA
 	initScriptImpl();
+#endif // MODULE_LUA
 
 	initGpPwm();
 
@@ -381,12 +385,14 @@ bool validateConfig() {
 	ensureArrayIsAscendingOrDefault("Map estimate TPS", config->mapEstimateTpsBins);
 	ensureArrayIsAscendingOrDefault("Map estimate RPM", config->mapEstimateRpmBins);
 
+#ifdef MODULE_LUA
 	ensureArrayIsAscendingOrDefault("Script Curve 1", config->scriptCurve1Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 2", config->scriptCurve2Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 3", config->scriptCurve3Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 4", config->scriptCurve4Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 5", config->scriptCurve5Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 6", config->scriptCurve6Bins);
+#endif // MODULE_LUA
 
 	// todo: huh? why does this not work on CI?	ensureArrayIsAscendingOrDefault("Dwell Correction Voltage",
 	// engineConfiguration->dwellVoltageCorrVoltBins);

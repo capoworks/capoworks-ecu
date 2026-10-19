@@ -33,7 +33,9 @@
 #include "injector_model.h"
 #include "speed_density.h"
 #include "speed_density_base.h"
+#if EFI_LUA
 #include "lua_hooks.h"
+#endif // EFI_LUA
 
 static mapEstimate_Map3D_t mapEstimationTable;
 

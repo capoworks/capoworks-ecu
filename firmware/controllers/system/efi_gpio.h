@@ -107,7 +107,9 @@ public:
 	RegisteredOutputPin harleyAcr;
 	RegisteredOutputPin harleyAcr2;
 	OutputPin o2heater;
+#ifdef MODULE_LUA
 	OutputPin luaOutputPins[LUA_PWM_COUNT];
+#endif // MODULE_LUA
 
 	/**
 	 * brain board RED LED by default

@@ -24,7 +24,9 @@
 #include "sd_file_log.h"
 #include "memstreams.h"
 #include <chprintf.h>
+#if EFI_LUA
 #include "rusefi_lua.h"
+#endif // EFI_LUA
 #include "can_hw.h"
 #include "flash_main.h"
 #include "signal_executor_sleep.h"
@@ -267,7 +269,9 @@ void rusEfiFunctionalTest(void) {
 	initCan();
 #endif // HAL_USE_CAN
 
+#if EFI_LUA
 	startLua();
+#endif // EFI_LUA
 
 	extern bool main_loop_started;
 	main_loop_started = true;

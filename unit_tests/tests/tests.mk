@@ -43,17 +43,6 @@ TESTS_SRC_CPP = \
 	tests/ignition_injection/test_injector_model.cpp \
 	tests/ignition_injection/test_odd_firing_engine.cpp \
 	tests/ignition_injection/test_paired_wasted_spark.cpp \
-	tests/lua/test_lua_basic.cpp \
-	tests/lua/test_lookup.cpp \
-	tests/lua/test_lua_e38.cpp \
-	tests/lua/test_lua_e65.cpp \
-	tests/lua/test_lua_ford.cpp \
-	tests/lua/test_lua_vag.cpp \
-	tests/lua/test_lua_nissan.cpp \
-	tests/lua/test_lua_with_engine.cpp \
-	tests/lua/test_lua_hooks.cpp \
-	tests/lua/test_lua_Leiderman_Khlystov.cpp \
-	tests/lua/test_can_filter.cpp \
 	tests/util/test_biquad.cpp \
 	tests/util/test_scaled_channel.cpp \
 	tests/util/test_timer.cpp \
@@ -145,3 +134,18 @@ TESTS_SRC_CPP = \
 	tests/actuators/test_vvt.cpp \
 	tests/test_obd2.cpp \
 	tests/test_trip_odometer.cpp \
+
+ifneq ($(filter lua,$(FOME_MODULES_RESOLVED)),)
+TESTS_SRC_CPP += \
+	tests/lua/test_lua_basic.cpp \
+	tests/lua/test_lookup.cpp \
+	tests/lua/test_lua_e38.cpp \
+	tests/lua/test_lua_e65.cpp \
+	tests/lua/test_lua_ford.cpp \
+	tests/lua/test_lua_vag.cpp \
+	tests/lua/test_lua_nissan.cpp \
+	tests/lua/test_lua_with_engine.cpp \
+	tests/lua/test_lua_hooks.cpp \
+	tests/lua/test_lua_Leiderman_Khlystov.cpp \
+	tests/lua/test_can_filter.cpp
+endif

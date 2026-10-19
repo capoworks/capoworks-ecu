@@ -1,7 +1,7 @@
 # Shared resolved module profile. This file intentionally defines no build rules:
 # it is included while Make is still discovering its default goal.
 
-FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer
+FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua
 
 # The default selection includes available modules, with named opt-ins disabled.
 # An explicit FOME_MODULES selection can enable any available module.

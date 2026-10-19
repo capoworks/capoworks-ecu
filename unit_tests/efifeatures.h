@@ -48,7 +48,13 @@
 #define EFI_SHAFT_POSITION_INPUT TRUE
 #define EFI_ENGINE_CONTROL TRUE
 
+#ifndef EFI_LUA
+#ifdef MODULE_LUA
 #define EFI_LUA TRUE
+#else
+#define EFI_LUA FALSE
+#endif
+#endif
 
 #define EFI_HPFP TRUE
 

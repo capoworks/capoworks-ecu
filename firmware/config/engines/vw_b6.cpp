@@ -127,17 +127,20 @@ static inline void commonPassatB6() {
 	engineConfiguration->crankingInjectionMode = IM_SEQUENTIAL;
 }
 
+#if EFI_LUA
 // MAF signal frequency after hardware divider x16, Hz
 static const float hardCodedFreqBins[] = {139, 152, 180, 217, 280, 300, 365};
 
 // MAF grams per second
 static const float hardCodedGperSValues[]{3.58, 4.5, 6.7, 11, 22, 25, 40};
+#endif // EFI_LUA
 
 /**
  * set engine_type 39
  */
 void setProteusVwPassatB6() {
 #if HW_PROTEUS
+#if EFI_LUA
 	static_assert(sizeof(hardCodedFreqBins) == sizeof(hardCodedGperSValues));
 	{
 		size_t mi = 0;
@@ -152,6 +155,7 @@ void setProteusVwPassatB6() {
 		}
 	}
 	strcpy(engineConfiguration->scriptCurveName[0], "MAFcurve");
+#endif // EFI_LUA
 
 	commonPassatB6();
 	engineConfiguration->triggerInputPins[0] = PROTEUS_VR_1;
@@ -177,9 +181,11 @@ void setProteusVwPassatB6() {
 	engineConfiguration->tps1_2AdcChannel = PROTEUS_IN_TPS1_2;
 	setPPSInputs(PROTEUS_IN_ANALOG_VOLT_9, PROTEUS_IN_PPS2);
 
+#if EFI_LUA
 #include "vw_b6.lua"
+#endif // EFI_LUA
 
-#endif
+#endif // HW_PROTEUS
 }
 
 /**

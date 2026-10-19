@@ -121,7 +121,9 @@ void setBoardDefaultConfiguration() {
 
 	engineConfiguration->ignitionMode = IM_INDIVIDUAL_COILS; // IM_WASTED_SPARK
 
+#if EFI_LUA
 	engineConfiguration->luaOutputPins[0] = Gpio::G5; // 104 ETB Relay
+#endif												  // EFI_LUA
 
 	setPPSCalibration(0.75, 4.45, 0.43, 2.20);
 

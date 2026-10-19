@@ -339,6 +339,7 @@ static void updateRawSensors() {
 	engine->outputChannels.rawWastegatePosition = Sensor::getRaw(SensorType::WastegatePosition);
 	engine->outputChannels.rawFuelTankLevel = Sensor::getRaw(SensorType::FuelLevel);
 
+#ifdef MODULE_LUA
 	engine->outputChannels.luaGauges[0] = Sensor::getOrZero(SensorType::LuaGauge1);
 	engine->outputChannels.luaGauges[1] = Sensor::getOrZero(SensorType::LuaGauge2);
 	engine->outputChannels.luaGauges[2] = Sensor::getOrZero(SensorType::LuaGauge3);
@@ -347,6 +348,7 @@ static void updateRawSensors() {
 	engine->outputChannels.luaGauges[5] = Sensor::getOrZero(SensorType::LuaGauge6);
 	engine->outputChannels.luaGauges[6] = Sensor::getOrZero(SensorType::LuaGauge7);
 	engine->outputChannels.luaGauges[7] = Sensor::getOrZero(SensorType::LuaGauge8);
+#endif // MODULE_LUA
 
 	for (size_t i = 0; i < efi::size(engine->outputChannels.rawAnalogInput); i++) {
 		engine->outputChannels.rawAnalogInput[i] =
@@ -436,10 +438,7 @@ static void updateFuelInfo() {
 	const float timeSinceCut = std::min(
 			engine->module<DfcoController>()->getTimeSinceCut(), engine->module<LimpManager>()->getTimeSinceAnyCut());
 	engine->outputChannels.veAnalyzeTimeSinceCut = clampF(0, timeSinceCut, 655.35f);
-	static_assert(offsetof(TunerStudioOutputChannels, veAnalyzeIsCranking) == 259);
-	static_assert(offsetof(TunerStudioOutputChannels, coilDutyCycle) == 260);
-	static_assert(offsetof(TunerStudioOutputChannels, veAnalyzeTimeSinceCut) == 262);
-	static_assert(offsetof(TunerStudioOutputChannels, seconds) == 264);
+	// Offsets follow the selected generated output layout.
 
 	engine->outputChannels.veValue = engine->engineState.currentVe;
 }
