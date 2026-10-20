@@ -206,11 +206,15 @@
 #endif
 
 #ifndef EFI_LUA
+#ifdef MODULE_LUA
 #define EFI_LUA TRUE
+#else
+#define EFI_LUA FALSE
+#endif
 #endif
 
 #ifndef EFI_ENGINE_SNIFFER
-#define EFI_ENGINE_SNIFFER TRUE
+#define EFI_ENGINE_SNIFFER MODULE_ENGINE_SNIFFER
 #endif
 
 #ifndef DL_OUTPUT_BUFFER

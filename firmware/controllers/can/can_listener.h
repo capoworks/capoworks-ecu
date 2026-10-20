@@ -16,7 +16,11 @@ public:
 
 	CanListener* processFrame(CanBusIndex busIndex, const CANRxFrame& frame, efitick_t nowNt) {
 		if (acceptFrame(busIndex, frame)) {
+#ifdef MODULE_EMP_PUMP
+			decodeFrame(busIndex, frame, nowNt);
+#else
 			decodeFrame(frame, nowNt);
+#endif
 		}
 
 		return m_next;
@@ -41,6 +45,13 @@ public:
 	}
 
 protected:
+#ifdef MODULE_EMP_PUMP
+	// Bus-aware override for listeners whose protocol endpoint can move between
+	// CAN controllers. The bridge is compiled only when a bus-aware module needs it.
+	virtual void decodeFrame(CanBusIndex, const CANRxFrame& frame, efitick_t nowNt) {
+		decodeFrame(frame, nowNt);
+	}
+#endif
 	virtual void decodeFrame(const CANRxFrame& frame, efitick_t nowNt) = 0;
 
 private:

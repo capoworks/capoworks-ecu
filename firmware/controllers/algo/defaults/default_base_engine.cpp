@@ -53,6 +53,55 @@ static void setDefaultTractionControl() {
 	}
 }
 
+#ifdef MODULE_EMP_PUMP
+static void setDefaultEmpPump() {
+	// The feature is deliberately disabled by default. These values are a
+	// conservative starting point for the Caponord EMP coolant circuit and
+	// must be calibrated for the installed pump and radiator.
+	auto& emp = engineConfiguration->empPump;
+	emp.afterRunEnabled = true;
+	emp.powerHoldEnabled = true;
+	emp.runDuringCranking = true;
+	emp.closedLoopEnabled = true;
+	emp.canBus = 0; // Core8 CAN1, PD0/PD1
+	emp.controllerAddress = 0x96;
+	emp.sourceAddress = 0xA3;
+	emp.stopDebounce100ms = 10;
+	emp.statusTimeoutSeconds = 3;
+	emp.batteryCutoff10 = 115;
+	emp.batteryResume10 = 120;
+	emp.manualTestSeconds = 10;
+	emp.minimumRunRpm = 1500;
+	emp.maximumRpm = 6000;
+	emp.afterRunMinimumRpm = 1800;
+	emp.failsafeRpm = 3000;
+	emp.rampRpmPerSecond = 2000;
+	emp.afterRunMaximumSeconds = 180;
+	emp.manualTestRpm = 2000;
+	emp.afterRunStartTemperature = 95;
+	emp.afterRunStopTemperature = 85;
+	emp.targetTemperature = 90;
+	emp.iatReferenceTemperature = 20;
+	emp.temperatureDeadband = 1;
+	emp.proportionalGain = 250;
+	emp.integralGain = 12;
+	emp.integralLimitRpm = 2000;
+	emp.derivativeGain = 10;
+	emp.loadFeedForwardGain = 220;
+	emp.iatCompensationGain = 18;
+	emp.airflowFullSpeedKph = 100;
+	emp.airflowReliefRpm = 600;
+	emp.fanEquivalentSpeedKph = 35;
+	emp.coolingLimitedDelta = 8;
+	emp.overloadDelta = 15;
+	emp.overloadDelaySeconds = 20;
+	copyArray(emp.temperatureBins, {40, 60, 75, 85, 95, 110});
+	copyArray(emp.rpmBins, {1500, 1600, 1800, 2300, 3500, 6000});
+	copyArray(emp.engineRpmBins, {0, 2000, 5000, 9000});
+	copyArray(emp.minimumFlowRpmBins, {1500, 1800, 2300, 3000});
+}
+#endif // MODULE_EMP_PUMP
+
 /* Cylinder to bank mapping */
 void setLeftRightBanksNeedBetterName() {
 	// Runs at preset-setup time, before the cylinderCount cache is populated, so derive
@@ -115,6 +164,9 @@ void setDefaultBaseEngine() {
 
 	setDefaultTorqueModel();
 	setDefaultTractionControl();
+#ifdef MODULE_EMP_PUMP
+	setDefaultEmpPump();
+#endif // MODULE_EMP_PUMP
 
 	// Fuel pump
 	engineConfiguration->startUpFuelPumpDuration = 4;

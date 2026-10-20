@@ -20,10 +20,22 @@ enum class AirmassConsumer : uint8_t {
 	KnockRetard,
 	KnockGain,
 	HpfpTarget,
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	CylinderFuelTrim,
+#endif // MODULE_CYLINDER_FUEL_TRIM
 	Count
 };
 
 using AirmassConsumerMask = uint16_t;
+
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+// Cylinder fuel trim coordinates are published as dedicated telemetry rather
+// than packed consumer cursors. Keeping them out of the display array avoids
+// growing AirmassConsumerLoadCandidate beyond its existing static bound.
+constexpr size_t AIRMASS_PACKED_CONSUMER_COUNT = static_cast<size_t>(AirmassConsumer::CylinderFuelTrim);
+#else
+constexpr size_t AIRMASS_PACKED_CONSUMER_COUNT = static_cast<size_t>(AirmassConsumer::Count);
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 // Full precision control values. Packed output channels are display only and
 // must never be read back as control inputs.
@@ -66,7 +78,7 @@ struct AirmassConsumerLoadCandidate {
 	AirmassLoadSnapshot Snapshot;
 	AirmassConsumerLoadIdentity Identity;
 	load_override_e Sources[static_cast<size_t>(AirmassConsumer::Count)][MAX_CYLINDER_COUNT] = {};
-	int16_t DisplayCursors[static_cast<size_t>(AirmassConsumer::Count)][MAX_CYLINDER_COUNT] = {};
+	int16_t DisplayCursors[AIRMASS_PACKED_CONSUMER_COUNT][MAX_CYLINDER_COUNT] = {};
 	bool Prepared = false;
 };
 

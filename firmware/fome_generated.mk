@@ -29,10 +29,15 @@ $(JAVA_TOOLS) : $(JAVA_TOOL_SOURCES)
 # the profile itself: an empty-recipe target behind a phony prerequisite is not restatted
 # after its prerequisite runs, which delays A->B invalidation until the next Make run.
 .PHONY: module-profile MODULE_PROFILE_FORCE
-module-profile: $(MODULE_PROFILE_FILE)
+module-profile: $(MODULE_PROFILE_FILE) $(MODULE_PROFILE_OUTPUTS)
 
 $(MODULE_PROFILE_FILE): MODULE_PROFILE_FORCE
-	@$(MODULE_PROFILE_WRITE_CMD)
+	@$(MODULE_PROFILE_REFRESH_CMD)
+
+ifneq ($(strip $(MODULE_PROFILE_OUTPUTS)),)
+$(MODULE_PROFILE_OUTPUTS): $(MODULE_PROFILE_FILE) $(MODULE_PROFILE_OUTPUT_DEPS)
+	@test -f '$@' || $(MODULE_PROFILE_OUTPUT_CMD)
+endif
 
 MODULE_PROFILE_FORCE:
 

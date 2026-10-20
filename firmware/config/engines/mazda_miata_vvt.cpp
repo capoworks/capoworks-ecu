@@ -474,9 +474,11 @@ void setMazdaMiata2003EngineConfiguration() {
 	 * set_fsio_setting 3 65
 	 * set_fsio_setting 4 15
 	 */
+#if EFI_LUA
 	engineConfiguration->scriptSetting[1] = 6500; // #2 RPM threshold
 	engineConfiguration->scriptSetting[2] = 105;  // #3 CLT threshold
 	engineConfiguration->scriptSetting[3] = 12.0; // #4 voltage threshold
+#endif // EFI_LUA
 
 	// enable auto_idle
 	// set idle_p 0.05

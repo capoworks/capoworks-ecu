@@ -405,6 +405,7 @@ void proteusDcWastegateTest() {
 	engineConfiguration->wastegatePositionMin = 700;
 	engineConfiguration->wastegatePositionMax = 4000;
 
+#if EFI_LUA
 	strncpy(config->luaScript,
 			R"(
 
@@ -419,6 +420,7 @@ end
 
     )",
 			efi::size(config->luaScript));
+#endif // EFI_LUA
 }
 
 /**
@@ -452,12 +454,14 @@ void proteusBoardTest() {
 	engineConfiguration->injectionPins[10] = PROTEUS_LS_12;
 	engineConfiguration->injectionPins[11] = PROTEUS_LS_13;
 
+#if EFI_LUA
 	engineConfiguration->luaOutputPins[0] = PROTEUS_LS_7;
 	engineConfiguration->luaOutputPins[1] = PROTEUS_LS_14;
 	engineConfiguration->luaOutputPins[2] = PROTEUS_LS_15;
 	engineConfiguration->luaOutputPins[3] = PROTEUS_LS_16;
 	engineConfiguration->luaOutputPins[4] = PROTEUS_HS_2;
 	engineConfiguration->luaOutputPins[5] = PROTEUS_HS_4;
+#endif // EFI_LUA
 
 	engineConfiguration->ignitionPins[0] = PROTEUS_IGN_1;
 	engineConfiguration->ignitionPins[1] = PROTEUS_IGN_2;
@@ -473,6 +477,7 @@ void proteusBoardTest() {
 	engineConfiguration->ignitionPins[10] = PROTEUS_HS_1;
 	engineConfiguration->ignitionPins[11] = PROTEUS_IGN_12;
 
+#if EFI_LUA
 	strncpy(config->luaScript,
 			R"(
 	startPwm(0, 10, 0.5)
@@ -488,6 +493,7 @@ void proteusBoardTest() {
 	end
     )",
 			efi::size(config->luaScript));
+#endif // EFI_LUA
 
 #endif // EFI_PROD_CODE
 
@@ -661,6 +667,7 @@ void proteusLuaDemo() {
 	engineConfiguration->tps1SecondaryMin = 105;
 	engineConfiguration->tps1SecondaryMax = 933;
 
+#if EFI_LUA
 	strcpy(engineConfiguration->scriptCurveName[2 - 1], "rateofchange");
 
 	strcpy(engineConfiguration->scriptCurveName[3 - 1], "bias");
@@ -682,6 +689,7 @@ void proteusLuaDemo() {
 
 	copyArray(config->scriptCurve3Bins, defaultBiasBins);
 	copyArray(config->scriptCurve3, defaultBiasValues);
+#endif // EFI_LUA
 
 	engineConfiguration->auxAnalogInputs[0] = PROTEUS_IN_ANALOG_VOLT_10;
 	engineConfiguration->afr.hwChannel = EFI_ADC_NONE;
@@ -716,6 +724,7 @@ void proteusLuaDemo() {
 	 *
 	 */
 
+#if EFI_LUA
 	auto script = R"(
 
 startPwm(0, 800, 0.1)
@@ -769,7 +778,8 @@ function onTick()
 end
 				)";
 	strncpy(config->luaScript, script, efi::size(config->luaScript));
-#endif
+#endif // EFI_LUA
+#endif // HW_PROTEUS
 }
 
 void detectBoardType() {

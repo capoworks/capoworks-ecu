@@ -118,7 +118,9 @@ void setBoardDefaultConfiguration() {
 
 	engineConfiguration->invertPrimaryTriggerSignal = true;
 
+#if EFI_LUA
 	engineConfiguration->luaOutputPins[0] = H144_OUT_IO6; // starter relay
+#endif													  // EFI_LUA
 
 #ifdef MODULE_BOOST
 	engineConfiguration->boostControlPin = H144_OUT_PWM5;

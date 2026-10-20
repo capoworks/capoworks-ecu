@@ -1,0 +1,30 @@
+#define SCRIPT_CURVE_8 8
+#define SCRIPT_CURVE_16 16
+
+int16_t[SCRIPT_CURVE_16] autoscale scriptCurve1Bins;;"x", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_16] autoscale scriptCurve1;;"y", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_16] autoscale scriptCurve2Bins;;"x", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_16] autoscale scriptCurve2;;"y", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve3Bins;;"x", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve3;;"y", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve4Bins;;"x", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve4;;"y", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve5Bins;;"x", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve5;;"y", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve6Bins;;"x", 0.1, 0, -3270, 3270, 2
+int16_t[SCRIPT_CURVE_8] autoscale scriptCurve6;;"y", 0.1, 0, -3270, 3270, 2
+
+int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable2;;"value", 0.01, 0, -327, 327, 2
+int16_t[SCRIPT_TABLE_8] scriptTable2LoadBins;;"L", 1, 0, -32000, 32000, 0
+int16_t[SCRIPT_TABLE_8] scriptTable2RpmBins;;"RPM", 1, 0, -32000, 32000, 0
+
+int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable3;;"value", 0.01, 0, -327, 327, 2
+int16_t[SCRIPT_TABLE_8] scriptTable3LoadBins;;"L", 1, 0, -32000, 32000, 0
+int16_t[SCRIPT_TABLE_8] scriptTable3RpmBins;;"RPM", 1, 0, -32000, 32000, 0
+
+int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable4;;"value", 0.01, 0, -327, 327, 2
+int16_t[SCRIPT_TABLE_8] scriptTable4LoadBins;;"L", 1, 0, -32000, 32000, 0
+int16_t[SCRIPT_TABLE_8] scriptTable4RpmBins;;"RPM", 1, 0, -32000, 32000, 0
+
+custom lua_script_t @@LUA_SCRIPT_SIZE@@ string, ASCII, @OFFSET@, @@LUA_SCRIPT_SIZE@@
+lua_script_t luaScript;

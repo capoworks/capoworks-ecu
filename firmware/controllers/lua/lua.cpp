@@ -406,8 +406,6 @@ void startLua() {
 
 #else // not EFI_UNIT_TEST
 
-void startLua() {}
-
 #include <stdexcept>
 #include <string>
 

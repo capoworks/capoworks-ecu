@@ -1,0 +1,2 @@
+	bit isWaveAnalyzerEnabled
+	uint16_t engineChartSize;;"count", 1, 0, 0, 300, 0

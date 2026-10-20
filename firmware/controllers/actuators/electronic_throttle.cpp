@@ -395,8 +395,10 @@ percent_t EtbController::getSetpointEtbNonTorqueModel(percent_t pedalTableValue)
 	// 100% target from table -> 100% target position
 	percent_t targetPosition = interpolateClamped(0, etbIdleAddition, 100, 100, pedalTableValue);
 
+#if EFI_LUA
 	// Adjust up/down by Lua adjustment
 	targetPosition += getLuaAdjustment();
+#endif // EFI_LUA
 
 #if EFI_ANTILAG_SYSTEM
 	if (engine->antilagController.isAntilagCondition) {
@@ -414,6 +416,7 @@ percent_t EtbController::getSetpointEtbTorqueModel(percent_t pedalTableValue) co
 	return std::min(torqueModelThrottle, pedalTableValue);
 }
 
+#if EFI_LUA
 void EtbController::setLuaAdjustment(float adjustment) {
 	luaAdjustment = adjustment;
 	m_luaAdjustmentTimer.reset();
@@ -428,6 +431,7 @@ float EtbController::getLuaAdjustment() const {
 		return luaAdjustment;
 	}
 }
+#endif // EFI_LUA
 
 percent_t EtbController2::getThrottleTrim(float rpm, percent_t targetPosition) const {
 	return interpolate3d(
@@ -1125,6 +1129,7 @@ void setEtbWastegatePosition(percent_t pos) {
 	}
 }
 
+#if EFI_LUA
 void setEtbLuaAdjustment(percent_t pos) {
 	for (int i = 0; i < ETB_COUNT; i++) {
 		if (auto etb = engine->etbControllers[i]) {
@@ -1132,6 +1137,7 @@ void setEtbLuaAdjustment(percent_t pos) {
 		}
 	}
 }
+#endif // EFI_LUA
 
 void setToyota89281_33010_pedal_position_sensor() {
 	setPPSCalibration(0, 4.1, 0.73, 4.9);
