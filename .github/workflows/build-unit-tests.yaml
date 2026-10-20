@@ -29,7 +29,8 @@ jobs:
     - name: Install required software (macos)
       if: ${{ matrix.os == 'macos-latest' }}
       run: |
-        brew install mtools zip dosfstools
+        brew install mtools zip dosfstools make
+        echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
     - name: Print Compiler version
       # NOTE: on mac, this is actually symlink'd to clang, not gcc, but that's ok - we want to build on both
