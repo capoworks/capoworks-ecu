@@ -29,13 +29,17 @@ jobs:
     - name: Install required software (macos)
       if: ${{ matrix.os == 'macos-latest' }}
       run: |
-        brew install mtools zip dosfstools make
+        brew install mtools zip dosfstools make bash
+        echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
         echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
     - name: Print Compiler version
       # NOTE: on mac, this is actually symlink'd to clang, not gcc, but that's ok - we want to build on both
       working-directory: .
-      run: gcc -v
+      run: |
+        gcc -v
+        make --version
+        bash --version
 
     - name: Build Tests
       working-directory: ./unit_tests/
