@@ -186,7 +186,6 @@ CPPSRC = $(ALLCPPSRC) \
   $(HW_LAYER_DRIVERS_CPP) \
   $(HW_LAYER_DRIVERS_CORE_CPP) \
   $(CONSOLE_SRC_CPP) \
-  $(DEV_SIMULATOR_SRC_CPP) \
   simulator/rusEfiFunctionalTest.cpp \
   simulator/can/hal_can_lld.cpp \
   simulator/framework.cpp \

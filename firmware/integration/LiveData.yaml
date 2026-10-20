@@ -64,6 +64,7 @@ Usages:
     folder: controllers/actuators
     prepend: integration/fome_config_shared.txt
     conditional_compilation: "EFI_ENGINE_CONTROL"
+    module: boost
     output_name: Boost
 
   - name: ac_control

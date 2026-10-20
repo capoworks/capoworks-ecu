@@ -7,7 +7,6 @@ ALLCPPSRC += $(LUA_DIR)/lua.cpp \
 			 $(LUA_DIR)/lua_hooks_util.cpp \
 			 $(LUA_DIR)/script_impl.cpp \
 			 $(LUA_DIR)/output_lookup.cpp \
-			 $(LUA_DIR)/value_lookup.cpp \
 			 $(LUA_DIR)/lua_can_rx.cpp \
 			 $(LUA_DIR)/lua_getchannel.cpp \
 

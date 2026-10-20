@@ -126,10 +126,12 @@ static void setDefaultLaunchParameters() {
 			500; // Rpm above Launch triggered +(if retard enabled) launchTimingRpmRange to hard cut
 	engineConfiguration->launchSpeedThreshold = 10; // maximum speed allowed before disable launch
 	engineConfiguration->launchFuelAdded = 10;		// Extra fuel in % when launch are triggered
-	engineConfiguration->launchBoostDuty = 70;		// boost valve duty cycle at launch
-	engineConfiguration->launchActivateDelay = 3;	// Delay in seconds for launch to kick in
-													//	engineConfiguration->enableLaunchRetard = true;
-													// dead code todo	engineConfiguration->enableLaunchBoost = true;
+#ifdef MODULE_BOOST
+	engineConfiguration->launchBoostDuty = 70;	  // boost valve duty cycle at launch
+#endif											  // MODULE_BOOST
+	engineConfiguration->launchActivateDelay = 3; // Delay in seconds for launch to kick in
+												  //	engineConfiguration->enableLaunchRetard = true;
+												  // dead code todo	engineConfiguration->enableLaunchBoost = true;
 	engineConfiguration->launchSmoothRetard =
 			true; // interpolates the advance linear from launchrpm to fully retarded at launchtimingrpmrange
 				  // dead code todo	engineConfiguration->antiLagRpmTreshold = 3000;

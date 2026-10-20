@@ -10,7 +10,9 @@
 
 #include "pch.h"
 
+#if EFI_LUA
 #include "rusefi_lua.h"
+#endif // EFI_LUA
 #include "can_bench_test.h"
 
 typedef float SCRIPT_TABLE_8x8_f32t_linear[SCRIPT_TABLE_8 * SCRIPT_TABLE_8];
@@ -204,7 +206,9 @@ void processCanRxMessage(CanBusIndex busIndex, const CANRxFrame& frame, efitick_
 
 	processCanBenchTest(frame);
 
+#if EFI_LUA
 	processLuaCan(busIndex, frame);
+#endif // EFI_LUA
 
 	processEgtCan(busIndex, frame);
 

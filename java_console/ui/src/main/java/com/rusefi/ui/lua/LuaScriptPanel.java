@@ -1,6 +1,10 @@
 package com.rusefi.ui.lua;
 
 import com.opensr5.ConfigurationImage;
+import com.opensr5.ini.IniFileModel;
+import com.opensr5.ini.IniFileReader;
+import com.opensr5.ini.RawIniFile;
+import com.opensr5.ini.field.IniField;
 import com.rusefi.binaryprotocol.BinaryProtocol;
 import com.rusefi.config.generated.Fields;
 import com.rusefi.io.ConnectionStatusLogic;
@@ -15,12 +19,18 @@ import neoe.formatter.lua.LuaFormatter;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
 
 import static com.rusefi.ui.util.UiUtils.trueLayout;
 
 public class LuaScriptPanel {
+    private static final String LUA_SCRIPT_FIELD_NAME = "luaScript";
+
     private final UIContext context;
     private final JPanel mainPanel = new JPanel(new BorderLayout());
     private final AnyCommand command;
@@ -128,13 +138,80 @@ public class LuaScriptPanel {
             scriptText.setText("No configuration image");
             return;
         }
-        ByteBuffer luaScriptBuffer = image.getByteBuffer(Fields.LUASCRIPT.getOffset(), Fields.LUA_SCRIPT_SIZE);
 
-        byte[] scriptArr = new byte[Fields.LUA_SCRIPT_SIZE];
+        IniField luaScriptField = resolveLuaScriptField(bp, image);
+        if (luaScriptField == null)
+            return;
+
+        ByteBuffer luaScriptBuffer = image.getByteBuffer(luaScriptField.getOffset(), luaScriptField.getSize());
+
+        byte[] scriptArr = new byte[luaScriptField.getSize()];
         luaScriptBuffer.get(scriptArr);
 
         int i = findNullTerminator(scriptArr);
         scriptText.setText(new String(scriptArr, 0, i, StandardCharsets.US_ASCII));
+    }
+
+    private IniField resolveLuaScriptField(BinaryProtocol bp, ConfigurationImage image) {
+        try {
+            File iniFile = IniFileModel.getInstance().getSourceFile();
+            if (iniFile == null) {
+                setEditorMessage("Lua scripting unavailable: active INI is not loaded");
+                return null;
+            }
+
+            RawIniFile ini;
+            try (FileInputStream input = new FileInputStream(iniFile)) {
+                ini = IniFileReader.read(input);
+            }
+
+            return resolveLuaScriptField(ini, bp.signature, image.getSize(), this::setEditorMessage);
+        } catch (IOException | RuntimeException e) {
+            setEditorMessage("Lua scripting unavailable: could not read active ECU schema");
+        }
+        return null;
+    }
+
+    static IniField resolveLuaScriptField(RawIniFile ini, String connectedSignature, int configImageSize) {
+        return resolveLuaScriptField(ini, connectedSignature, configImageSize, message -> {
+        });
+    }
+
+    private static IniField resolveLuaScriptField(RawIniFile ini, String connectedSignature, int configImageSize,
+                                                  Consumer<String> onError) {
+        try {
+            if (connectedSignature == null || connectedSignature.isEmpty()) {
+                onError.accept("Lua scripting unavailable: ECU signature is not available");
+                return null;
+            }
+
+            String activeSignature = new IniFileModel().readIniFile(ini).getSignature();
+            if (activeSignature == null || activeSignature.isEmpty() || !connectedSignature.equals(activeSignature)) {
+                onError.accept("Lua scripting unavailable: active INI does not match ECU signature");
+                return null;
+            }
+
+            for (RawIniFile.Line line : ini.getLines()) {
+                String[] tokens = line.getTokens();
+                if (tokens.length < 5 || !LUA_SCRIPT_FIELD_NAME.equalsIgnoreCase(tokens[0])
+                        || !IniFileModel.FIELD_TYPE_STRING.equalsIgnoreCase(tokens[1])
+                        || !"ASCII".equalsIgnoreCase(tokens[2]))
+                    continue;
+
+                int offset = Integer.parseInt(tokens[3]);
+                int size = Integer.parseInt(tokens[4]);
+                if (offset < 0 || size <= 0 || (long) offset + size > configImageSize) {
+                    onError.accept("Lua scripting unavailable: active INI has an invalid luaScript field");
+                    return null;
+                }
+                return new ActiveLuaScriptField(offset, size);
+            }
+
+            onError.accept("Lua scripting unavailable for this ECU profile: active INI has no luaScript field");
+        } catch (RuntimeException e) {
+            onError.accept("Lua scripting unavailable: could not read active ECU schema");
+        }
+        return null;
     }
 
     @SuppressWarnings("StatementWithEmptyBody")
@@ -151,9 +228,29 @@ public class LuaScriptPanel {
 
         linkManager.submit(() -> {
             BinaryProtocol bp = linkManager.getCurrentStreamState();
+            if (bp == null) {
+                setEditorMessage("No ECU located");
+                return;
+            }
 
-            byte[] paddedScript = new byte[Fields.LUA_SCRIPT_SIZE];
+            ConfigurationImage image = bp.getControllerConfiguration();
+            if (image == null) {
+                setEditorMessage("No configuration image");
+                return;
+            }
+
+            IniField luaScriptField = resolveLuaScriptField(bp, image);
+            if (luaScriptField == null)
+                return;
+
             byte[] scriptBytes = script.getBytes(StandardCharsets.US_ASCII);
+            if (scriptBytes.length >= luaScriptField.getSize()) {
+                setEditorMessage("Lua script is too large for this ECU profile: "
+                        + scriptBytes.length + "/" + (luaScriptField.getSize() - 1) + " bytes");
+                return;
+            }
+
+            byte[] paddedScript = new byte[luaScriptField.getSize()];
             System.arraycopy(scriptBytes, 0, paddedScript, 0, scriptBytes.length);
 
             int idx = 0;
@@ -163,7 +260,7 @@ public class LuaScriptPanel {
                 remaining = paddedScript.length - idx;
                 int thisWrite = Math.min(remaining, Fields.BLOCKING_FACTOR);
 
-                bp.writeData(paddedScript, idx, Fields.LUASCRIPT.getOffset() + idx, thisWrite);
+                bp.writeData(paddedScript, idx, luaScriptField.getOffset() + idx, thisWrite);
 
                 idx += thisWrite;
 
@@ -180,7 +277,29 @@ public class LuaScriptPanel {
         });
     }
 
+    private void setEditorMessage(String message) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            scriptText.setText(message);
+        } else {
+            SwingUtilities.invokeLater(() -> scriptText.setText(message));
+        }
+    }
+
     void resetLua() {
         this.context.getCommandQueue().write("luareset");
+    }
+
+    private static final class ActiveLuaScriptField extends IniField {
+        private final int size;
+
+        private ActiveLuaScriptField(int offset, int size) {
+            super(LUA_SCRIPT_FIELD_NAME, offset);
+            this.size = size;
+        }
+
+        @Override
+        public int getSize() {
+            return size;
+        }
     }
 }

@@ -21,6 +21,7 @@ void setGmLs4() {
 
 	engineConfiguration->etbIdleThrottleRange = 15;
 
+#if EFI_LUA
 	strncpy(config->luaScript,
 			R"(
 
@@ -128,6 +129,7 @@ end
 
     )",
 			efi::size(config->luaScript));
+#endif // EFI_LUA
 
 	setPPSCalibration(0.51, 2.11, 1.01, 4.23);
 	setTPS1Calibration(880, 129, 118, 870);

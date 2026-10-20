@@ -122,9 +122,12 @@ static ICanTransmitMock* mockCan;
 
 CanTxMessage::~CanTxMessage() {
 	if (mockCan) {
-		mockCan->onTx(
-				m_frame.SID,
+		const bool isExtended = m_frame.IDE == CAN_IDE_EXT;
+		mockCan->onTxFrame(
+				isExtended ? CAN_EID(m_frame) : CAN_SID(m_frame),
 				m_frame.DLC,
+				isExtended,
+				m_busIndex,
 				m_frame.data8[0],
 				m_frame.data8[1],
 				m_frame.data8[2],

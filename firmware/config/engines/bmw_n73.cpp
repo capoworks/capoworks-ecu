@@ -8,11 +8,15 @@
 #include "pch.h"
 
 #include "bmw_n73.h"
+#if EFI_LUA
 #include "lua_lib.h"
+#endif // EFI_LUA
 
 /**
  * set engine_type 9
  */
 void setEngineProteusGearboxManInTheMiddle() {
+#if EFI_LUA
 #include "bmw_6hp_mim.lua"
+#endif // EFI_LUA
 }

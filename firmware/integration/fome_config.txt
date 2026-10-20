@@ -106,10 +106,8 @@ struct_no_prefix persistent_config_s
 
 struct_no_prefix engine_configuration_s
 
-#define BLOCKING_FACTOR 1600
-
-#define LUA_PWM_COUNT 8
-#define LUA_DIGITAL_INPUT_COUNT 8
+! 1640 covers the 1628-byte upcoming Shock profile plus 10 bytes of overhead without increasing the 1664-byte USB buffers.
+#define BLOCKING_FACTOR 1640
 
 ! https://github.com/rusefi/rusefi/issues/2010 shows the corner case wheel with huge depth requirement
 #define GAP_TRACKING_LENGTH 18
@@ -162,8 +160,6 @@ struct_no_prefix engine_configuration_s
 #define HW_MAX_ADC_INDEX 17
 #define TRIGGER_SIMULATOR_PIN_COUNT 2
 #define TRIGGER_INPUT_PIN_COUNT 2
-#define SCRIPT_SETTING_COUNT 8
-
 #define VEHICLE_INFO_SIZE 32
 
 #define FUEL_RPM_COUNT 16
@@ -203,9 +199,6 @@ struct_no_prefix engine_configuration_s
 #define PERCENT_TRIM_BYTE_PACKING_DIV 0.02
 
 #define SCRIPT_TABLE_8 8
-
-#define SCRIPT_CURVE_8 8
-#define SCRIPT_CURVE_16 16
 
 #define TPS_TPS_ACCEL_TABLE 8
 #define ADC_CHANNEL_NONE 0
@@ -478,15 +471,6 @@ injection_mode_e crankingInjectionMode;This is the injection strategy during eng
 
 injection_mode_e injectionMode;This is where the fuel injection type is defined: "Simultaneous" means all injectors will fire together at once. "Sequential" fires the injectors on a per cylinder basis, which requires individually wired injectors. "Batched" will fire the injectors in groups. If your injectors are individually wired you will also need to enable "Two wire batch emulation".
 
-uint16_t boostControlMinRpm; Minimum RPM to enable boost control. Use this to avoid solenoid noise at idle, and help spool in some cases.;"", 1, 0, 0, 25000, 0
-uint8_t boostControlMinTps; Minimum TPS to enable boost control. Use this to avoid solenoid noise at idle, and help spool in some cases.;"", 1, 0, 0, 100, 0
-uint8_t boostControlMinMap; Minimum MAP to enable boost control. Use this to avoid solenoid noise at idle, and help spool in some cases.;"", 1, 0, 0, 250, 0
-
-gppwm_channel_e boostOpenLoopXAxis;Select the parameter to use for the X axis of the open loop boost table.
-gppwm_channel_e boostOpenLoopYAxis;Select the parameter to use for the Y axis of the open loop boost table.
-gppwm_channel_e boostClosedLoopXAxis;Select the parameter to use for the X axis of the closed loop boost table.
-gppwm_channel_e boostClosedLoopYAxis;Select the parameter to use for the Y axis of the closed loop boost table.
-
 custom timing_mode_e 1 bits, U08, @OFFSET@, [0:0], "dynamic", "fixed"
 timing_mode_e timingMode;Dynamic uses the timing map to decide the ignition timing, Static timing fixes the timing to the value set below (only use for checking static timing with a timing light).
 
@@ -552,7 +536,6 @@ adc_channel_e fuelLevelSensor;This is the processor pin that your fuel level sen
 	float airByRpmTaper;Extra air taper amount;"%", 1, 0, 0, 50, 1
 
 custom spi_device_e 1 bits, U08, @OFFSET@, [0:2], "Off", "SPI1", "SPI2", "SPI3", "SPI4", "SPI5", "SPI6"
-	uint8_t boostControlSafeDutyCycle;Duty cycle to use in case of a sensor failure. This duty cycle should produce the minimum possible amount of boost. This duty is also used in case any of the minimum RPM/TPS/MAP conditions are not met.;"%", 1, 0, 0, 100, 0
 
 adc_channel_e throttlePedalPositionAdcChannel;Throttle pedal position first channel
 	pin_output_mode_e tle6240_csPinMode;
@@ -715,7 +698,6 @@ bit is_enabled_spi_2
 	uint32_t verboseCanBaseAddress;The ECU base CAN address (ID).\n\nValue is specified as a decimal number e.g. 512 is 0x200 in HEX.;"dec", 1, 0, 0, 536870911, 0
 
 	uint8_t mc33_hvolt;Boost Voltage;"v", 1, 0, 40, 70, 0
-	uint8_t minimumBoostClosedLoopMap;Minimum MAP before closed loop boost is enabled. Use to prevent misbehavior upon entering boost.;"kPa", 1, 0, 0, 255, 0
 
 output_pin_e acFanPin;Optional Radiator Fan used with A/C
 	pin_output_mode_e acFanPinMode;
@@ -778,9 +760,6 @@ output_pin_e acFanPin;Optional Radiator Fan used with A/C
 
 	Gpio mc33816_flag0;
 
-	custom script_setting_t 4 scalar, F32, @OFFSET@, 		"",	   1,	   0, 0, 18000,	  2
-	script_setting_t[SCRIPT_SETTING_COUNT iterate] scriptSetting;
-
 	Gpio spi1mosiPin;
 	Gpio spi1misoPin;
 	Gpio spi1sckPin;
@@ -836,17 +815,8 @@ bit verboseCan2,"Print all","Do not print";Print incoming and outgoing second bu
 	dc_io[ETB_COUNT iterate] etbIo
 
 
-    output_pin_e boostControlPin;Wastegate control Solenoid;
-	pin_output_mode_e boostControlPinMode;
-
-	custom boostType_e 1 bits, U08, @OFFSET@, [0:0], "Open Loop", "Open + Closed Loop"
-	boostType_e boostType;
-
 	switch_input_pin_e ALSActivatePin;
 	switch_input_pin_e launchActivatePin;
-
-	pid_s boostPid;
-	uint16_t boostPwmFrequency;;"Hz", 1, 0, 0, 3000, 0
 
 	#define launchActivationMode_e_enum "Launch Button", "Clutch Down Switch", "Always Active(Disabled By Speed)"
     custom launchActivationMode_e  1 bits, S08, @OFFSET@, [0:1], @@launchActivationMode_e_enum@@
@@ -859,7 +829,6 @@ bit verboseCan2,"Print all","Do not print";Print incoming and outgoing second bu
     int launchSpeedThreshold;Disabled above this speed;"Kph", 1, 0, 0, 300, 0
     int launchTimingRpmRange;Range from Launch RPM for Timing Retard to activate;"RPM", 1, 0, 0, 8000, 0
     int launchFuelAdded;Extra Fuel Added;"%", 1, 0, 0, 100, 0
-    int launchBoostDuty;Duty Cycle for the Boost Solenoid;"%", 1, 0, 0, 100, 0
 	int hardCutRpmRange;Range from Launch RPM to activate Hard Cut;"RPM", 1, 0, 0, 3000, 0
 	float turbochargerFilter;;"", 1, 0, 0, 50, 0
 	int launchTpsThreshold;;"", 1, 0, 0, 20000, 0
@@ -885,8 +854,6 @@ custom idle_mode_e 1 bits, U08, @OFFSET@, [0:0], "Open Loop + Closed Loop", "Ope
 	idle_mode_e idleMode
 
 	Gpio       drv8860_miso;
-
-	output_pin_e[LUA_PWM_COUNT iterate] luaOutputPins
 
 	int16_t[CAM_INPUTS_COUNT iterate] autoscale vvtOffsets;Angle between cam sensor and VVT zero position. Adjust this so that your VVT indication reads 0 while running with the control solenoid disabled.;"value", 0.1, 0, -720, 1000, 1
 
@@ -941,7 +908,6 @@ bit skippedWheelOnCam,"On camshaft","On crankshaft";Where is your primary skippe
 	bit useCrankingIdleTaperTableSetting; If enabled, use separate temperature multiplier table for cranking taper duration.
 	bit overrideCrankingIacSetting;If enabled, use separate temperature multiplier table for cranking idle position.\nIf disabled, use normal running multiplier table applied to the cranking base position.
 	bit useSeparateAdvanceForIdle;This activates a separate ignition timing table for idle conditions, this can help idle stability by using ignition retard and advance either side of the desired idle speed. Extra retard at low idle speeds will prevent stalling and extra advance at high idle speeds can help reduce engine power and slow the idle speed.
-	bit isWaveAnalyzerEnabled
 	bit useSeparateVeForIdle;This activates a separate fuel table for Idle, this allows fine tuning of the idle fuelling.
 	bit verboseTriggerSynchDetails;Verbose info in console below engineSnifferRpmThreshold\nenable trigger_details
 	bit alwaysResetPidLeavingIdle
@@ -953,7 +919,6 @@ bit useSeparateAdvanceForCranking,"Table","Fixed (auto taper)";In Constant mode,
 bit useAdvanceCorrectionsForCranking;This enables the various ignition corrections during cranking (IAT, CLT, FSIO and PID idle).\nYou probably don't need this.
 bit flexCranking;Enable a second cranking table to use for E100 flex fuel, interpolating between the two based on flex fuel sensor.
 bit torqueReductionEnabled;Enable the torque-reduction controller (spark retard + cylinder cut). It maps a torque-reduction request to ignition retard and cut. No producer (e.g. traction control) is wired up yet, so on its own this currently has no effect.
-bit isBoostControlEnabled
 bit launchSmoothRetard;Interpolates the Ignition Retard from 0 to 100% within the RPM Range
 bit isPhaseSyncRequiredForIgnition;If enabled, no fuel or spark happens until the cam/VVT sensor has resolved engine phase, so the engine always starts in fully sequential mode.\nIf disabled, the engine begins firing wasted spark and batch fuel as soon as the crank syncs, then switches to sequential once the cam syncs. This starts sooner, but a few engines don't like running that way.\nEngines with a symmetrical crank wheel (where cam sync is required to know engine phase at all) always wait for cam sync regardless of this setting.
 bit useCltBasedRpmLimit,"yes","no";If enabled, use a curve for RPM limit (based on coolant temperature) instead of a constant value.
@@ -964,10 +929,6 @@ bit useBiQuadOnAuxSpeedSensors
 bit sdTriggerLog,"trigger","normal";'Trigger' mode will write a high speed log of trigger events (warning: uses lots of space!). 'Normal' mode will write a standard MLG of sensors, engine function, etc. similar to the one captured in TunerStudio.
 bit ALSActivateInverted
 bit isCylinderCleanupLatching,"Service / Workshop","Roadside";Roadside restores fuel if the engine reaches running RPM. Service / Workshop latches the fuel cut until the accelerator is released, so the starter can also be used to build oil pressure without enabling injection.
-
-	uint16_t engineChartSize;;"count", 1, 0, 0, 300, 0
-
-	brain_input_pin_e hellaOpsTInput;Hella OPS+T combined oil pressure and temperature sensor input. Existing oil pressure and temperature providers retain priority for their registered channel.
 
 	float turboSpeedSensorMultiplier;;"mult", 1, 0, 0, 7000, 3
 
@@ -1194,9 +1155,6 @@ tChargeMode_e tChargeMode;
 	uint8_t autotemp fan2OnTemperature;Cooling fan turn-on temperature threshold, in Celsius;"C", 1, 0, 0, 150, 0
 	uint8_t autotemp fan2OffTemperature;Cooling fan turn-off temperature threshold, in Celsius;"C", 1, 0, 0, 150, 0
 
-#define SCRIPT_CURVE_COUNT 6
-#define SCRIPT_TABLE_COUNT 4
-
 	Gpio stepperEnablePin;
 	Gpio tle8888_cs;
 	pin_output_mode_e tle8888_csPinMode;
@@ -1225,11 +1183,6 @@ tChargeMode_e tChargeMode;
 
 	linear_sensor_s highPressureFuel;
 	linear_sensor_s lowPressureFuel;
-
-gppwm_note_t[SCRIPT_CURVE_COUNT iterate] scriptCurveName;
-
-gppwm_note_t[SCRIPT_TABLE_COUNT iterate] scriptTableName;
-gppwm_note_t[SCRIPT_SETTING_COUNT iterate] scriptSettingName;
 
 float tChargeAirCoefMin;Heat transfer coefficient at zero flow.\n0 means the air charge is fully heated to the same temperature as CLT.\n1 means the air charge gains no heat, and enters the cylinder at the temperature measured by IAT.;"", 1, 0, 0, 1, 3
 float tChargeAirCoefMax;Heat transfer coefficient at high flow, as defined by "max air flow".\n0 means the air charge is fully heated to the same temperature as CLT.\n1 means the air charge gains no heat, and enters the cylinder at the temperature measured by IAT.;"", 1, 0, 0, 1, 3
@@ -1346,7 +1299,6 @@ output_pin_e acrPin2;
 	uint8_t crankingIACposition;This is the IAC position during cranking, some engines start better if given more air during cranking to improve cylinder filling.;"percent", 1, 0, 0, 100, 0
 
 
-switch_input_pin_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPins;
 	int16_t ALSMinRPM;;"rpm", 1, 0, 0, 20000, 0
 	int16_t ALSMaxRPM;;"rpm", 1, 0, 0, 20000, 0
 int16_t ALSMaxDuration;;"sec", 1, 0, 0, 10, 0
@@ -1370,8 +1322,6 @@ uint8_t alsEtbPosition;;"", 1, 0, 0, 20000, 0
 
 	uint8_t autoscale tpsSecondaryMaximum;For Ford TPS, use 53%. For Toyota ETCS-i, use ~65%. 0 and 100 disable, <20 invalid, rest will avoid sensor averaging.;"%", 0.5, 0, 0, 100, 1
 	uint8_t autoscale ppsSecondaryMaximum;For Toyota ETCS-i, use ~69%. 0 and 100 disable, <20 invalid, rest will avoid sensor averaging.;"%", 0.5, 0, 0, 100, 1
-pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
-
 	ThermistorConf oilTempSensor
 	ThermistorConf fuelTempSensor
 	ThermistorConf ambientTempSensor
@@ -1497,6 +1447,7 @@ pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
 	bit ignitionTimeBudget,"Time budget (experimental)","Legacy";Plan charge and fire timing from the bounded causal cycle profile for individual coils. Requires full cam phase sync and a supported rising-only missing-tooth crank wheel. Legacy timing remains the default and fallback. Experimental. Not a substitute for the independent physical dwell guard.
 
 ! end of engine_configuration_s
+! MODULE_CONFIG
 end_struct
 
 ! note that this magic field name is used by LiveDataParserPanel
@@ -1514,19 +1465,6 @@ engine_configuration_s engineConfiguration;
 	int8_t[CLT_TIMING_CURVE_SIZE] autoscale cltTimingExtra;;"degree", 0.1, 0, -30, 30, 1
 
 
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve1Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve1;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve2Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve2;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve3Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve3;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve4Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve4;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve5Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve5;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve6Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve6;;"y", 0.1, 0, -3270, 3270, 2
-
 	uint16_t[BARO_CORR_SIZE] autoscale baroCorrPressureBins;;"kPa", 0.1, 0, 0, 200, 1
 	uint16_t[BARO_CORR_SIZE] baroCorrRpmBins;;"RPM", 1, 0, 0, 65000, 0
 
@@ -1542,14 +1480,6 @@ uint8_t[8] autoscale torqueReductionRetardReqBins;Requested torque reduction rat
 int16_t[8] autoscale torqueReductionRetard;Ignition retard applied per torque-reduction request;"deg", 0.1, 0, 0, 50, 1
 uint8_t[CLT_CURVE_SIZE] autoscale iacCoastingRpmBins;RPM-based idle position for coasting;"RPM", 100, 0, 0, 25000, 0
 uint8_t[CLT_CURVE_SIZE] autoscale iacCoasting;    RPM-based idle position for coasting;"%", 0.5, 0, 0, 100, 1
-
-uint8_t[BOOST_RPM_COUNT x BOOST_LOAD_COUNT] autoscale boostTableOpenLoop;;"", {1/2}, 0, 0, 100, 1
-int16_t[BOOST_RPM_COUNT] boostRpmBins;;"", 1, 0, -10000, 10000, 0
-int16_t[BOOST_LOAD_COUNT] boostTpsBins;;"", 1, 0, -10000, 10000, 0
-
-uint8_t[BOOST_RPM_COUNT x BOOST_LOAD_COUNT] autoscale boostTableClosedLoop;;"", 2, 0, 0, 3000, 0
-int16_t[BOOST_RPM_COUNT] boostClosedLoopXAxisBins;;"", 1, 0, -10000, 10000, 0
-int16_t[BOOST_LOAD_COUNT] boostClosedLoopYAxisBins;;"", 1, 0, -10000, 10000, 0
 
 uint8_t[PEDAL_TO_TPS_SIZE x PEDAL_TO_TPS_SIZE] pedalToTpsTable;;"%", 1, 0, 0, 100, 0
 uint8_t[PEDAL_TO_TPS_SIZE] pedalToTpsPedalBins;;"%", 1, 0, 0, 120, 0
@@ -1580,8 +1510,6 @@ uint8_t[IDLE_VE_SIZE] idleVeLoadBins;;"load", 1, 0, 0, 100, 0
 uint16_t[IDLE_VE_SIZE x IDLE_VE_SIZE] autoscale idleVeTable;;"%", 0.1, 0, 0, 999, 1
 
 #define LUA_SCRIPT_SIZE 8000
-custom lua_script_t @@LUA_SCRIPT_SIZE@@ string, ASCII, @OFFSET@, @@LUA_SCRIPT_SIZE@@
-lua_script_t luaScript;
 
 float[CLT_CURVE_SIZE] autotemp cltFuelCorrBins;;"C", 1, 0, -100, 250, 2
 float[CLT_CURVE_SIZE] cltFuelCorr;;"ratio", 1, 0, 0, 5, 2
@@ -1656,30 +1584,10 @@ int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable1;;"value", 0.01, 
 int16_t[SCRIPT_TABLE_8] scriptTable1LoadBins;;"L", 1, 0, -32000, 32000, 0
 int16_t[SCRIPT_TABLE_8] scriptTable1RpmBins;;"RPM", 1, 0, -32000, 32000, 0
 
-int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable2;;"value", 0.01, 0, -327, 327, 2
-int16_t[SCRIPT_TABLE_8] scriptTable2LoadBins;;"L", 1, 0, -32000, 32000, 0
-int16_t[SCRIPT_TABLE_8] scriptTable2RpmBins;;"RPM", 1, 0, -32000, 32000, 0
-
-int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable3;;"value", 0.01, 0, -327, 327, 2
-int16_t[SCRIPT_TABLE_8] scriptTable3LoadBins;;"L", 1, 0, -32000, 32000, 0
-int16_t[SCRIPT_TABLE_8] scriptTable3RpmBins;;"RPM", 1, 0, -32000, 32000, 0
-
-int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable4;;"value", 0.01, 0, -327, 327, 2
-int16_t[SCRIPT_TABLE_8] scriptTable4LoadBins;;"L", 1, 0, -32000, 32000, 0
-int16_t[SCRIPT_TABLE_8] scriptTable4RpmBins;;"RPM", 1, 0, -32000, 32000, 0
-
 #define TRIM_SIZE 4
 
 struct cyl_trim_s
 	int8_t[TRIM_SIZE x TRIM_SIZE] autoscale table;;"", 0.2, 0, -25, 25, 1
-end_struct
-
-! Per-cylinder model fuel trims are 16x16 and belong to the SD or Alpha-N airmass family.
-! Independent of the TRIM_SIZE ignition trim tables above.
-#define CYLINDER_FUEL_TRIM_SIZE 16
-
-struct cylinder_model_fuel_trim_s
-	int8_t[CYLINDER_FUEL_TRIM_SIZE x CYLINDER_FUEL_TRIM_SIZE] autoscale table;;"%", 0.2, 0, -25, 25, 1
 end_struct
 
 ! All ign trim tables share axes
@@ -1726,9 +1634,6 @@ blend_table_s[VE_BLEND_COUNT iterate] veBlends
 
 uint16_t[12] autoscale throttleEstimateEffectiveAreaBins;;"%", 0.1, 0, 0, 100, 1
 uint16_t[12] autoscale throttleEstimateEffectiveAreaValues;In units of g/s normalized to choked flow conditions;"g/s", 0.1, 0, 0, 6500, 1
-
-blend_table_s[BOOST_BLEND_COUNT iterate] boostOpenLoopBlends
-blend_table_s[BOOST_BLEND_COUNT iterate] boostClosedLoopBlends
 
 uint8_t[4 x 4] autoscale lambdaMaxDeviationTable;;"lambda", 0.01, 0, 0, 1, 2
 uint16_t[4] lambdaMaxDeviationLoadBins;;"", 1, 0, 0, 1000, 0
@@ -1878,15 +1783,7 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 		table_values uint8_t airmassBlendTable;Alpha-N contribution to cylinder air mass. 0% uses SD only, 100% uses Alpha-N only.;"% Alpha-N", 1, 0, 0, 100, 0
 	end_table
 
-	! Per-cylinder model fuel trims: the only per-cylinder fuel trims. The former
-	! 4x4 residual fuel trims were removed, so this layout is not backward compatible.
-	! Each family shares one set of axes across all cylinders; SD and Alpha-N axes are independent.
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimLoadBins;;"kPa", 1, 0, 0, 1000, 0
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
-	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] sdCylinderFuelTrims
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] autoscale alphaNCylinderFuelTrimTpsBins;;"% TPS", {1/@@TPS_2_BYTE_PACKING_MULT@@}, 0, 0, 100, 2
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] alphaNCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
-	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] alphaNCylinderFuelTrims
+! MODULE_PERSISTENT_CONFIG
 end_struct
 
 ! Pedal Position Sensor
@@ -1928,7 +1825,6 @@ end_struct
 #define CMD_LOGIC_PIN "set_logic_input_pin"
 #define CMD_ALTERNATOR_PIN "set_alternator_pin"
 #define CMD_IDLE_PIN "set_idle_pin"
-#define CMD_BOOST_PIN "set_boost_pin"
 #define CMD_TRIGGER_SIMULATOR_PIN "set_trigger_simulator_pin"
 #define CMD_IGNITION_PIN "set_ignition_pin"
 
@@ -2087,7 +1983,6 @@ end_struct
 #define ts_show_energySystems true
 #define ts_show_acSettings true
 #define ts_show_idle true
-#define ts_show_boost true
 #define ts_show_vvt true
 #define ts_show_pedal true
 #define ts_show_maf true

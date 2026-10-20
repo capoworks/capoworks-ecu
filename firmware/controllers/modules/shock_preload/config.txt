@@ -1,0 +1,3 @@
+	bit enableShockPreload;Enable the Caponord electronic shock preload controller on secondary CAN (CAN2, standard IDs 0x720-0x722).
+
+	uint8_t shockPreloadCommandTarget;Target position sent by the Shock Preload Set Target command.;"%", 1, 0, 0, 100, 0

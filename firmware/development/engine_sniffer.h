@@ -12,6 +12,8 @@
 
 #include "datalogging.h"
 
+#if EFI_ENGINE_SNIFFER
+
 void addEngineSnifferTdcEvent(efitick_t timestamp, int rpm);
 
 /**
@@ -21,8 +23,6 @@ void addEngineSnifferTdcEvent(efitick_t timestamp, int rpm);
 void addEngineSnifferCrankEvent(efitick_t timestamp, int wheelIndex, int triggerEventIndex, bool isRise);
 void addEngineSnifferVvtEvent(efitick_t timestamp, int vvtIndex, bool isRise);
 void addEngineSnifferOutputPinEvent(NamedOutputPin* pin, bool isRise);
-
-#if EFI_ENGINE_SNIFFER
 
 /**
  * @brief	rusEfi console sniffer data buffer

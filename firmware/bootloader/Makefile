@@ -367,10 +367,12 @@ ULIBS = -lm --specs=nano.specs
 
 include $(RULESFILE)
 include $(PROJECT_DIR)/rusefi_pch.mk
+include $(PROJECT_DIR)/controllers/modules/module_profile.mk
 include $(PROJECT_DIR)/fome_generated.mk
 include $(PROJECT_DIR)/gitversion.mk
 include $(PROJECT_DIR)/controllers/modules/modules_header_gen.mk
 
+$(info MODULE_PROFILE: $(MODULE_PROFILE_FILE))
 $(info MODULES_INC:   $(MODULES_INC))
 
 .PHONY: CLEAN_RULE_HOOK CLEAN_PCH_HOOK CLEAN_BUNDLE_HOOK

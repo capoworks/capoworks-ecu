@@ -1,0 +1,352 @@
+package com.rusefi.test.newParse;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+
+public class ModuleProfileTest {
+    private static final Path FIRMWARE = Paths.get("../../firmware").toAbsolutePath().normalize();
+    private static final Path BOARD = FIRMWARE.resolve("config/boards/f407-discovery");
+    private static final Path PROFILE_TOOL = FIRMWARE.resolve("controllers/modules/module_profile.sh");
+    private static final Path PROFILE_MAKE = FIRMWARE.resolve("controllers/modules/module_profile_host.mk");
+
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    @Test
+    public void cylinderFuelTrimDefaultsOnWithCapacitySixAndIniFragment() throws Exception {
+        Path profileDirectory = temporaryFolder.newFolder("default").toPath();
+        Path profile = profileDirectory.resolve("module_profile.txt");
+        Path definitions = profileDirectory.resolve("module_profile_defines.h");
+
+        ProcessResult defaultResult = runProfileMake(profile, null, null);
+        assertEquals(defaultResult.output, 0, defaultResult.exitCode);
+
+        List<String> modules = Arrays.asList(profileValue(profile, "modules").split("\\s+"));
+        assertTrue(modules.contains("fan"));
+        assertTrue(modules.contains("cylinder_fuel_trim"));
+        assertEquals("6", profileValue(profile, "cylinder_fuel_trim_count"));
+        assertTrue(read(definitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 6"));
+
+        Path generatedIni = profileDirectory.resolve("cylinder_fuel_trim.ini");
+        assertTrue(read(profile).contains("ini " + generatedIni + "\n"));
+        assertTrue(Files.isRegularFile(generatedIni));
+        assertTrue(read(generatedIni).contains("cylinderFuelTrimTbl6"));
+        assertFalse(read(generatedIni).contains("cylinderFuelTrimTbl7"));
+    }
+
+    @Test
+    public void explicitProfileWithoutCylinderFuelTrimCanonicalizesToZero() throws Exception {
+        // FOME_MODULES replaces the default profile, so stale values are ignored.
+        Path offDirectory = temporaryFolder.newFolder("off-with-value").toPath();
+        Path offProfile = offDirectory.resolve("module_profile.txt");
+        Path offDefinitions = offDirectory.resolve("module_profile_defines.h");
+        ProcessResult offResult = runProfileMake(offProfile, "fan", "13");
+        assertEquals(offResult.output, 0, offResult.exitCode);
+        assertFalse(profileValue(offProfile, "modules").contains("cylinder_fuel_trim"));
+        assertEquals("0", profileValue(offProfile, "cylinder_fuel_trim_count"));
+        assertTrue(read(offDefinitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 0"));
+        assertFalse(read(offProfile).contains("cylinder_fuel_trim.ini"));
+    }
+
+    @Test
+    public void selectedCylinderFuelTrimDefaultsToCapacitySix() throws Exception {
+        Path profileDirectory = temporaryFolder.newFolder("selected-default").toPath();
+        Path profile = profileDirectory.resolve("module_profile.txt");
+        Path definitions = profileDirectory.resolve("module_profile_defines.h");
+
+        ProcessResult result = runProfileMake(profile, "fan cylinder_fuel_trim", null);
+        assertEquals(result.output, 0, result.exitCode);
+        assertTrue(profileValue(profile, "modules").contains("cylinder_fuel_trim"));
+        assertEquals("6", profileValue(profile, "cylinder_fuel_trim_count"));
+        assertTrue(read(definitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 6"));
+    }
+
+    @Test
+    public void selectedCylinderFuelTrimAcceptsExplicitSupportedCounts() throws Exception {
+        for (String count : Arrays.asList("1", "4", "6", "12")) {
+            Path profileDirectory = temporaryFolder.newFolder("selected-" + count).toPath();
+            Path profile = profileDirectory.resolve("module_profile.txt");
+            Path definitions = profileDirectory.resolve("module_profile_defines.h");
+
+            ProcessResult result = runProfileMake(profile, "fan cylinder_fuel_trim", count);
+            assertEquals(result.output, 0, result.exitCode);
+            assertTrue(profileValue(profile, "modules").contains("cylinder_fuel_trim"));
+            assertEquals(count, profileValue(profile, "cylinder_fuel_trim_count"));
+            assertTrue(read(definitions).contains("#define CYLINDER_FUEL_TRIM_COUNT " + count));
+        }
+    }
+
+    @Test
+    public void selectedCylinderFuelTrimRejectsInvalidCount() throws Exception {
+        assertRejected("", "integer from 1 to 12");
+        assertRejected("0", "integer from 1 to 12");
+        assertRejected("13", "integer from 1 to 12");
+        assertRejected("4.5", "integer from 1 to 12");
+        assertRejected("4 5", "integer from 1 to 12");
+        assertRejected("%", "integer from 1 to 12");
+    }
+
+    @Test
+    public void legacyProfileInvocationsRemainReadable() throws Exception {
+        Path directory = temporaryFolder.newFolder("legacy-profile").toPath();
+        Path legacyProfile = directory.resolve("legacy.txt");
+        Files.write(legacyProfile, Arrays.asList(
+                "modules fan",
+                "board " + BOARD,
+                "cpu ARCH_STM32F4"
+        ), StandardCharsets.UTF_8);
+
+        ProcessResult check = runCommand(Arrays.asList(
+                "bash", PROFILE_TOOL.toString(), "check", legacyProfile.toString()
+        ));
+        assertEquals(check.output, 0, check.exitCode);
+
+        ProcessResult count = runCommand(Arrays.asList(
+                "bash", PROFILE_TOOL.toString(), "read", legacyProfile.toString(), "cylinder_fuel_trim_count"
+        ));
+        assertEquals(count.output, 0, count.exitCode);
+        assertEquals("0\n", count.output);
+
+        ProcessResult definitions = runCommand(Arrays.asList(
+                "bash", PROFILE_TOOL.toString(), "definitions", legacyProfile.toString()
+        ));
+        assertEquals(definitions.output, 0, definitions.exitCode);
+        Path legacyDefinitions = directory.resolve("legacy_defines.h");
+        assertEquals(legacyDefinitions.toString() + "\n", definitions.output);
+        assertTrue(read(legacyDefinitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 0"));
+
+        Path writtenProfile = directory.resolve("written.txt");
+        Path fragment = directory.resolve("legacy-config.txt");
+        Files.write(fragment, Arrays.asList("#define LEGACY_VALUE 1"), StandardCharsets.UTF_8);
+        ProcessResult write = runCommand(Arrays.asList(
+                "bash", PROFILE_TOOL.toString(), "write",
+                writtenProfile.toString(), BOARD.toString(), "ARCH_STM32F4", "fan",
+                "config", fragment.toString()
+        ));
+        assertEquals(write.output, 0, write.exitCode);
+        assertEquals("0", profileValue(writtenProfile, "cylinder_fuel_trim_count"));
+        assertEquals(fragment.toString(), profileValue(writtenProfile, "config"));
+    }
+
+    @Test
+    public void countChangeInvalidatesObjectsAndConfigurationGeneration() throws Exception {
+        Path directory = temporaryFolder.newFolder("invalidation").toPath();
+        Path profile = directory.resolve("module_profile.txt");
+        Path object = directory.resolve("object.o");
+        Path configStamp = directory.resolve("config.stamp");
+        Path makefile = directory.resolve("profile-deps.mk");
+        Path buildDirectory = directory.resolve("build");
+        Path generatedDirectory = directory.resolve("generated");
+
+        Files.createDirectories(buildDirectory);
+        Files.createDirectories(generatedDirectory);
+        Files.write(makefile, Arrays.asList(
+                "PROJECT_DIR := " + FIRMWARE,
+                "BOARD_DIR := " + BOARD,
+                "include $(PROJECT_DIR)/controllers/modules/module_profile.mk",
+                "include $(PROJECT_DIR)/fome_generated.mk",
+                "all: $(OBJS)",
+                "$(OBJS):",
+                "\t@touch $@"
+        ), StandardCharsets.UTF_8);
+
+        ProcessResult first = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan cylinder_fuel_trim", "4", true);
+        assertEquals(first.output, 0, first.exitCode);
+        assertTrue(Files.isRegularFile(object));
+        assertTrue(Files.isRegularFile(configStamp));
+        Path generatedIni = directory.resolve("cylinder_fuel_trim.ini");
+        assertTrue(Files.isRegularFile(generatedIni));
+        assertTrue(read(generatedIni).contains("cylinderFuelTrimTbl4"));
+        assertFalse(read(generatedIni).contains("cylinderFuelTrimTbl5"));
+
+        Files.setLastModifiedTime(object, FileTime.fromMillis(1000));
+        Files.setLastModifiedTime(configStamp, FileTime.fromMillis(1000));
+
+        ProcessResult second = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan cylinder_fuel_trim", "6", true);
+        assertEquals(second.output, 0, second.exitCode);
+        assertEquals("6", profileValue(profile, "cylinder_fuel_trim_count"));
+        assertTrue(read(generatedIni).contains("cylinderFuelTrimTbl6"));
+        assertFalse(read(generatedIni).contains("cylinderFuelTrimTbl7"));
+        assertTrue(read(profile).contains("ini " + generatedIni + "\n"));
+        assertTrue("profile count change did not invalidate stale object", Files.getLastModifiedTime(object).toMillis() > 1000);
+
+        ProcessResult dryRun = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan cylinder_fuel_trim", "6", false);
+        assertEquals(dryRun.output, 0, dryRun.exitCode);
+        assertTrue("profile count change did not invalidate configuration generation: " + dryRun.output,
+                dryRun.output.contains("gen_config_board.sh"));
+
+        ProcessResult off = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan", "6", true);
+        assertEquals(off.output, 0, off.exitCode);
+        assertEquals("0", profileValue(profile, "cylinder_fuel_trim_count"));
+        assertFalse(read(profile).contains("cylinder_fuel_trim.ini"));
+        assertTrue(Files.isRegularFile(generatedIni));
+        assertEquals("", read(generatedIni));
+    }
+
+    @Test
+    public void moduleValidationRejectsUnknownAndPatternValues() throws Exception {
+        Path directory = temporaryFolder.newFolder("invalid-modules").toPath();
+        ProcessResult validMixed = runProfileMake(
+                directory.resolve("valid-mixed.txt"), "fan fuel_pump", null);
+        assertEquals(validMixed.output, 0, validMixed.exitCode);
+
+        ProcessResult multiword = runProfileMake(
+                directory.resolve("multi.txt"), "fan bogus fuel_pump", null);
+        assertNotEquals(multiword.output, 0, multiword.exitCode);
+        assertTrue(multiword.output, multiword.output.contains("bogus"));
+
+        ProcessResult pattern = runProfileMake(
+                directory.resolve("pattern.txt"), "%", null);
+        assertNotEquals(pattern.output, 0, pattern.exitCode);
+        assertTrue(pattern.output, pattern.output.contains("Expected modules from"));
+    }
+
+    private void assertRejected(String count, String expectedError) throws Exception {
+        Path directory = temporaryFolder.newFolder("reject-" + String.valueOf(count).replace('.', '-')).toPath();
+        ProcessResult result = runProfileMake(
+                directory.resolve("module_profile.txt"),
+                "cylinder_fuel_trim",
+                count);
+
+        assertNotEquals(result.output, 0, result.exitCode);
+        assertTrue(result.output, result.output.contains("FOME_CYLINDER_TRIM_COUNT"));
+        assertTrue(result.output, result.output.contains(expectedError));
+    }
+
+    private ProcessResult runProfileMake(Path profile, String modules, String count) throws Exception {
+        List<String> command = new ArrayList<>(Arrays.asList(
+                "make", "-s", "--no-print-directory",
+                "-f", PROFILE_MAKE.toString(),
+                "module-profile",
+                "PROJECT_DIR=" + FIRMWARE,
+                "BOARD_DIR=" + BOARD,
+                "MODULE_PROFILE_FILE=" + profile
+        ));
+        if (modules != null) {
+            command.add("FOME_MODULES=" + modules);
+        }
+        if (count != null) {
+            command.add("FOME_CYLINDER_TRIM_COUNT=" + count);
+        }
+        return runCommand(command);
+    }
+
+    private ProcessResult runDependencyMake(
+            Path makefile,
+            Path profile,
+            Path object,
+            Path configStamp,
+            Path buildDirectory,
+            Path generatedDirectory,
+            String modules,
+            String count,
+            boolean assumeConfigCurrent
+    ) throws Exception {
+        Files.createDirectories(profile.getParent());
+        Files.createDirectories(object.getParent());
+        Files.createDirectories(configStamp.getParent());
+        Files.createDirectories(buildDirectory);
+        Files.createDirectories(generatedDirectory);
+        if (assumeConfigCurrent && !Files.exists(configStamp)) {
+            Files.write(configStamp, new byte[0]);
+        }
+
+        List<String> command = new ArrayList<>(Arrays.asList(
+                "make", "-s", "--no-print-directory",
+                "-f", makefile.toString()
+        ));
+        if (assumeConfigCurrent) {
+            command.add("-o");
+            command.add(configStamp.toString());
+        } else {
+            command.add("-n");
+        }
+        command.addAll(Arrays.asList(
+                "all",
+                "module-profile",
+                "PROJECT_DIR=" + FIRMWARE,
+                "BOARD_DIR=" + BOARD,
+                "PROJECT_CPU=ARCH_STM32F4",
+                "BUILDDIR=" + buildDirectory,
+                "GENERATED_DIR=" + generatedDirectory,
+                "SHORT_BOARD_NAME=profile-test",
+                "OBJS=" + object,
+                "PCHOBJ=" + buildDirectory.resolve("pch.stamp"),
+                "CONFIG_STAMP=" + configStamp,
+                "LIVE_DATA_STAMP=" + buildDirectory.resolve("live.stamp"),
+                "JAVA_TOOLS=" + buildDirectory.resolve("java.cookie"),
+                "MODULE_PROFILE_FILE=" + profile,
+                "FOME_MODULES=" + modules,
+                "FOME_CYLINDER_TRIM_COUNT=" + count
+        ));
+        return runCommand(command);
+    }
+
+    private ProcessResult runCommand(List<String> command) throws Exception {
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(FIRMWARE.toFile());
+        processBuilder.redirectErrorStream(true);
+        processBuilder.environment().remove("FOME_MODULES");
+        processBuilder.environment().remove("FOME_CYLINDER_TRIM_COUNT");
+
+        Process process = processBuilder.start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append('\n');
+            }
+        }
+        return new ProcessResult(process.waitFor(), output.toString());
+    }
+
+    private static String profileValue(Path profile, String field) throws IOException {
+        for (String line : Files.readAllLines(profile, StandardCharsets.UTF_8)) {
+            if (line.startsWith(field + " ")) {
+                return line.substring(field.length() + 1);
+            }
+        }
+        throw new AssertionError("Missing profile field " + field + " in " + profile);
+    }
+
+    private static String read(Path path) throws IOException {
+        return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static class ProcessResult {
+        private final int exitCode;
+        private final String output;
+
+        private ProcessResult(int exitCode, String output) {
+            this.exitCode = exitCode;
+            this.output = output;
+        }
+    }
+}

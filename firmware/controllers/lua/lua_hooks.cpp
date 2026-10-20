@@ -746,7 +746,7 @@ void configureRusefiLuaHooks(lua_State* l) {
 		return 1;
 	});
 
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 	lua_register(l, "setBoostTargetAdd", [](lua_State* l2) {
 		engine->module<BoostController>().unmock().luaTargetAdd = luaL_checknumber(l2, 1);
 		return 0;
@@ -759,7 +759,7 @@ void configureRusefiLuaHooks(lua_State* l) {
 		engine->module<BoostController>().unmock().luaOpenLoopAdd = luaL_checknumber(l2, 1);
 		return 0;
 	});
-#endif // EFI_ENGINE_CONTROL
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 #if EFI_IDLE_CONTROL
 	lua_register(l, "setIdleAdd", [](lua_State* l2) {
 		engine->module<IdleController>().unmock().luaAdd = luaL_checknumber(l2, 1);
