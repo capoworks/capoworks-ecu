@@ -1,0 +1,415 @@
+name: Custom firmware build
+run-name: Firmware build ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Opaque URL-safe request identifier
+        required: true
+        type: string
+      board:
+        description: Firmware board to build
+        required: true
+        type: choice
+        options:
+          - hellen72
+          - hellen-nb1
+          - hellenNA8_96
+          - hellenNA6
+          - hellen128
+          - mre_f4
+          - mre_f7
+          - proteus_f4
+          - proteus_f7
+          - proteus_h7
+          - stm32f429_nucleo
+          - f407-discovery
+          - atlas
+          - core8
+      features:
+        description: Comma-separated opt-in modules (hella_opst,boost,engine_sniffer,lua,emp_pump,shock_preload,cylinder_fuel_trim)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Firmware / ${{ inputs.board }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out fixed master source
+        uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 1
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6.0.1
+        with:
+          distribution: zulu
+          java-version: '21'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gcc-multilib \
+            g++-multilib \
+            mtools \
+            dosfstools \
+            zip \
+            xxd \
+            rsync
+
+      - name: Validate board and module profile
+        env:
+          INPUT_REQUEST_ID: ${{ inputs.request_id }}
+          INPUT_BOARD: ${{ inputs.board }}
+          INPUT_FEATURES: ${{ inputs.features }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+
+          fail() {
+            printf '::error title=Invalid firmware profile::%s\n' "$*" >&2
+            exit 1
+          }
+
+          request_id="${INPUT_REQUEST_ID:-}"
+          if [[ ! "$request_id" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            fail "request_id must contain only letters, digits, underscores, and hyphens"
+          fi
+
+          trim() {
+            local value=$1
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            printf '%s' "$value"
+          }
+
+          base_modules=(
+            fan
+            fuel_pump
+            gear_detector
+            tachometer
+            trip_odometer
+            map_averaging
+          )
+          optional_modules=(
+            hella_opst
+            boost
+            engine_sniffer
+            lua
+            emp_pump
+            shock_preload
+            cylinder_fuel_trim
+          )
+          canonical_catalog="${base_modules[*]} ${optional_modules[*]}"
+          source_catalog="$(
+            sed -nE \
+              's/^FOME_MODULE_CATALOG[[:space:]]*:=[[:space:]]*//p' \
+              firmware/controllers/modules/module_profile.mk
+          )"
+          if [[ -z "$source_catalog" || "$source_catalog" != "$canonical_catalog" ]]; then
+            fail "Workflow module catalog is stale; expected '$canonical_catalog', found '$source_catalog'"
+          fi
+
+          board_id="${INPUT_BOARD:-}"
+          case "$board_id" in
+            hellen72)
+              board_dir=firmware/config/boards/hellen/hellen72
+              compile_script=compile_hellen72.sh
+              ini_file=fome_hellen72.ini
+              ;;
+            hellen-nb1)
+              board_dir=firmware/config/boards/hellen/hellen-nb1
+              compile_script=compile_hellen-nb1.sh
+              ini_file=fome_hellen-nb1.ini
+              ;;
+            hellenNA8_96)
+              board_dir=firmware/config/boards/hellen/hellenNA8_96
+              compile_script=compile_hellenNA8_96.sh
+              ini_file=fome_hellenNA8_96.ini
+              ;;
+            hellenNA6)
+              board_dir=firmware/config/boards/hellen/hellen64_miataNA6_94
+              compile_script=compile_hellenNA6.sh
+              ini_file=fome_hellenNA6.ini
+              ;;
+            hellen128)
+              board_dir=firmware/config/boards/hellen/hellen128
+              compile_script=compile_hellen128.sh
+              ini_file=fome_hellen128.ini
+              ;;
+            mre_f4)
+              board_dir=firmware/config/boards/microrusefi
+              compile_script=compile_mre_f4.sh
+              ini_file=fome_mre_f4.ini
+              ;;
+            mre_f7)
+              board_dir=firmware/config/boards/microrusefi
+              compile_script=compile_mre_f7.sh
+              ini_file=fome_mre_f7.ini
+              ;;
+            proteus_f4)
+              board_dir=firmware/config/boards/proteus
+              compile_script=compile_proteus_f4.sh
+              ini_file=fome_proteus_f4.ini
+              ;;
+            proteus_f7)
+              board_dir=firmware/config/boards/proteus
+              compile_script=compile_proteus_f7.sh
+              ini_file=fome_proteus_f7.ini
+              ;;
+            proteus_h7)
+              board_dir=firmware/config/boards/proteus
+              compile_script=compile_proteus_h7.sh
+              ini_file=fome_proteus_h7.ini
+              ;;
+            stm32f429_nucleo)
+              board_dir=firmware/config/boards/nucleo_f429
+              compile_script=compile_stm32f429_nucleo.sh
+              ini_file=fome_stm32f429_nucleo.ini
+              ;;
+            f407-discovery)
+              board_dir=firmware/config/boards/f407-discovery
+              compile_script=compile_f407-discovery.sh
+              ini_file=fome_f407-discovery.ini
+              ;;
+            atlas)
+              board_dir=firmware/config/boards/atlas
+              compile_script=compile_atlas.sh
+              ini_file=fome_atlas.ini
+              ;;
+            core8)
+              board_dir=firmware/config/boards/core8
+              compile_script=compile_core8.sh
+              ini_file=fome_core8.ini
+              ;;
+            *)
+              fail "Unknown board id '$board_id'"
+              ;;
+          esac
+
+          test -f "$board_dir/$compile_script" ||
+            fail "Mapped compile script not found: $board_dir/$compile_script"
+
+          requested_features="$(trim "${INPUT_FEATURES:-}")"
+          if (( ${#requested_features} > 512 )); then
+            fail "features exceeds 512 characters"
+          fi
+          if [[ "$requested_features" == *$'\n'* || "$requested_features" == *$'\r'* ]]; then
+            fail "features must be a single line"
+          fi
+          if [[ ! "$requested_features" =~ ^[[:space:],a-z_]*$ ]]; then
+            fail "features contains characters outside lowercase module tokens and commas"
+          fi
+          if [[ -n "$requested_features" && "$requested_features" =~ (^|,)[[:space:]]*(,|$) ]]; then
+            fail "features contains an empty token"
+          fi
+
+          declare -A selected=()
+          if [[ -n "$requested_features" ]]; then
+            IFS=',' read -r -a requested_tokens <<< "$requested_features"
+            if (( ${#requested_tokens[@]} > ${#optional_modules[@]} )); then
+              fail "features contains more than ${#optional_modules[@]} tokens"
+            fi
+
+            for token in "${requested_tokens[@]}"; do
+              token="$(trim "$token")"
+              [[ -n "$token" ]] || fail "features contains an empty token"
+
+              if [[ -n "${selected[$token]+set}" ]]; then
+                fail "duplicate module token '$token'"
+              fi
+
+              is_optional=false
+              for module in "${optional_modules[@]}"; do
+                if [[ "$token" == "$module" ]]; then
+                  is_optional=true
+                  break
+                fi
+              done
+              if [[ "$is_optional" != true ]]; then
+                for module in "${base_modules[@]}"; do
+                  if [[ "$token" == "$module" ]]; then
+                    fail "base module '$token' is mandatory and must not be requested"
+                  fi
+                done
+                fail "unknown or unsupported opt-in module '$token'"
+              fi
+
+              selected[$token]=1
+            done
+          fi
+
+          # Keep this aligned with FOME_MODULES_BOARD_UNSUPPORTED in board.mk.
+          if [[ "$board_id" == hellen128 && -n "${selected[lua]+set}" ]]; then
+            fail "lua is not supported on hellen128"
+          fi
+
+          if [[ -n "${selected[shock_preload]+set}" ]]; then
+            case "$board_id" in
+              core8|atlas|proteus_f4|proteus_f7|proteus_h7)
+                ;;
+              *)
+                fail "shock_preload requires CAN2 and is not supported on $board_id"
+                ;;
+            esac
+          fi
+
+          modules=("${base_modules[@]}")
+          selected_optional=()
+          for module in "${optional_modules[@]}"; do
+            if [[ -n "${selected[$module]+set}" ]]; then
+              modules+=("$module")
+              selected_optional+=("$module")
+            fi
+          done
+
+          module_string="${modules[*]}"
+          base_string="${base_modules[*]}"
+          selected_optional_string="${selected_optional[*]}"
+
+          {
+            printf 'REQUEST_ID=%s\n' "$request_id"
+            printf 'BOARD_ID=%s\n' "$board_id"
+            printf 'BOARD_DIR=%s\n' "$board_dir"
+            printf 'COMPILE_SCRIPT=%s\n' "$compile_script"
+            printf 'INI_FILE=%s\n' "$ini_file"
+            printf 'REQUESTED_FEATURES=%s\n' "$requested_features"
+            printf 'BASE_MODULES=%s\n' "$base_string"
+            printf 'SELECTED_OPTIONAL_MODULES=%s\n' "$selected_optional_string"
+            printf 'FOME_MODULES=%s\n' "$module_string"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "### Custom firmware profile"
+            echo
+            echo "- Board: \`$board_id\`"
+            echo "- Opt-in features: \`${requested_features:-(none)}\`"
+            echo "- Resolved modules: \`$module_string\`"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Expose bundled ARM binutils
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain_dir="$GITHUB_WORKSPACE/firmware/ext/build-tools/arm-gnu-toolchain-11.3.rel1-x86_64-arm-none-eabi/bin"
+          binutils_dir="$GITHUB_WORKSPACE/build/custom-firmware-binutils"
+          mkdir -p "$binutils_dir"
+          for tool in objcopy objdump; do
+            test -x "$toolchain_dir/arm-none-eabi-$tool"
+            ln -sf "$toolchain_dir/arm-none-eabi-$tool" "$binutils_dir/$tool"
+          done
+          printf 'PATH=%s:%s\n' "$binutils_dir" "$PATH" >> "$GITHUB_ENV"
+
+      - name: Build firmware
+        env:
+          JOBS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BOARD_DIR"
+          bash "$COMPILE_SCRIPT"
+
+      - name: Verify outputs and create manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s firmware/deliver/fome.bin
+          resolved_modules="$(
+            bash firmware/controllers/modules/module_profile.sh \
+              read firmware/generated/module_profile.txt modules
+          )"
+          test "$resolved_modules" = "$FOME_MODULES"
+
+          artifact_dir="$RUNNER_TEMP/custom-firmware-artifacts"
+          rm -rf -- "$artifact_dir"
+          mkdir -p "$artifact_dir"
+          cp firmware/deliver/fome.bin "$artifact_dir/fome.bin"
+
+          if [[ -s firmware/deliver/fome_update.srec ]]; then
+            cp firmware/deliver/fome_update.srec "$artifact_dir/fome_update.srec"
+          fi
+          if [[ -s "firmware/tunerstudio/generated/$INI_FILE" ]]; then
+            cp "firmware/tunerstudio/generated/$INI_FILE" "$artifact_dir/$INI_FILE"
+          fi
+
+          export ARTIFACT_DIR="$artifact_dir"
+          export SOURCE_COMMIT
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          artifact_dir = Path(os.environ["ARTIFACT_DIR"])
+          artifacts = []
+          for path in sorted(artifact_dir.iterdir(), key=lambda item: item.name):
+              if not path.is_file():
+                  continue
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              artifacts.append(
+                  {
+                      "file": path.name,
+                      "sha256": digest.hexdigest(),
+                      "size_bytes": path.stat().st_size,
+                  }
+              )
+
+          manifest = {
+              "schema_version": 1,
+              "workflow": "custom-firmware-build.yaml",
+              "requested": {
+                  "request_id": os.environ["REQUEST_ID"],
+                  "board": os.environ["BOARD_ID"],
+                  "features": os.environ["REQUESTED_FEATURES"],
+              },
+              "resolved": {
+                  "board_id": os.environ["BOARD_ID"],
+                  "base_modules": os.environ["BASE_MODULES"].split(),
+                  "optional_modules": os.environ[
+                      "SELECTED_OPTIONAL_MODULES"
+                  ].split(),
+                  "modules": os.environ["FOME_MODULES"].split(),
+              },
+              "source": {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "ref": "refs/heads/master",
+                  "commit": os.environ["SOURCE_COMMIT"],
+              },
+              "run": {
+                  "id": os.environ["GITHUB_RUN_ID"],
+                  "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              },
+              "artifacts": artifacts,
+          }
+          (artifact_dir / "manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload firmware and manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: custom-firmware-${{ env.BOARD_ID }}
+          path: ${{ runner.temp }}/custom-firmware-artifacts
+          if-no-files-found: error
+          retention-days: 14
