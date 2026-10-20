@@ -176,6 +176,7 @@ void setBoardDefaultConfiguration() {
 	// ECU has two SD cards one fixed ine removable
 	engineConfiguration->sdCardCsPin = Gpio::B3;
 
+#if EFI_LUA
 	strncpy(config->luaScript,
 			R"(
 
@@ -185,4 +186,5 @@ void setBoardDefaultConfiguration() {
 
     )",
 			efi::size(config->luaScript));
+#endif // EFI_LUA
 }

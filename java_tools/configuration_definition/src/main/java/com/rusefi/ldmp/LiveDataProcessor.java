@@ -43,9 +43,8 @@ public class LiveDataProcessor {
 
     private final StringBuilder fragmentsContent = new StringBuilder(header);
 
-    private final String extraPrepend = System.getProperty("LiveDataProcessor.extra_prepend");
-
     private final ArrayList<String> inputFiles = new ArrayList<>();
+    private final ArrayList<String> prependFiles = new ArrayList<>();
     private final ArrayList<String> outputFiles = new ArrayList<>();
     private final ArrayList<String> outputFragmentFiles = new ArrayList<>();
     // Null is the legacy include-all mode; an empty set excludes every module-owned usage.
@@ -53,7 +52,7 @@ public class LiveDataProcessor {
 
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
-            System.err.println("Usage: LiveDataProcessor <yaml_file> [-makefileDep <dep_file>] [-stampFile <stamp_file>] [-modules <selected_modules>]");
+            System.err.println("Usage: LiveDataProcessor <yaml_file> [-makefileDep <dep_file>] [-stampFile <stamp_file>] [-modules <selected_modules>] [-prepend <definition_file>]...");
             System.exit(-1);
         }
 
@@ -64,6 +63,7 @@ public class LiveDataProcessor {
         String makefileDepsDestination = null;
         String stampFile = null;
         String modules = null;
+        ArrayList<String> prependFiles = new ArrayList<>();
         ArrayList<String> outputFragmentFiles = new ArrayList<>();
 
         // Parse optional arguments
@@ -82,6 +82,8 @@ public class LiveDataProcessor {
                 outputFragmentFiles.add(value);
             } else if ("-modules".equals(option)) {
                 modules = value;
+            } else if ("-prepend".equals(option)) {
+                prependFiles.add(value);
             } else {
                 throw new IllegalArgumentException("Unknown option " + option);
             }
@@ -94,6 +96,9 @@ public class LiveDataProcessor {
         liveDataProcessor.selectedModules = parseSelectedModules(modules);
         liveDataProcessor.inputFiles.add(yamlFileName);
         liveDataProcessor.inputFiles.addAll(outputFragmentFiles);
+        for (String prependFile : prependFiles) {
+            liveDataProcessor.addPrependFile(prependFile);
+        }
         liveDataProcessor.outputFragmentFiles.addAll(outputFragmentFiles);
 
         int sensorTsPosition = liveDataProcessor.handleYaml(data);
@@ -160,10 +165,7 @@ public class LiveDataProcessor {
                 ParseState parseState = new ParseState();
 
                 parseState.setDefinitionPolicy(Definition.OverwritePolicy.NotAllowed);
-
-                if (prepend != null && !prepend.isEmpty()) {
-                    RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), prepend);
-                }
+                parsePrependDefinitions(parseState, prepend);
 
                 if (!outputFragmentFiles.isEmpty()
                         && new File(definitionFile).getName().equals("output_channels.txt")) {
@@ -278,6 +280,21 @@ public class LiveDataProcessor {
         int totalSize = outputChannelWriter.getSize();
         outputChannelWriter.close();
         return totalSize;
+    }
+
+    void parsePrependDefinitions(ParseState parseState, String usagePrepend) throws IOException {
+        for (String prependFile : prependFiles) {
+            RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), prependFile);
+        }
+
+        if (usagePrepend != null && !usagePrepend.isEmpty()) {
+            RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), usagePrepend);
+        }
+    }
+
+    void addPrependFile(String prependFile) {
+        prependFiles.add(prependFile);
+        inputFiles.add(prependFile);
     }
 
     private void writeFiles() throws IOException {

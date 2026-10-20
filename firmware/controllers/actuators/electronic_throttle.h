@@ -16,7 +16,9 @@ void doInitElectronicThrottle();
 
 void setEtbIdlePosition(percent_t pos);
 void setEtbWastegatePosition(percent_t pos);
+#if EFI_LUA
 void setEtbLuaAdjustment(percent_t adjustment);
+#endif // EFI_LUA
 void setHitachiEtbCalibration();
 
 void setToyota89281_33010_pedal_position_sensor();
@@ -62,5 +64,7 @@ public:
 
 	virtual const pid_state_s& getPidState() const = 0;
 
+#if EFI_LUA
 	virtual void setLuaAdjustment(percent_t adjustment) = 0;
+#endif // EFI_LUA
 };

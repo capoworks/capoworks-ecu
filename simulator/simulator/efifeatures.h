@@ -105,7 +105,13 @@
 
 #define EFI_TUNER_STUDIO TRUE
 
+#ifndef EFI_LUA
+#ifdef MODULE_LUA
 #define EFI_LUA TRUE
+#else
+#define EFI_LUA FALSE
+#endif
+#endif
 
 #ifndef LUA_USER_HEAP
 #define LUA_USER_HEAP 100000

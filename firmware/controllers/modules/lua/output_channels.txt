@@ -1,0 +1,4 @@
+! Lua
+float[LUA_GAUGE_COUNT iterate] luaGauges;Lua: Gauge;"value",1, 0, 0, 50000, 3
+uint16_t luaLastCycleDuration;Lua: Last tick duration;"us",1, 0, 0, 0, 0
+uint8_t luaInvocationCounter;Lua: Tick counter;"count",1, 0, 0, 0, 0

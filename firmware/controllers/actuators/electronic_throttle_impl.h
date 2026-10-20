@@ -74,8 +74,10 @@ public:
 	}
 
 	// Lua throttle adjustment
+#if EFI_LUA
 	void setLuaAdjustment(percent_t adjustment) override;
 	float getLuaAdjustment() const;
+#endif // EFI_LUA
 
 	float prevOutput = 0;
 
@@ -139,7 +141,9 @@ private:
 	uint8_t m_autotuneCounter = 0;
 	uint8_t m_autotuneCurrentParam = 0;
 
+#if EFI_LUA
 	Timer m_luaAdjustmentTimer;
+#endif // EFI_LUA
 };
 
 void etbPidReset();

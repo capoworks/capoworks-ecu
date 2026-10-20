@@ -106,10 +106,8 @@ struct_no_prefix persistent_config_s
 
 struct_no_prefix engine_configuration_s
 
-#define BLOCKING_FACTOR 1600
-
-#define LUA_PWM_COUNT 8
-#define LUA_DIGITAL_INPUT_COUNT 8
+! 1640 covers the 1628-byte upcoming Shock profile plus 10 bytes of overhead without increasing the 1664-byte USB buffers.
+#define BLOCKING_FACTOR 1640
 
 ! https://github.com/rusefi/rusefi/issues/2010 shows the corner case wheel with huge depth requirement
 #define GAP_TRACKING_LENGTH 18
@@ -162,8 +160,6 @@ struct_no_prefix engine_configuration_s
 #define HW_MAX_ADC_INDEX 17
 #define TRIGGER_SIMULATOR_PIN_COUNT 2
 #define TRIGGER_INPUT_PIN_COUNT 2
-#define SCRIPT_SETTING_COUNT 8
-
 #define VEHICLE_INFO_SIZE 32
 
 #define FUEL_RPM_COUNT 16
@@ -203,9 +199,6 @@ struct_no_prefix engine_configuration_s
 #define PERCENT_TRIM_BYTE_PACKING_DIV 0.02
 
 #define SCRIPT_TABLE_8 8
-
-#define SCRIPT_CURVE_8 8
-#define SCRIPT_CURVE_16 16
 
 #define TPS_TPS_ACCEL_TABLE 8
 #define ADC_CHANNEL_NONE 0
@@ -767,9 +760,6 @@ output_pin_e acFanPin;Optional Radiator Fan used with A/C
 
 	Gpio mc33816_flag0;
 
-	custom script_setting_t 4 scalar, F32, @OFFSET@, 		"",	   1,	   0, 0, 18000,	  2
-	script_setting_t[SCRIPT_SETTING_COUNT iterate] scriptSetting;
-
 	Gpio spi1mosiPin;
 	Gpio spi1misoPin;
 	Gpio spi1sckPin;
@@ -864,8 +854,6 @@ custom idle_mode_e 1 bits, U08, @OFFSET@, [0:0], "Open Loop + Closed Loop", "Ope
 	idle_mode_e idleMode
 
 	Gpio       drv8860_miso;
-
-	output_pin_e[LUA_PWM_COUNT iterate] luaOutputPins
 
 	int16_t[CAM_INPUTS_COUNT iterate] autoscale vvtOffsets;Angle between cam sensor and VVT zero position. Adjust this so that your VVT indication reads 0 while running with the control solenoid disabled.;"value", 0.1, 0, -720, 1000, 1
 
@@ -1167,9 +1155,6 @@ tChargeMode_e tChargeMode;
 	uint8_t autotemp fan2OnTemperature;Cooling fan turn-on temperature threshold, in Celsius;"C", 1, 0, 0, 150, 0
 	uint8_t autotemp fan2OffTemperature;Cooling fan turn-off temperature threshold, in Celsius;"C", 1, 0, 0, 150, 0
 
-#define SCRIPT_CURVE_COUNT 6
-#define SCRIPT_TABLE_COUNT 4
-
 	Gpio stepperEnablePin;
 	Gpio tle8888_cs;
 	pin_output_mode_e tle8888_csPinMode;
@@ -1198,11 +1183,6 @@ tChargeMode_e tChargeMode;
 
 	linear_sensor_s highPressureFuel;
 	linear_sensor_s lowPressureFuel;
-
-gppwm_note_t[SCRIPT_CURVE_COUNT iterate] scriptCurveName;
-
-gppwm_note_t[SCRIPT_TABLE_COUNT iterate] scriptTableName;
-gppwm_note_t[SCRIPT_SETTING_COUNT iterate] scriptSettingName;
 
 float tChargeAirCoefMin;Heat transfer coefficient at zero flow.\n0 means the air charge is fully heated to the same temperature as CLT.\n1 means the air charge gains no heat, and enters the cylinder at the temperature measured by IAT.;"", 1, 0, 0, 1, 3
 float tChargeAirCoefMax;Heat transfer coefficient at high flow, as defined by "max air flow".\n0 means the air charge is fully heated to the same temperature as CLT.\n1 means the air charge gains no heat, and enters the cylinder at the temperature measured by IAT.;"", 1, 0, 0, 1, 3
@@ -1319,7 +1299,6 @@ output_pin_e acrPin2;
 	uint8_t crankingIACposition;This is the IAC position during cranking, some engines start better if given more air during cranking to improve cylinder filling.;"percent", 1, 0, 0, 100, 0
 
 
-switch_input_pin_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPins;
 	int16_t ALSMinRPM;;"rpm", 1, 0, 0, 20000, 0
 	int16_t ALSMaxRPM;;"rpm", 1, 0, 0, 20000, 0
 int16_t ALSMaxDuration;;"sec", 1, 0, 0, 10, 0
@@ -1343,8 +1322,6 @@ uint8_t alsEtbPosition;;"", 1, 0, 0, 20000, 0
 
 	uint8_t autoscale tpsSecondaryMaximum;For Ford TPS, use 53%. For Toyota ETCS-i, use ~65%. 0 and 100 disable, <20 invalid, rest will avoid sensor averaging.;"%", 0.5, 0, 0, 100, 1
 	uint8_t autoscale ppsSecondaryMaximum;For Toyota ETCS-i, use ~69%. 0 and 100 disable, <20 invalid, rest will avoid sensor averaging.;"%", 0.5, 0, 0, 100, 1
-pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
-
 	ThermistorConf oilTempSensor
 	ThermistorConf fuelTempSensor
 	ThermistorConf ambientTempSensor
@@ -1488,19 +1465,6 @@ engine_configuration_s engineConfiguration;
 	int8_t[CLT_TIMING_CURVE_SIZE] autoscale cltTimingExtra;;"degree", 0.1, 0, -30, 30, 1
 
 
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve1Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve1;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve2Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_16] autoscale scriptCurve2;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve3Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve3;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve4Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve4;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve5Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve5;;"y", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve6Bins;;"x", 0.1, 0, -3270, 3270, 2
-	int16_t[SCRIPT_CURVE_8] autoscale scriptCurve6;;"y", 0.1, 0, -3270, 3270, 2
-
 	uint16_t[BARO_CORR_SIZE] autoscale baroCorrPressureBins;;"kPa", 0.1, 0, 0, 200, 1
 	uint16_t[BARO_CORR_SIZE] baroCorrRpmBins;;"RPM", 1, 0, 0, 65000, 0
 
@@ -1546,8 +1510,6 @@ uint8_t[IDLE_VE_SIZE] idleVeLoadBins;;"load", 1, 0, 0, 100, 0
 uint16_t[IDLE_VE_SIZE x IDLE_VE_SIZE] autoscale idleVeTable;;"%", 0.1, 0, 0, 999, 1
 
 #define LUA_SCRIPT_SIZE 8000
-custom lua_script_t @@LUA_SCRIPT_SIZE@@ string, ASCII, @OFFSET@, @@LUA_SCRIPT_SIZE@@
-lua_script_t luaScript;
 
 float[CLT_CURVE_SIZE] autotemp cltFuelCorrBins;;"C", 1, 0, -100, 250, 2
 float[CLT_CURVE_SIZE] cltFuelCorr;;"ratio", 1, 0, 0, 5, 2
@@ -1622,30 +1584,10 @@ int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable1;;"value", 0.01, 
 int16_t[SCRIPT_TABLE_8] scriptTable1LoadBins;;"L", 1, 0, -32000, 32000, 0
 int16_t[SCRIPT_TABLE_8] scriptTable1RpmBins;;"RPM", 1, 0, -32000, 32000, 0
 
-int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable2;;"value", 0.01, 0, -327, 327, 2
-int16_t[SCRIPT_TABLE_8] scriptTable2LoadBins;;"L", 1, 0, -32000, 32000, 0
-int16_t[SCRIPT_TABLE_8] scriptTable2RpmBins;;"RPM", 1, 0, -32000, 32000, 0
-
-int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable3;;"value", 0.01, 0, -327, 327, 2
-int16_t[SCRIPT_TABLE_8] scriptTable3LoadBins;;"L", 1, 0, -32000, 32000, 0
-int16_t[SCRIPT_TABLE_8] scriptTable3RpmBins;;"RPM", 1, 0, -32000, 32000, 0
-
-int16_t[SCRIPT_TABLE_8 x SCRIPT_TABLE_8] autoscale scriptTable4;;"value", 0.01, 0, -327, 327, 2
-int16_t[SCRIPT_TABLE_8] scriptTable4LoadBins;;"L", 1, 0, -32000, 32000, 0
-int16_t[SCRIPT_TABLE_8] scriptTable4RpmBins;;"RPM", 1, 0, -32000, 32000, 0
-
 #define TRIM_SIZE 4
 
 struct cyl_trim_s
 	int8_t[TRIM_SIZE x TRIM_SIZE] autoscale table;;"", 0.2, 0, -25, 25, 1
-end_struct
-
-! Per-cylinder model fuel trims are 16x16 and belong to the SD or Alpha-N airmass family.
-! Independent of the TRIM_SIZE ignition trim tables above.
-#define CYLINDER_FUEL_TRIM_SIZE 16
-
-struct cylinder_model_fuel_trim_s
-	int8_t[CYLINDER_FUEL_TRIM_SIZE x CYLINDER_FUEL_TRIM_SIZE] autoscale table;;"%", 0.2, 0, -25, 25, 1
 end_struct
 
 ! All ign trim tables share axes
@@ -1841,15 +1783,6 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 		table_values uint8_t airmassBlendTable;Alpha-N contribution to cylinder air mass. 0% uses SD only, 100% uses Alpha-N only.;"% Alpha-N", 1, 0, 0, 100, 0
 	end_table
 
-	! Per-cylinder model fuel trims: the only per-cylinder fuel trims. The former
-	! 4x4 residual fuel trims were removed, so this layout is not backward compatible.
-	! Each family shares one set of axes across all cylinders; SD and Alpha-N axes are independent.
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimLoadBins;;"kPa", 1, 0, 0, 1000, 0
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
-	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] sdCylinderFuelTrims
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] autoscale alphaNCylinderFuelTrimTpsBins;;"% TPS", {1/@@TPS_2_BYTE_PACKING_MULT@@}, 0, 0, 100, 2
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] alphaNCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
-	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] alphaNCylinderFuelTrims
 ! MODULE_PERSISTENT_CONFIG
 end_struct
 
