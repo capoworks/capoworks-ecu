@@ -1,0 +1,16 @@
+#define LUA_PWM_COUNT 8
+#define LUA_DIGITAL_INPUT_COUNT 8
+#define SCRIPT_SETTING_COUNT 8
+#define SCRIPT_CURVE_COUNT 6
+#define SCRIPT_TABLE_COUNT 4
+
+custom script_setting_t 4 scalar, F32, @OFFSET@, 		"",	   1,	   0, 0, 18000,	  2
+script_setting_t[SCRIPT_SETTING_COUNT iterate] scriptSetting;
+
+output_pin_e[LUA_PWM_COUNT iterate] luaOutputPins
+switch_input_pin_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPins;
+pin_input_mode_e[LUA_DIGITAL_INPUT_COUNT iterate] luaDigitalInputPinModes;
+
+gppwm_note_t[SCRIPT_CURVE_COUNT iterate] scriptCurveName;
+gppwm_note_t[SCRIPT_TABLE_COUNT iterate] scriptTableName;
+gppwm_note_t[SCRIPT_SETTING_COUNT iterate] scriptSettingName;

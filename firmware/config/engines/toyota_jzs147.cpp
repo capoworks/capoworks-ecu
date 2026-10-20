@@ -48,7 +48,9 @@ static void common2jz() {
 	engineConfiguration->fuelPumpPin = Gpio::Unassigned;
 
 	// chartsize 450
+#if EFI_ENGINE_SNIFFER
 	engineConfiguration->engineChartSize = 450;
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->map.sensor.type = MT_CUSTOM;
 

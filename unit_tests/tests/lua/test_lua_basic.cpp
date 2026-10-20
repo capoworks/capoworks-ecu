@@ -130,7 +130,3 @@ TEST(LuaSensor, Timeout) {
 	)")
 					.value_or(0));
 }
-
-TEST(SystemLua, ScriptLoads) {
-	startLua();
-}

@@ -151,6 +151,7 @@ static void doRunSparkBench(size_t humanIndex, float onTime, float offTime, int 
 	pinbench(onTime, offTime, count, enginePins.coils[humanIndex - 1]);
 }
 
+#ifdef MODULE_LUA
 static void doRunBenchTestLuaOutput(size_t humanIndex, float onTime, float offTime, int count) {
 	if (humanIndex < 1 || humanIndex > LUA_PWM_COUNT) {
 		efiPrintf("Invalid index: %d", humanIndex);
@@ -158,6 +159,7 @@ static void doRunBenchTestLuaOutput(size_t humanIndex, float onTime, float offTi
 	}
 	pinbench(onTime, offTime, count, enginePins.luaOutputPins[humanIndex - 1]);
 }
+#endif // MODULE_LUA
 
 /**
  * cylinder #2, 5ms ON, 1000ms OFF, repeat 3 times
@@ -193,9 +195,11 @@ static void sparkBench(float onTime, float offTime, float count) {
  * channel #1, 5ms ON, 1000ms OFF, repeat 3 times
  * fsiobench2 1 5 1000 3
  */
+#ifdef MODULE_LUA
 static void luaOutBench2(float humanIndex, float onTime, float offTime, float count) {
 	doRunBenchTestLuaOutput((int)humanIndex, onTime, offTime, (int)count);
 }
+#endif // MODULE_LUA
 
 void fanBench() {
 	engine->module<FanControl1>()->benchTest();
@@ -448,12 +452,32 @@ void executeTSCommand(uint16_t subsystem, uint16_t index) {
 			}
 			break;
 
+#ifdef MODULE_LUA
 		case TS_LUA_OUTPUT_CATEGORY:
 			if (!running) {
 				doRunBenchTestLuaOutput(
 						index, 4.0, engineConfiguration->benchTestOffTime, engineConfiguration->benchTestCount);
 			}
 			break;
+#endif // MODULE_LUA
+
+#ifdef MODULE_SHOCK_PRELOAD
+		case TS_SHOCK_PRELOAD_CATEGORY:
+			engine->module<ShockPreload>()->handleTsCommand(index);
+			break;
+#endif
+
+#ifdef MODULE_EMP_PUMP
+		case TS_EMP_PUMP_CATEGORY:
+			// The EMP module itself rejects a start while the engine is running
+			// unless the explicit configuration override is enabled.
+			if (index == EMP_PUMP_SERVICE_START) {
+				engine->module<EmpPump>()->handleServiceCommand(EmpPumpServiceCommand::Start);
+			} else if (index == EMP_PUMP_SERVICE_STOP) {
+				engine->module<EmpPump>()->handleServiceCommand(EmpPumpServiceCommand::Stop);
+			}
+			break;
+#endif // MODULE_EMP_PUMP
 
 		case TS_X14:
 			handleCommandX14(index);
@@ -549,7 +573,9 @@ void initBenchTest() {
 	addConsoleAction(CMD_MIL_BENCH, milBench);
 	addConsoleAction(CMD_HPFP_BENCH, hpfpValveBench);
 
+#ifdef MODULE_LUA
 	addConsoleActionFFFF("luabench2", luaOutBench2);
+#endif // MODULE_LUA
 	instance.startThread();
 	onConfigurationChangeBenchTest();
 }

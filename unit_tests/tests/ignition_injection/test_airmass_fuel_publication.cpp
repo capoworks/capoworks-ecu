@@ -2,8 +2,10 @@
 
 #include "airmass_calibration.h"
 #include "fuel_math.h"
+#if EFI_LUA
 #include "lua_airmass.h"
 #include "lua_hooks.h"
+#endif // EFI_LUA
 
 namespace {
 using Fault = AirmassInjectionFault;
@@ -120,11 +122,15 @@ void configureLegacyConsumerRun(EngineTestHelper& eth, engine_load_mode_e mode, 
 	engine->engineModules.get<IdleController>().set(&idleController);
 
 	const AirmassResult airmass{1.3440001f, 50.0f};
+#if EFI_LUA
 	if (mode == LM_LUA) {
 		static_cast<LuaAirmass&>(getLuaAirmassModel()).setAirmass(airmass);
 	} else {
+#endif // EFI_LUA
 		EXPECT_CALL(*eth.mockAirmass, getAirmass(testing::_, testing::_)).WillRepeatedly(testing::Return(airmass));
+#if EFI_LUA
 	}
+#endif // EFI_LUA
 }
 
 void expectLegacyCustomConsumerAxes() {
@@ -347,6 +353,7 @@ TEST(AirmassFuelPublication, LegacyMockSelectorsUseLiveConsumerAxes) {
 	expectLegacyCustomConsumerAxes();
 }
 
+#if EFI_LUA
 TEST(AirmassFuelPublication, LegacyLuaSelectorsUseLiveConsumerAxes) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 	NeverIdleController idleController;
@@ -368,6 +375,8 @@ TEST(AirmassFuelPublication, LegacyLuaSelectorsUseLiveConsumerAxes) {
 	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
 	expectLegacyCustomConsumerAxes();
 }
+
+#endif // EFI_LUA
 
 TEST(AirmassFuelPublication, LegacyDefaultSelectorsKeepHistoricalConsumerCoordinates) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);

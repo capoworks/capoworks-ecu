@@ -70,10 +70,12 @@ const injector_model_s* getLiveData(size_t) {
 	return &engine->module<InjectorModelPrimary>().unmock();
 }
 
+#ifdef MODULE_BOOST
 template <>
 const boost_control_s* getLiveData(size_t) {
 	return &engine->module<BoostController>().unmock();
 }
+#endif // MODULE_BOOST
 
 template <>
 const ac_control_s* getLiveData(size_t) {

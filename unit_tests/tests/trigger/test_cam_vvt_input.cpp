@@ -9,8 +9,10 @@
 
 extern WarningCodeState unitTestWarningCodeState;
 
+#if EFI_ENGINE_SNIFFER
 #include "engine_sniffer.h"
 extern WaveChart waveChart;
+#endif // EFI_ENGINE_SNIFFER
 
 TEST(trigger, testNoStartUpWarningsNoSyncronizationTrigger) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
@@ -182,5 +184,7 @@ TEST(trigger, testNB2CamInput) {
 	EXPECT_FLOAT_EQ(540, engine->triggerCentral.triggerState.m_phaseAdjustment);
 	EXPECT_TRUE(engine->triggerCentral.triggerState.hasSynchronizedPhase());
 
+#if EFI_ENGINE_SNIFFER
 	EXPECT_EQ(39, waveChart.getSize());
+#endif // EFI_ENGINE_SNIFFER
 }

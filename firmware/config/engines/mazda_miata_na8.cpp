@@ -36,7 +36,9 @@ static void commonNA8() {
 
 	engineConfiguration->iacByTpsTaper = 6;
 	engineConfiguration->useIdleTimingPidControl = true;
+#if EFI_ENGINE_SNIFFER
 	engineConfiguration->engineChartSize = 300;
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->wwaeTau = 0.1;
 	engineConfiguration->targetVBatt = 14.2;

@@ -16,10 +16,12 @@ void setBoardConfigOverrides() {
 	engineConfiguration->vbattAdcChannel = EFI_ADC_11;
 
 	// Force I/O for Lua - so no TS is required
+#if EFI_LUA
 	engineConfiguration->luaOutputPins[0] = H64_OUT_PWM1;
 	engineConfiguration->luaOutputPins[1] = H64_OUT_PWM2;
 	engineConfiguration->luaOutputPins[2] = H64_OUT_PWM3;
 	engineConfiguration->luaOutputPins[3] = H64_OUT_PWM4;
+#endif // EFI_LUA
 
 	engineConfiguration->auxAnalogInputs[0] = EFI_ADC_2;
 	engineConfiguration->auxAnalogInputs[1] = EFI_ADC_3;
