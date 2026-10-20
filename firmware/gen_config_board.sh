@@ -22,6 +22,7 @@ PROFILE_FILE=${4:-}
 INI="fome_${SHORT_BOARDNAME}.ini"
 PROFILE_READER=controllers/modules/module_profile.sh
 PROFILE_MAKE=controllers/modules/module_profile_host.mk
+PROFILE_BOARD_DIR=$BOARD_DIR
 LIVE_DATA_OUTPUTS=(
 	generated/live_data_ids.h
 	generated/live_data_fragments.h
@@ -31,6 +32,16 @@ LIVE_DATA_OUTPUTS=(
 	generated/output_channels.ini
 	generated/data_logs.ini
 )
+
+# Frankenso files build with the f407-discovery board metadata but live in a
+# separate directory without board.mk. Keep that exception local to the
+# host-only module profile; config generation below still uses BOARD_DIR.
+BOARD_DIR_NORMALIZED=${BOARD_DIR%/}
+case "$BOARD_DIR_NORMALIZED" in
+	config/boards/frankenso|*/config/boards/frankenso)
+		PROFILE_BOARD_DIR="${BOARD_DIR_NORMALIZED%/frankenso}/f407-discovery"
+		;;
+esac
 
 echo "BOARD_DIR=${BOARD_DIR} SHORT_BOARDNAME=${SHORT_BOARDNAME}"
 
@@ -46,7 +57,7 @@ if [ -z "$PROFILE_FILE" ]; then
 
 	make --no-print-directory -f "$PROFILE_MAKE" module-profile \
 		PROJECT_DIR="$PWD" \
-		BOARD_DIR="$BOARD_DIR"
+		BOARD_DIR="$PROFILE_BOARD_DIR"
 
 	LIVE_DATA_REFRESH=0
 	if ! cmp -s "$PROFILE_SNAPSHOT" "$PROFILE_FILE"; then
