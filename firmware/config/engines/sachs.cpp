@@ -18,7 +18,9 @@ void setSachs() {
 
 	engineConfiguration->twoStroke = true;
 	engineConfiguration->firingOrder = FO_1;
+#if EFI_ENGINE_SNIFFER
 	engineConfiguration->engineChartSize = 400;
+#endif // EFI_ENGINE_SNIFFER
 
 	setEgoSensor(ES_Innovate_MTX_L);
 

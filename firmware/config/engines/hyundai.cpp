@@ -10,6 +10,7 @@
 #include "hyundai.h"
 
 static void commonGenesisCoupe() {
+#if EFI_LUA
 	strncpy(config->luaScript,
 			R"(
 
@@ -44,6 +45,7 @@ end
 
 )",
 			efi::size(config->luaScript));
+#endif // EFI_LUA
 }
 
 void setGenesisCoupeBK1() {

@@ -1,0 +1,10 @@
+uint8_t[BOOST_RPM_COUNT x BOOST_LOAD_COUNT] autoscale boostTableOpenLoop;;"", {1/2}, 0, 0, 100, 1
+int16_t[BOOST_RPM_COUNT] boostRpmBins;;"", 1, 0, -10000, 10000, 0
+int16_t[BOOST_LOAD_COUNT] boostTpsBins;;"", 1, 0, -10000, 10000, 0
+
+uint8_t[BOOST_RPM_COUNT x BOOST_LOAD_COUNT] autoscale boostTableClosedLoop;;"", 2, 0, 0, 3000, 0
+int16_t[BOOST_RPM_COUNT] boostClosedLoopXAxisBins;;"", 1, 0, -10000, 10000, 0
+int16_t[BOOST_LOAD_COUNT] boostClosedLoopYAxisBins;;"", 1, 0, -10000, 10000, 0
+
+blend_table_s[BOOST_BLEND_COUNT iterate] boostOpenLoopBlends
+blend_table_s[BOOST_BLEND_COUNT iterate] boostClosedLoopBlends

@@ -81,8 +81,9 @@
 #define EFI_VVT_PID TRUE
 #endif // EFI_VVT_PID
 
-#undef EFI_ENGINE_SNIFFER
-#define EFI_ENGINE_SNIFFER TRUE
+#ifndef EFI_ENGINE_SNIFFER
+#define EFI_ENGINE_SNIFFER MODULE_ENGINE_SNIFFER
+#endif
 
 #define FUEL_MATH_EXTREME_LOGGING FALSE
 #define EFI_INTERNAL_FLASH TRUE
@@ -104,10 +105,17 @@
 
 #define EFI_TUNER_STUDIO TRUE
 
+#ifndef EFI_LUA
+#ifdef MODULE_LUA
 #define EFI_LUA TRUE
+#else
+#define EFI_LUA FALSE
+#endif
+#endif
 
-#undef LUA_USER_HEAP
+#ifndef LUA_USER_HEAP
 #define LUA_USER_HEAP 100000
+#endif
 
 #define EFI_CAN_SERIAL FALSE
 #define EFI_USE_OPENBLT FALSE

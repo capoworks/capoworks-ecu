@@ -5,12 +5,13 @@
 #include "configuration_storage.h"
 #include "crc_accelerator.h"
 
-static ConfigurationFlashState
-validateConfiguration(int version, int size, uint32_t storedCrc, uint32_t calculatedCrc) {
-	if (storedCrc != calculatedCrc) {
-		return storedCrc == UINT32_MAX ? ConfigurationFlashState::BlankChip : ConfigurationFlashState::CrcFailed;
+static ConfigurationFlashState validateHeader(const persistent_config_header_s& header) {
+	if (header.version == UINT32_MAX && header.size == UINT32_MAX && header.layoutIdLow == UINT32_MAX &&
+		header.layoutIdHigh == UINT32_MAX) {
+		return ConfigurationFlashState::BlankChip;
 	}
-	if (version != FLASH_DATA_VERSION || size != sizeof(persistent_config_container_s)) {
+	if (header.version != FLASH_DATA_VERSION || header.size != sizeof(persistent_config_container_s) ||
+		getPersistentConfigLayoutId(header) != CONFIG_LAYOUT_ID) {
 		return ConfigurationFlashState::IncompatibleVersion;
 	}
 	return ConfigurationFlashState::Ok;
@@ -20,14 +21,40 @@ static ConfigurationFlashState readCopy(flashaddr_t address, persistent_config_c
 	if (!address) {
 		return ConfigurationFlashState::BlankChip;
 	}
-	if (intFlashRead(address, reinterpret_cast<char*>(&destination), sizeof(destination)) != FLASH_RETURN_SUCCESS) {
+
+	persistent_config_header_s header;
+	if (intFlashRead(address, reinterpret_cast<char*>(&header), sizeof(header)) != FLASH_RETURN_SUCCESS) {
 		return ConfigurationFlashState::ReadFailed;
 	}
-	return validateConfiguration(
-			destination.version,
-			destination.size,
-			destination.value,
-			singleCrc(&destination.persistentConfiguration, sizeof(destination.persistentConfiguration)));
+	auto headerState = validateHeader(header);
+	if (headerState != ConfigurationFlashState::Ok) {
+		return headerState;
+	}
+
+	if (intFlashRead(
+				address + offsetof(persistent_config_container_s, persistentConfiguration),
+				reinterpret_cast<char*>(&destination.persistentConfiguration),
+				sizeof(destination.persistentConfiguration)) != FLASH_RETURN_SUCCESS) {
+		return ConfigurationFlashState::ReadFailed;
+	}
+
+	uint32_t storedCrc;
+	if (intFlashRead(
+				address + offsetof(persistent_config_container_s, value),
+				reinterpret_cast<char*>(&storedCrc),
+				sizeof(storedCrc)) != FLASH_RETURN_SUCCESS) {
+		return ConfigurationFlashState::ReadFailed;
+	}
+
+	uint32_t calculatedCrc =
+			singleCrc(&destination.persistentConfiguration, sizeof(destination.persistentConfiguration));
+	if (storedCrc != calculatedCrc) {
+		return storedCrc == UINT32_MAX ? ConfigurationFlashState::BlankChip : ConfigurationFlashState::CrcFailed;
+	}
+
+	destination.header = header;
+	destination.value = storedCrc;
+	return ConfigurationFlashState::Ok;
 }
 
 ConfigurationFlashState
@@ -39,25 +66,24 @@ readConfigurationCopies(flashaddr_t first, flashaddr_t second, persistent_config
 // Check a stored copy without allocating another full configuration in RAM.
 // Every read goes through the driver so M7 cache invalidation also applies.
 static ConfigurationFlashState checkCopy(flashaddr_t address) {
-	struct Header {
-		int version;
-		int size;
-	} header;
-	static_assert(sizeof(header) == offsetof(persistent_config_container_s, persistentConfiguration));
+	persistent_config_header_s header;
 
 	if (!address || intFlashRead(address, reinterpret_cast<char*>(&header), sizeof(header)) != FLASH_RETURN_SUCCESS) {
 		return ConfigurationFlashState::ReadFailed;
 	}
-	if (header.version != FLASH_DATA_VERSION || header.size != sizeof(persistent_config_container_s)) {
-		return header.version == -1 && header.size == -1 ? ConfigurationFlashState::BlankChip
-														 : ConfigurationFlashState::IncompatibleVersion;
+	auto headerState = validateHeader(header);
+	if (headerState != ConfigurationFlashState::Ok) {
+		return headerState;
 	}
 
 	Crc crc(sizeof(persistent_config_s));
 	alignas(4) char buffer[128];
 	for (size_t offset = 0; offset < sizeof(persistent_config_s); offset += sizeof(buffer)) {
 		size_t count = std::min(sizeof(buffer), sizeof(persistent_config_s) - offset);
-		if (intFlashRead(address + sizeof(header) + offset, buffer, count) != FLASH_RETURN_SUCCESS) {
+		if (intFlashRead(
+					address + offsetof(persistent_config_container_s, persistentConfiguration) + offset,
+					buffer,
+					count) != FLASH_RETURN_SUCCESS) {
 			return ConfigurationFlashState::ReadFailed;
 		}
 		crc.addData(buffer, count);
@@ -70,7 +96,10 @@ static ConfigurationFlashState checkCopy(flashaddr_t address) {
 				sizeof(storedCrc)) != FLASH_RETURN_SUCCESS) {
 		return ConfigurationFlashState::ReadFailed;
 	}
-	return validateConfiguration(header.version, header.size, storedCrc, crc.getCrc());
+	if (storedCrc != crc.getCrc()) {
+		return storedCrc == UINT32_MAX ? ConfigurationFlashState::BlankChip : ConfigurationFlashState::CrcFailed;
+	}
+	return ConfigurationFlashState::Ok;
 }
 
 static bool invalidLayout(flashaddr_t first, flashaddr_t second, size_t size) {

@@ -142,9 +142,7 @@ static void writeConfiguration(bool requestedOnly) {
 	if (!burnWithoutFlash) {
 		efiPrintf("Writing pending configuration...");
 
-		// Set up the container
-		persistentState.size = sizeof(persistentState);
-		persistentState.version = FLASH_DATA_VERSION;
+		initializePersistentConfigHeader(persistentState);
 		persistentState.value = flashStateCrc(persistentState);
 
 #if EFI_STORAGE_INT_FLASH == TRUE
@@ -244,11 +242,8 @@ void readFromFlash() {
 			resetConfigurationExt(engine_type_e::DEFAULT_ENGINE_TYPE);
 			break;
 		case ConfigurationFlashState::IncompatibleVersion:
-			// Preserve engine type from old config
-			efiPrintf(
-					"Resetting due to version mismatch but preserving engine type [%d]",
-					(int)engineConfiguration->engineType);
-			resetConfigurationExt(engineConfiguration->engineType);
+			efiPrintf("Resetting due to incompatible configuration header");
+			resetConfigurationExt(engine_type_e::DEFAULT_ENGINE_TYPE);
 			break;
 		case ConfigurationFlashState::Ok:
 			// At this point we know that CRC and version number is what we expect. Safe to assume it's a valid

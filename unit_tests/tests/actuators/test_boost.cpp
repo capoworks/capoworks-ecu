@@ -1,5 +1,7 @@
 #include "pch.h"
 
+#ifdef MODULE_BOOST
+
 #include "airmass_loads.h"
 #include "boost_control.h"
 
@@ -186,3 +188,5 @@ TEST(BoostControl, SetOutput) {
 
 	bc.setOutput(25.0f);
 }
+
+#endif // MODULE_BOOST

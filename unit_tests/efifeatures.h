@@ -15,7 +15,9 @@
 
 #define EFI_VEHICLE_SPEED TRUE
 
-#define EFI_ENGINE_SNIFFER TRUE
+#ifndef EFI_ENGINE_SNIFFER
+#define EFI_ENGINE_SNIFFER MODULE_ENGINE_SNIFFER
+#endif
 
 #define EFI_PRINTF_FUEL_DETAILS TRUE
 
@@ -46,7 +48,13 @@
 #define EFI_SHAFT_POSITION_INPUT TRUE
 #define EFI_ENGINE_CONTROL TRUE
 
+#ifndef EFI_LUA
+#ifdef MODULE_LUA
 #define EFI_LUA TRUE
+#else
+#define EFI_LUA FALSE
+#endif
+#endif
 
 #define EFI_HPFP TRUE
 

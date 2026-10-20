@@ -1,7 +1,5 @@
 #include "pch.h"
 
-#include "boost_control.h"
-
 using ::testing::_;
 using ::testing::StrictMock;
 

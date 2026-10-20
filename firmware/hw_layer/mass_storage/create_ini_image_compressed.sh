@@ -23,13 +23,19 @@ SHORT_BOARDNAME=$4
 BOARD_SPECIFIC_URL=$5
 
 IMAGE=ramdisk.image
+DEFLATE_WINDOW_BITS=14
+DEFLATE_WINDOW_SIZE=$((1 << DEFLATE_WINDOW_BITS))
 
 # mkfs.fat and fatlabel are privileged on some systems
 PATH="$PATH:/usr/sbin"
 
 echo "create_ini_image_compressed: ini $FULL_INI to $H_OUTPUT size $FS_SIZE for $SHORT_BOARDNAME [$BOARD_SPECIFIC_URL]"
 
-rm -f $IMAGE $IMAGE.gz
+cleanup() {
+  rm -f "$IMAGE" "$IMAGE.gz"
+}
+trap cleanup EXIT
+cleanup
 
 # copy *FS_SIZE*KB of zeroes
 dd if=/dev/zero of=$IMAGE bs=1024 count=$FS_SIZE
@@ -62,13 +68,29 @@ mcopy -i $IMAGE hw_layer/mass_storage/filesystem_contents/FOME\ Wiki.url ::
 mcopy -i $IMAGE hw_layer/mass_storage/filesystem_contents/FOME\ Discord.url ::
 mcopy -i $IMAGE hw_layer/mass_storage/filesystem_contents/FOME\ Releases.url ::
 
-# Compress the image as DEFLATE with gzip
-gzip $IMAGE
+# Compress the image as DEFLATE in a gzip wrapper with a fixed 16 KiB window
+python3 - "$IMAGE" "$IMAGE.gz" "$DEFLATE_WINDOW_BITS" <<'PY'
+import sys
+import zlib
 
-# write out as a C array, with "static const" tacked on the front
-xxd -i $IMAGE.gz \
-    | cat <(echo -n "static const ") - \
-    > $H_OUTPUT
+source_path, output_path, window_bits = sys.argv[1:]
+# memLevel changes host-side compression table allocation and output density, not the decoder window.
+compressor = zlib.compressobj(level=9, wbits=16 + int(window_bits), memLevel=6)
 
-rm $IMAGE.gz
+with open(source_path, "rb") as source, open(output_path, "wb") as output:
+    while True:
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            break
+        output.write(compressor.compress(chunk))
+    output.write(compressor.flush())
+PY
+
+# write out the window contract and C array, with "static const" on the array
+{
+    echo "#define RAMDISK_IMAGE_DEFLATE_WINDOW_SIZE $DEFLATE_WINDOW_SIZE"
+    echo -n "static const "
+    xxd -i "$IMAGE.gz"
+} > "$H_OUTPUT"
+
 exit 0

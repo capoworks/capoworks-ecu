@@ -33,7 +33,12 @@
 #include "injector_model.h"
 #include "speed_density.h"
 #include "speed_density_base.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
+#if EFI_LUA
 #include "lua_hooks.h"
+#endif // EFI_LUA
 
 static mapEstimate_Map3D_t mapEstimationTable;
 
@@ -362,8 +367,14 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 
 	const bool modelTrimRequired =
 			engineConfiguration->isInjectionEnabled && (!isCranking || engineConfiguration->useRunningMathForCranking);
-	AirmassEvaluation trimEvaluation;
-	bool hasTrimEvaluation = false;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	if (capture.Standalone && engineConfiguration->isInjectionEnabled &&
+		capture.CylinderCount > CYLINDER_FUEL_TRIM_COUNT) {
+		candidate.Fault = AirmassInjectionFault::Configuration;
+		return candidate;
+	}
+#endif // MODULE_CYLINDER_FUEL_TRIM
+
 	AirmassResult airmass;
 	if (capture.Standalone) {
 		if (capture.Strategy != LM_SD_ALPHA_N && !isAirmassModelConfigurationValid(capture.Strategy)) {
@@ -384,8 +395,6 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			}
 
 			airmass = evaluation.Airmass.Result;
-			trimEvaluation = evaluation.Airmass;
-			hasTrimEvaluation = true;
 			candidate.Degraded = evaluation.Airmass.Degraded;
 			candidate.Fault = evaluation.Fault;
 			candidate.NormalizedCylinderFilling = evaluation.NormalizedFilling;
@@ -407,10 +416,6 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			}
 
 			airmass = evaluation.Result;
-			if (capture.Strategy == LM_SPEED_DENSITY || capture.Strategy == LM_ALPHA_N) {
-				trimEvaluation = evaluation;
-				hasTrimEvaluation = true;
-			}
 			candidate.Degraded = evaluation.Degraded;
 			candidate.Fault = evaluation.Degraded ? AirmassInjectionFault::Sensor : AirmassInjectionFault::None;
 		}
@@ -422,18 +427,6 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		}
 		airmass = model->getAirmass(rpm, true).value_or(AirmassResult{});
 		candidate.Fault = AirmassInjectionFault::None;
-	}
-
-	if (modelTrimRequired && hasTrimEvaluation) {
-		if (!prepareCylinderModelFuelTrim(*engine, capture.Inputs, trimEvaluation, candidate.CylinderFuelTrim)) {
-			candidate.Fault = AirmassInjectionFault::Configuration;
-			return candidate;
-		}
-		if (requireCurrent && !isFuelCaptureCurrent(capture)) {
-			candidate.Stale = true;
-			return candidate;
-		}
-		candidate.ApplyCylinderModelFuelTrim = true;
 	}
 
 	FuelComputer candidateFuelComputer = engine->fuelComputer;
@@ -496,6 +489,26 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 		candidate.Fault = AirmassInjectionFault::Result;
 		return candidate;
 	}
+
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	// Lua and mock models are intentionally non-standalone: they expose no
+	// immutable publication context, so trimming them would require live sensor
+	// reads after capture. They remain neutral; all captured table models above
+	// (Speed Density, Alpha-N, MAF and blended SD/Alpha-N) are trimmed.
+	if (modelTrimRequired && capture.Standalone) {
+		if (!prepareCylinderFuelTrim(*engine, capture.Inputs, candidate.ConsumerLoads, candidate.CylinderFuelTrim)) {
+			candidate.Fault = AirmassInjectionFault::Configuration;
+			return candidate;
+		}
+		if (requireCurrent && !isFuelCaptureCurrent(capture)) {
+			candidate.Stale = true;
+			return candidate;
+		}
+		candidate.ApplyCylinderFuelTrim = true;
+	}
+#else
+	UNUSED(modelTrimRequired);
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	const float gramPerCycle = airmass.CylinderAirmass * capture.CylinderCount;
 	const float gramPerMs = rpm == 0 ? 0 : gramPerCycle / getEngineCycleDuration(rpm);

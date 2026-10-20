@@ -1,0 +1,25 @@
+	uint8_t empPumpState;EMP pump: State;"",1, 0, 0, 4, 0
+	uint8_t empPumpThermalState;EMP pump: Thermal state;"",1, 0, 0, 7, 0
+	uint16_t empPumpFaults;EMP pump: Faults;"",1, 0, 0, 65535, 0
+	uint8_t empPumpCapabilities;EMP pump: Capabilities;"",1, 0, 0, 255, 0
+	uint16_t empPumpTargetRpm;EMP pump: Commanded speed;"RPM",1, 0, 0, 12000, 0
+	uint16_t empPumpActualRpm;EMP pump: Actual speed;"RPM",1, 0, 0, 12000, 0
+	uint8_t empPumpActualPercent;EMP pump: Actual speed raw percent;"%",1, 0, 0, 255, 0
+	uint8_t empPumpControllerStatus;EMP pump: Controller status;"",1, 0, 0, 255, 0
+	uint8_t empPumpStatusSummary;EMP pump: Status summary;"",1, 0, 0, 255, 0
+	uint8_t empPumpHvilState;EMP pump: HVIL state;"",1, 0, 0, 3, 0
+	uint16_t empPumpVoltageRaw;EMP pump: Voltage raw;"raw",1, 0, 0, 65535, 0
+	uint16_t empPumpCurrentRaw;EMP pump: Current raw;"raw",1, 0, 0, 65535, 0
+	uint16_t empPumpPowerWatts;EMP pump: Power;"W",1, 0, 0, 65535, 0
+	uint16_t empPumpStatusAgeMs;EMP pump: Main status age;"ms",1, 0, 0, 65535, 0
+	uint16_t empPumpAfterRunRemaining;EMP pump: After-run remaining;"s",1, 0, 0, 65535, 0
+	uint8_t empPumpLastControl;EMP pump: Last command control byte;"",1, 0, 0, 255, 0
+	uint8_t empPumpControlFlags;EMP pump: Control flags;"",1, 0, 0, 255, 0
+	int16_t empPumpFilteredIat;EMP pump: Filtered IAT;"C",1, 0, -100, 200, 0
+	int8_t empPumpTemperatureError;EMP pump: CLT target error;"C",1, 0, -100, 100, 0
+	int16_t empPumpCoolantSlope;EMP pump: CLT slope;"C/min",1, 0, -600, 600, 0
+	uint16_t empPumpMinimumFlow;EMP pump: Minimum flow;"RPM",1, 0, 0, 12000, 0
+	int16_t empPumpFeedForward;EMP pump: Feed-forward;"RPM",1, 0, -12000, 12000, 0
+	int16_t empPumpPiCorrection;EMP pump: PI correction;"RPM",1, 0, -12000, 12000, 0
+	uint8_t empPumpCoolingDemand;EMP pump: Cooling demand;"%",1, 0, 0, 100, 0
+	uint16_t empPumpSaturationSeconds;EMP pump: Saturation time;"s",1, 0, 0, 65535, 0

@@ -1,9 +1,5 @@
-include $(PROJECT_DIR)/controllers/modules/fan/fan.mk
-include $(PROJECT_DIR)/controllers/modules/fuel_pump/fuel_pump.mk
-include $(PROJECT_DIR)/controllers/modules/gear_detector/gear_detector.mk
-include $(PROJECT_DIR)/controllers/modules/tachometer/tachometer.mk
-include $(PROJECT_DIR)/controllers/modules/trip_odometer/trip_odometer.mk
+include $(PROJECT_DIR)/controllers/modules/module_profile.mk
 
-ifeq ($(NO_MAP_AVERAGING),)
-  include $(PROJECT_DIR)/controllers/modules/map_averaging/map_averaging.mk
-endif
+# Module recipes only add C++ sources, include paths, macros and generated-module tuples.
+# The profile above remains the only catalog/selection source used by generation.
+include $(MODULE_RECIPE_FILES)

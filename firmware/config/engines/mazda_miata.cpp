@@ -73,7 +73,9 @@ static const uint8_t miataNA8_maf_advance_table[16][16] = { {/*0  engineLoad=1.2
 
 void common079721_2351() {
 
+#if EFI_ENGINE_SNIFFER
 	engineConfiguration->engineChartSize = 300;
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->firingOrder = FO_1_3_4_2;
 

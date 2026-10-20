@@ -11,8 +11,8 @@ HW_LAYER_EMS_CPP += $(PROJECT_DIR)/hw_layer/ports/stm32/stm32f7/mpu_util.cpp \
 
 MCU_BOOTLOADER_FLASH = openblt_flash_f4_f7.cpp
 
-# This MCU has a cache, align functions to a cache line for maximum cache efficiency
-USE_OPT += -falign-functions=16
+# Align functions to 4-byte words to bound inter-function flash padding
+USE_OPT += -falign-functions=4
 
 DDEFS += -DSTM32F767xx
 MCU = cortex-m7

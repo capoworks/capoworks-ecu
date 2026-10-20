@@ -20,8 +20,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 public class LiveDataProcessor {
     private final static Logging log = Logging.getLogging(LiveDataProcessor.class);
@@ -41,14 +43,16 @@ public class LiveDataProcessor {
 
     private final StringBuilder fragmentsContent = new StringBuilder(header);
 
-    private final String extraPrepend = System.getProperty("LiveDataProcessor.extra_prepend");
-
     private final ArrayList<String> inputFiles = new ArrayList<>();
+    private final ArrayList<String> prependFiles = new ArrayList<>();
     private final ArrayList<String> outputFiles = new ArrayList<>();
+    private final ArrayList<String> outputFragmentFiles = new ArrayList<>();
+    // Null is the legacy include-all mode; an empty set excludes every module-owned usage.
+    private Set<String> selectedModules;
 
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
-            System.err.println("Usage: LiveDataProcessor <yaml_file> [-makefileDep <dep_file>] [-stampFile <stamp_file>]");
+            System.err.println("Usage: LiveDataProcessor <yaml_file> [-makefileDep <dep_file>] [-stampFile <stamp_file>] [-modules <selected_modules>] [-prepend <definition_file>]...");
             System.exit(-1);
         }
 
@@ -58,13 +62,30 @@ public class LiveDataProcessor {
         String yamlFileName = args[0];
         String makefileDepsDestination = null;
         String stampFile = null;
+        String modules = null;
+        ArrayList<String> prependFiles = new ArrayList<>();
+        ArrayList<String> outputFragmentFiles = new ArrayList<>();
 
         // Parse optional arguments
-        for (int i = 1; i < args.length - 1; i += 2) {
-            if ("-makefileDep".equals(args[i])) {
-                makefileDepsDestination = args[i + 1];
-            } else if ("-stampFile".equals(args[i])) {
-                stampFile = args[i + 1];
+        for (int i = 1; i < args.length; i += 2) {
+            String option = args[i];
+            if (i + 1 >= args.length) {
+                throw new IllegalArgumentException("Missing value for " + option);
+            }
+            String value = args[i + 1];
+
+            if ("-makefileDep".equals(option)) {
+                makefileDepsDestination = value;
+            } else if ("-stampFile".equals(option)) {
+                stampFile = value;
+            } else if ("-outputFragment".equals(option)) {
+                outputFragmentFiles.add(value);
+            } else if ("-modules".equals(option)) {
+                modules = value;
+            } else if ("-prepend".equals(option)) {
+                prependFiles.add(value);
+            } else {
+                throw new IllegalArgumentException("Unknown option " + option);
             }
         }
 
@@ -72,7 +93,13 @@ public class LiveDataProcessor {
         Map<String, Object> data = yaml.load(new FileReader(yamlFileName));
 
         LiveDataProcessor liveDataProcessor = new LiveDataProcessor();
+        liveDataProcessor.selectedModules = parseSelectedModules(modules);
         liveDataProcessor.inputFiles.add(yamlFileName);
+        liveDataProcessor.inputFiles.addAll(outputFragmentFiles);
+        for (String prependFile : prependFiles) {
+            liveDataProcessor.addPrependFile(prependFile);
+        }
+        liveDataProcessor.outputFragmentFiles.addAll(outputFragmentFiles);
 
         int sensorTsPosition = liveDataProcessor.handleYaml(data);
         liveDataProcessor.writeFiles();
@@ -89,7 +116,26 @@ public class LiveDataProcessor {
     }
 
     interface EntryHandler {
-        void onEntry(String name, String javaName, String folder, String prepend, String[] outputNames, String conditional) throws IOException;
+        void onEntry(String name, String javaName, String folder, String prepend, String[] outputNames, String conditional, boolean includeTelemetry) throws IOException;
+    }
+
+    private static Set<String> parseSelectedModules(String modules) {
+        if (modules == null) {
+            return null;
+        }
+
+        Set<String> selectedModules = new HashSet<>();
+        for (String module : modules.trim().split("\\s+")) {
+            if (!module.isEmpty()) {
+                selectedModules.add(module);
+            }
+        }
+        return selectedModules;
+    }
+
+    private boolean isModuleIncluded(String module) {
+        // Unannotated usages are shared infrastructure and are always present.
+        return selectedModules == null || module == null || selectedModules.contains(module.trim());
     }
 
     private int handleYaml(Map<String, Object> data) throws IOException {
@@ -102,11 +148,9 @@ public class LiveDataProcessor {
 
         OutputLookupWriter outputLookupWriter = new OutputLookupWriter("generated/output_lookup_generated.cpp", "getOutputValueByName");
 
-        EntryHandler handler = (name, javaName, folder, prepend, outputNames, conditional) -> {
+        EntryHandler handler = (name, javaName, folder, prepend, outputNames, conditional, includeTelemetry) -> {
             int startingPosition = outputChannelWriter.getSize();
             log.info("Starting " + name + " at " + startingPosition + " with [" + conditional + "]");
-
-            baseAddressCHeader.append("#define ").append(name.toUpperCase()).append("_BASE_ADDRESS ").append(startingPosition).append("\n");
 
             String cHeaderDestination = folder + File.separator + name + "_generated.h";
             String definitionFile = folder + File.separator + name + ".txt";
@@ -121,22 +165,32 @@ public class LiveDataProcessor {
                 ParseState parseState = new ParseState();
 
                 parseState.setDefinitionPolicy(Definition.OverwritePolicy.NotAllowed);
+                parsePrependDefinitions(parseState, prepend);
 
-                if (prepend != null && !prepend.isEmpty()) {
-                    RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), prepend);
+                if (!outputFragmentFiles.isEmpty()
+                        && new File(definitionFile).getName().equals("output_channels.txt")) {
+                    RusefiParseErrorStrategy.parseDefinitionString(parseState.getListener(),
+                            ModuleFragments.composeOutput(definitionFile, outputFragmentFiles));
+                } else {
+                    RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), definitionFile);
                 }
-
-                RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), definitionFile);
 
                 CStructWriter cStructs = new CStructWriter();
                 cStructs.writeCStructs(parseState, cHeaderDestination);
 
                 if (javaName != null) {
-                    JavaFieldsWriter javaWriter = new JavaFieldsWriter("../java_console/generated/src/main/java/com/rusefi/config/generated/" + javaName, outputChannelWriter.getSize());
+                    JavaFieldsWriter javaWriter = new JavaFieldsWriter("../java_console/generated/src/main/java/com/rusefi/config/generated/" + javaName, startingPosition);
                     javaWriter.writeDefinitions(parseState.getDefinitions());
                     javaWriter.writeFields(parseState);
                     javaWriter.finish();
                 }
+
+                if (!includeTelemetry) {
+                    log.info("Skipping telemetry for unselected module usage " + name);
+                    return;
+                }
+
+                baseAddressCHeader.append("#define ").append(name.toUpperCase()).append("_BASE_ADDRESS ").append(startingPosition).append("\n");
 
                 // Offset of this usage within the whole output channel space, before any instances
                 // are written. Used to address fields by offset in the SD log and value lookup.
@@ -173,6 +227,8 @@ public class LiveDataProcessor {
             String folder = (String) entry.get("folder");
             String prepend = (String) entry.get("prepend");
             String conditional = (String) entry.get("conditional_compilation");
+            String module = (String) entry.get("module");
+            boolean includeTelemetry = isModuleIncluded(module);
 
             Object outputNames = entry.get("output_name");
 
@@ -188,11 +244,15 @@ public class LiveDataProcessor {
                 nameList.toArray(outputNamesArr);
             }
 
-            handler.onEntry(name, java, folder, prepend, outputNamesArr, conditional);
+            handler.onEntry(name, java, folder, prepend, outputNamesArr, conditional, includeTelemetry);
 
             String enumName = "LDS_" + name;
             String type = name + "_s"; // convention
             enumContent.append(enumName + ",\n");
+
+            if (!includeTelemetry) {
+                continue;
+            }
 
             if (outputNamesArr.length <= 1) {
                 fragmentsContent
@@ -220,6 +280,21 @@ public class LiveDataProcessor {
         int totalSize = outputChannelWriter.getSize();
         outputChannelWriter.close();
         return totalSize;
+    }
+
+    void parsePrependDefinitions(ParseState parseState, String usagePrepend) throws IOException {
+        for (String prependFile : prependFiles) {
+            RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), prependFile);
+        }
+
+        if (usagePrepend != null && !usagePrepend.isEmpty()) {
+            RusefiParseErrorStrategy.parseDefinitionFile(parseState.getListener(), usagePrepend);
+        }
+    }
+
+    void addPrependFile(String prependFile) {
+        prependFiles.add(prependFile);
+        inputFiles.add(prependFile);
     }
 
     private void writeFiles() throws IOException {

@@ -11,6 +11,10 @@
 #ifdef EFI_USE_COMPRESSED_INI_MSD
 #include "compressed_block_device.h"
 #include "ramdisk_image_compressed.h"
+
+static_assert(
+		sizeof(((CompressedBlockDevice*)nullptr)->dictionary) >= RAMDISK_IMAGE_DEFLATE_WINDOW_SIZE,
+		"Compressed INI dictionary is smaller than the generated DEFLATE window");
 #else
 #include "ramdisk.h"
 #include "ramdisk_image.h"

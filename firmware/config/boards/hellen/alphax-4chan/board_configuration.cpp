@@ -171,7 +171,9 @@ void setBoardDefaultConfiguration() {
 	engineConfiguration->fanPin = H144_OUT_IO11;
 	engineConfiguration->mainRelayPin = H144_OUT_IO10;
 	engineConfiguration->tachOutputPin = H144_OUT_IO13;
+#ifdef MODULE_BOOST
 	engineConfiguration->boostControlPin = H144_OUT_PWM3;
+#endif // MODULE_BOOST
 
 	// "required" hardware is done - set some reasonable defaults
 	setupDefaultSensorInputs();

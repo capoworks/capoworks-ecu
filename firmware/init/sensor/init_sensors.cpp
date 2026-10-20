@@ -11,6 +11,7 @@
 static void initSensorCli();
 
 static void initAuxDigital() {
+#ifdef MODULE_LUA
 #if EFI_PROD_CODE
 	for (size_t i = 0; i < efi::size(engineConfiguration->luaDigitalInputPins); i++) {
 		efiSetPadMode(
@@ -19,12 +20,15 @@ static void initAuxDigital() {
 				engineConfiguration->luaDigitalInputPinModes[i]);
 	}
 #endif // EFI_PROD_CODE
+#endif // MODULE_LUA
 }
 
 static void deInitAuxDigital() {
+#ifdef MODULE_LUA
 	for (size_t i = 0; i < efi::size(activeConfiguration.luaDigitalInputPins); i++) {
 		brain_pin_markUnused(activeConfiguration.luaDigitalInputPins[i]);
 	}
+#endif // MODULE_LUA
 }
 
 void initNewSensors() {
@@ -60,7 +64,9 @@ void stopSensors() {
 	deinitThermistors();
 	deinitLambda();
 	deInitFlexSensor();
+#ifdef MODULE_HELLA_OPST
 	deinitHellaOpsT();
+#endif // MODULE_HELLA_OPST
 	deinitAuxSensors();
 	deInitVehicleSpeedSensor();
 	deinitTurbochargerSpeedSensor();
@@ -80,7 +86,9 @@ void reconfigureSensors() {
 	initThermistors();
 	initLambda();
 	initFlexSensor();
+#ifdef MODULE_HELLA_OPST
 	initHellaOpsT();
+#endif // MODULE_HELLA_OPST
 	initAuxSensors();
 	initVehicleSpeedSensor();
 	initTurbochargerSpeedSensor();

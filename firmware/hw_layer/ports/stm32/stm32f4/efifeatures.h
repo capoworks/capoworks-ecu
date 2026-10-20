@@ -188,25 +188,33 @@
 
 #if MODULE_ETHERNET_CONSOLE
 // F4 ethernet needs some extra space
+#ifndef LUA_USER_HEAP
 #define LUA_USER_HEAP 25000
+#endif
 #else // MODULE_ETHERNET_CONSOLE
-#define LUA_USER_HEAP 65000
+#ifndef LUA_USER_HEAP
+#define LUA_USER_HEAP 60000
+#endif
 #endif
 #else
 // small memory F40x can't fit perf trace
 #define ENABLE_PERF_TRACE FALSE
 
 #ifndef LUA_USER_HEAP
-#define LUA_USER_HEAP 30000
+#define LUA_USER_HEAP 20000
 #endif
 #endif
 
 #ifndef EFI_LUA
+#ifdef MODULE_LUA
 #define EFI_LUA TRUE
+#else
+#define EFI_LUA FALSE
+#endif
 #endif
 
 #ifndef EFI_ENGINE_SNIFFER
-#define EFI_ENGINE_SNIFFER TRUE
+#define EFI_ENGINE_SNIFFER MODULE_ENGINE_SNIFFER
 #endif
 
 #ifndef DL_OUTPUT_BUFFER

@@ -1,6 +1,7 @@
 name: HW CI
 
-on: [push, pull_request]
+# Hardware CI erases/flashes attached ECUs and must be started explicitly.
+on: workflow_dispatch
 
 jobs:
   build-firmware:
@@ -71,4 +72,3 @@ jobs:
     # This both compiles and runs HW CI tests
     - name: Run Hardware CI
       run: .github/workflows/hw-ci/run_hw_ci.sh ${{matrix.ecu-serial}} ${{matrix.test-suite}}
-
