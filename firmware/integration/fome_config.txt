@@ -165,7 +165,6 @@ struct_no_prefix engine_configuration_s
 #define FUEL_RPM_COUNT 16
 #define FUEL_LOAD_COUNT 16
 
-#define ALPHA_N_RPM_COUNT 16
 #define ALPHA_N_LOAD_COUNT 16
 
 #define BOOST_RPM_COUNT 8
@@ -1558,7 +1557,7 @@ uint16_t[8] trailingIgnitionRpmBins;;"RPM",	   1, 0, 0, 18000, 0
 
 begin_table
 	table_rows num FUEL_LOAD_COUNT uint16_t veLoadBins;;"kPa",	1, 0, 0, 1000, 0
-	table_cols num FUEL_RPM_COUNT uint16_t veRpmBins;;"RPM",	   1, 0, 0, 18000, 0
+	table_cols num VE_RPM_COUNT uint16_t veRpmBins;;"RPM",	   1, 0, 0, 18000, 0
 	table_values uint16_t autoscale veTable;;"%", 0.1, 0, 0, 999, 1
 end_table
 
@@ -1775,8 +1774,6 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 	#define AirmassBlendLoadSource_enum "TPS %", "Measured MAP kPa"
 	custom AirmassBlendLoadSource 1 bits, U08, @OFFSET@, [0:0], @@AirmassBlendLoadSource_enum@@
 	AirmassBlendLoadSource airmassBlendLoadSource;Y-axis source for the SD + Alpha-N authority table. Changing it requires retuning the breakpoints.
-	#define AIRMASS_BLEND_LOAD_COUNT 8
-	#define AIRMASS_BLEND_RPM_COUNT 8
 	begin_table
 		table_rows num AIRMASS_BLEND_LOAD_COUNT float airmassBlendLoadBins;;"", 1, 0, 0, 1000, 2
 		table_cols num AIRMASS_BLEND_RPM_COUNT uint16_t airmassBlendRpmBins;;"RPM", 1, 0, 0, 18000, 0

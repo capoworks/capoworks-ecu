@@ -34,10 +34,12 @@ or
 ### Breaking Changes
  - Advance the flash data version to `20032` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI.
  - Tune images now carry a static configuration-layout identity for module-aware snapshots. Binary tunes with an incompatible layout are intentionally rejected and defaults are restored; export and re-import values with matching definitions because binary migration is not provided.
+ - Fuel table resolution is now fixed by the firmware build. Changing `FOME_VE_RPM_COUNT` or `FOME_AIRMASS_BLEND_SIZE` creates an incompatible configuration layout, so binary tunes from a differently sized build are rejected and reset; use the matching generated TunerStudio INI to transfer calibration values manually.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
 
 ### Added
+ - Add build-profile options for `FOME_VE_RPM_COUNT` (`16` or `32`) and `FOME_AIRMASS_BLEND_SIZE` (`8` or `16`). The defaults remain the legacy 16 RPM-point VE tables and 8x8 SD + Alpha-N authority table; expanded resolutions are intended for builds that can accommodate their larger configuration layout.
  - Add an optional Caponord electronic shock preload controller on CAN2, including preset, position, target, alarm and current telemetry, command service controls, and a default-off `enableShockPreload` runtime setting. The build module is opt-in.
  - Add an optional EMP coolant pump module with its Caponord J1939 state machine, configuration and fallback tables, telemetry, service controls, after-run power hold, and CAN TX-thread queue. The build module is opt-in and remains disabled at runtime by `enableEmpPump`; selecting it requires the fan module.
  - Add an optional Engine Sniffer event recorder while preserving the shared RPM guard for the binary tooth logger and verbose trigger logging.
@@ -73,6 +75,7 @@ or
 
 
 ### Changed
+ - Build-time engine preset selection through `FOME_ENGINE_PRESETS` is mutually exclusive with expanded fuel table dimensions: presets are available at the default 16 RPM-point / 8-point blend resolution and are not applied to expanded builds.
  - Ethernet TCP buffers are now sized for the standard 1500-byte network MTU (1460-byte MSS) instead of growing with the TunerStudio block size. The effective packet MSS was already capped by the netif MTU, so this aligns lwIP's configured pool size with the packets it actually sends; no hardware testing has been performed for this change.
  - On STM32F4 boards, move background CAN, USB console and USB mass-storage objects from CCM to ordinary SRAM. On non-Ethernet STM32F429 builds, also move the main loop to ordinary SRAM; Ethernet-console builds retain the main-loop CCM placement. The common non-Ethernet F429 Lua heap is reduced from 65,000 to 60,000 bytes, while the 25,000-byte Ethernet Lua heap is unchanged. The F407 Lua heap is now 20,000 bytes, down from 30,000, reducing available Lua script capacity. Runtime behavior at these smaller heaps and timing with the new memory placement have not yet been validated on hardware.
  - The embedded compressed INI drive now uses a 16 KiB DEFLATE dictionary, reducing firmware RAM use by 16 KiB.

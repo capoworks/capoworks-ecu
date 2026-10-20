@@ -49,6 +49,18 @@ void loadConfiguration();
 void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e engineType);
 void resetConfigurationExt(engine_type_e engineType);
 
+/**
+ * Whether this exact preset dispatch is compiled for the current board and profile.
+ * MINIMAL_PINS is always available.
+ */
+bool isEnginePresetAvailable(engine_type_e engineType);
+
+/**
+ * Return the board default when that preset is present in the build, otherwise
+ * MINIMAL_PINS so board defaults and pin overrides still initialize normally.
+ */
+engine_type_e getDefaultEngineType();
+
 void rememberCurrentConfiguration();
 #endif /* __cplusplus */
 

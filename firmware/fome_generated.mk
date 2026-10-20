@@ -70,6 +70,14 @@ $(PCHOBJ) : $(MODULE_PROFILE_FILE)
 $(OBJS) : | $(CONFIG_STAMP)
 $(PCHOBJ) : | $(CONFIG_STAMP)
 
+# Engine preset switches are rendered while Make reads the module profile.
+# Depend on the generated header after the build's default goal exists so a
+# profile change also rebuilds the PCH and every object carrying these macros.
+ifneq ($(strip $(ENGINE_PRESET_PROFILE_HEADER)),)
+$(OBJS) : $(ENGINE_PRESET_PROFILE_HEADER)
+$(PCHOBJ) : $(ENGINE_PRESET_PROFILE_HEADER)
+endif
+
 CLEAN_GENERATED_HOOK:
 	rm -f $(GENERATED_DIR)/*
 	rm -f $(LIVE_DATA_STAMP) $(CONFIG_STAMP) $(MODULE_PROFILE_FILE)

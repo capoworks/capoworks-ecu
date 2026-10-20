@@ -78,20 +78,26 @@ public class TsWriter {
                 continue;
             }
 
-            // Check if this line has a "skip me" suffix
+            // Check every independent "skip me" condition attached to this line.
+            boolean keepLine = true;
             Matcher skipMatch = OPTIONAL_LINE.matcher(line);
-            if (skipMatch.find()) {
+            while (skipMatch.find()) {
                 String varName = skipMatch.group(1);
 
                 Definition def = parser.findDefinition(varName);
 
                 if (def == null || def.toString().equals("false")) {
-                    // Definition was missing or false, skip this line
-                    continue;
+                    // Definition was missing or false, skip the whole line
+                    keepLine = false;
+                    break;
                 }
 
                 // Delete that part of the line
                 line = line.replace(skipMatch.group(0), "");
+                skipMatch = OPTIONAL_LINE.matcher(line);
+            }
+            if (!keepLine) {
+                continue;
             }
 
             // Don't strip surrounding quotes of the FIRST replace of the line - only do it in nested replacements

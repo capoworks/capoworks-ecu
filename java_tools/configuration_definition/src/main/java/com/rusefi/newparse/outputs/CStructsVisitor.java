@@ -52,6 +52,10 @@ public class CStructsVisitor extends ILayoutVisitor {
         ps.print("\t" + cTypeName + " " + scalar.name);
 
         if (arrayDims.length > 0) {
+            if (scalar.tableValues && arrayDims.length == 2) {
+                arrayDims = new int[] { arrayDims[1], arrayDims[0] };
+            }
+
             StringBuilder al = new StringBuilder();
 
             al.append('[');

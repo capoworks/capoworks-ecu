@@ -4,6 +4,7 @@
 FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim
 MODULE_ROOT := $(abspath $(PROJECT_DIR)/controllers/modules)
 MODULE_PROFILE_TOOL := $(MODULE_ROOT)/module_profile.sh
+MODULE_PROFILE_FILE := $(abspath $(PROJECT_DIR)/generated/module_profile.txt)
 
 # These modules are available for explicit selection but are not part of the
 # default profile on any board.
@@ -31,6 +32,27 @@ ifneq ($(strip $(NO_MAP_AVERAGING)),)
   FOME_MODULES_RESOLVED := $(filter-out map_averaging,$(FOME_MODULES_RESOLVED))
 endif
 
+# Fuel table dimensions are build-time profile values. FUEL_RPM_COUNT remains
+# the shared 16-column axis used by lambda, MAP estimate, and injection phase;
+# the dedicated VE dimensions are rendered into the generated configuration.
+FOME_VE_RPM_COUNT ?= 16
+ifneq ($(words $(strip $(FOME_VE_RPM_COUNT))),1)
+  $(error FOME_VE_RPM_COUNT must be 16 or 32, got '$(FOME_VE_RPM_COUNT)')
+endif
+ifneq ($(strip $(filter-out 16 32,$(strip $(FOME_VE_RPM_COUNT)))),)
+  $(error FOME_VE_RPM_COUNT must be 16 or 32, got '$(FOME_VE_RPM_COUNT)')
+endif
+FOME_VE_RPM_COUNT_RESOLVED := $(strip $(FOME_VE_RPM_COUNT))
+
+FOME_AIRMASS_BLEND_SIZE ?= 8
+ifneq ($(words $(strip $(FOME_AIRMASS_BLEND_SIZE))),1)
+  $(error FOME_AIRMASS_BLEND_SIZE must be 8 or 16, got '$(FOME_AIRMASS_BLEND_SIZE)')
+endif
+ifneq ($(strip $(filter-out 8 16,$(strip $(FOME_AIRMASS_BLEND_SIZE)))),)
+  $(error FOME_AIRMASS_BLEND_SIZE must be 8 or 16, got '$(FOME_AIRMASS_BLEND_SIZE)')
+endif
+FOME_AIRMASS_BLEND_SIZE_RESOLVED := $(strip $(FOME_AIRMASS_BLEND_SIZE))
+
 # Cylinder fuel trim owns a fixed-capacity subset of MAX_CYLINDER_COUNT. The
 # public build parameter is meaningful only while its module is selected.
 ifneq ($(filter cylinder_fuel_trim,$(FOME_MODULES_RESOLVED)),)
@@ -55,6 +77,10 @@ ifneq ($(filter emp_pump,$(FOME_MODULES_RESOLVED)),)
   endif
 endif
 
+# Engine presets depend on the validated table dimensions. This profile layer
+# consumes those fields and restricts presets that are incompatible with them.
+include $(PROJECT_DIR)/controllers/modules/engine_preset_profile.mk
+
 MODULE_NAMES := $(strip $(FOME_MODULES_RESOLVED))
 
 # Build-time exclusions are supported only for features with audited consumers.
@@ -70,14 +96,13 @@ MODULE_INI_FRAGMENTS := $(foreach dir,$(MODULE_RESOLVED_DIRS),$(wildcard $(dir)/
 MODULE_FRAGMENTS := $(MODULE_CONFIG_FRAGMENTS) $(MODULE_PERSISTENT_CONFIG_FRAGMENTS) $(MODULE_OUTPUT_FRAGMENTS) $(MODULE_INI_FRAGMENTS)
 
 # Profiles must run sequentially in the same checkout because generated outputs are shared.
-MODULE_PROFILE_FILE := $(abspath $(PROJECT_DIR)/generated/module_profile.txt)
 MODULE_PROFILE_BOARD = $(abspath $(BOARD_DIR))
 MODULE_PROFILE_FRAGMENT_ARGS = \
 	$(foreach fragment,$(MODULE_CONFIG_FRAGMENTS),config '$(fragment)') \
 	$(foreach fragment,$(MODULE_PERSISTENT_CONFIG_FRAGMENTS),persistent '$(fragment)') \
 	$(foreach fragment,$(MODULE_OUTPUT_FRAGMENTS),output '$(fragment)') \
 	$(foreach fragment,$(MODULE_INI_FRAGMENTS),ini '$(fragment)')
-MODULE_PROFILE_WRITE_CMD = '$(MODULE_PROFILE_TOOL)' write '$(MODULE_PROFILE_FILE)' '$(MODULE_PROFILE_BOARD)' '$(PROJECT_CPU)' '$(MODULE_NAMES)' --cylinder-fuel-trim-count '$(FOME_CYLINDER_TRIM_COUNT_RESOLVED)' $(MODULE_PROFILE_FRAGMENT_ARGS)
+MODULE_PROFILE_WRITE_CMD = '$(MODULE_PROFILE_TOOL)' write '$(MODULE_PROFILE_FILE)' '$(MODULE_PROFILE_BOARD)' '$(PROJECT_CPU)' '$(MODULE_NAMES)' --ve-rpm-count '$(FOME_VE_RPM_COUNT_RESOLVED)' --airmass-blend-size '$(FOME_AIRMASS_BLEND_SIZE_RESOLVED)' --cylinder-fuel-trim-count '$(FOME_CYLINDER_TRIM_COUNT_RESOLVED)' --engine-preset-mode '$(MODULE_ENGINE_PRESET_PROFILE_MODE)' --engine-presets '$(MODULE_ENGINE_PRESET_PROFILE_SELECTED)' --engine-preset-default '$(MODULE_ENGINE_PRESET_PROFILE_DEFAULT_ENGINE_TYPE)' $(MODULE_PROFILE_FRAGMENT_ARGS)
 
 # Cylinder fuel trims need one UI row per configured cylinder. Render the small
 # module-owned template after the validated profile has been written, then compose

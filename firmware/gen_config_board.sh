@@ -77,8 +77,89 @@ if [ -z "$PROFILE_FILE" ]; then
 	trap - EXIT
 fi
 
+ENGINE_PRESET_DEFINITIONS=$(dirname "$PROFILE_FILE")/engine_preset_profile_ts_definitions.txt
+
+validate_engine_preset_visibility() {
+	local profile=$1
+	local definitions=$2
+	local selected
+	local define
+	local name
+	local value
+	local extra
+	local symbol
+	local preset
+	local selected_count=0
+	local visible_count=0
+	local true_count=0
+	local -A visible=()
+	local -a preset_tokens=()
+
+	selected=$("$PROFILE_READER" read "$profile" engine_presets)
+	[[ -f "$definitions" ]] ||
+		{ echo "ERROR: engine preset visibility definitions not found: $definitions"; return 1; }
+
+	while read -r define name value extra; do
+		if [[ -z "$define" || "$define" == "!"* || "$define" == ";"* ]]; then
+			continue
+		fi
+		if [[ "$define" != "#define" || "$name" != show_engine_preset_* || -n "$extra" ]]; then
+			echo "ERROR: malformed engine preset visibility line in $definitions: $define $name $value $extra"
+			return 1
+		fi
+		case "$value" in
+			true|false)
+				;;
+			*)
+				echo "ERROR: invalid engine preset visibility '$value' for $name in $definitions"
+				return 1
+				;;
+		esac
+		symbol=${name#show_engine_preset_}
+		if [[ -n "${visible[$symbol]+set}" ]]; then
+			echo "ERROR: duplicate engine preset visibility for $symbol in $definitions"
+			return 1
+		fi
+		visible[$symbol]=$value
+		visible_count=$((visible_count + 1))
+		if [[ "$value" == true ]]; then
+			true_count=$((true_count + 1))
+		fi
+	done < "$definitions"
+
+	(( visible_count > 0 )) ||
+		{ echo "ERROR: no engine preset visibility definitions in $definitions"; return 1; }
+
+	if [[ "$selected" == all ]]; then
+		for symbol in "${!visible[@]}"; do
+			[[ "${visible[$symbol]}" == true ]] ||
+				{ echo "ERROR: legacy all-presets profile excludes $symbol in $definitions"; return 1; }
+		done
+		return 0
+	fi
+
+	read -ra preset_tokens <<< "$selected"
+	for preset in "${preset_tokens[@]}"; do
+		selected_count=$((selected_count + 1))
+		[[ "${visible[$preset]-}" == true ]] ||
+			{ echo "ERROR: selected engine preset $preset is not visible in $definitions"; return 1; }
+	done
+	for symbol in "${!visible[@]}"; do
+		if [[ "${visible[$symbol]}" == true && " $selected " != *" $symbol "* ]]; then
+			echo "ERROR: engine preset $symbol is visible but not selected in $profile"
+			return 1
+		fi
+	done
+	(( selected_count == true_count )) ||
+		{ echo "ERROR: engine preset visibility does not match selected profile: $profile"; return 1; }
+}
+
 "$PROFILE_READER" check "$PROFILE_FILE"
 PROFILE_DEFINITIONS=$("$PROFILE_READER" definitions "$PROFILE_FILE")
+validate_engine_preset_visibility "$PROFILE_FILE" "$ENGINE_PRESET_DEFINITIONS"
+ENGINE_PRESET_MODE=$("$PROFILE_READER" read "$PROFILE_FILE" engine_preset_mode)
+ENGINE_PRESET_DEFAULT=$("$PROFILE_READER" read "$PROFILE_FILE" engine_preset_default)
+echo "Engine presets: mode=${ENGINE_PRESET_MODE} default=${ENGINE_PRESET_DEFAULT}"
 
 CONFIG_FRAGMENTS=()
 while IFS= read -r fragment; do
@@ -140,6 +221,7 @@ java \
 	-boardName ${SHORT_BOARDNAME} \
 	-prepend generated/total_live_data_generated.h \
 	-prepend "${PROFILE_DEFINITIONS}" \
+	-prepend "$ENGINE_PRESET_DEFINITIONS" \
 	-prepend integration/fome_config_shared.txt \
 	-prepend ${BOARD_DIR}/prepend.txt \
 	-definition integration/fome_config.txt \

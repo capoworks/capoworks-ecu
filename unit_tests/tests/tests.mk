@@ -49,6 +49,7 @@ TESTS_SRC_CPP = \
 	tests/system/test_periodic_thread_controller.cpp \
 	tests/system/test_flash_write_lifecycle.cpp \
 	tests/system/test_configuration_storage.cpp \
+	tests/system/test_engine_preset_policy.cpp \
 	tests/test_util.cpp \
 	tests/test_start_stop.cpp \
 	tests/test_hardware_reinit.cpp \
@@ -66,6 +67,7 @@ TESTS_SRC_CPP = \
 	tests/ignition_injection/test_dedicated_airmass_tables.cpp \
 	tests/ignition_injection/test_airmass_evaluation.cpp \
 	tests/ignition_injection/test_blended_airmass.cpp \
+	tests/ignition_injection/test_table_profile_dimensions.cpp \
 	tests/ignition_injection/test_airmass_load_resolution.cpp \
 	tests/ignition_injection/test_airmass_consumer_infrastructure.cpp \
 	tests/ignition_injection/test_airmass_injection_gate.cpp \

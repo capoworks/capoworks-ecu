@@ -634,7 +634,16 @@ public class ParseState implements DefinitionsState {
         List<ScalarField> valuesPrototypes =
                 scope.structFields.stream()
                         .skip(2)
-                        .map(f -> (ScalarField)f)
+                        .map(f -> {
+                            ScalarField prototype = (ScalarField)f;
+                            return new ScalarField(
+                                    prototype.type,
+                                    prototype.name,
+                                    prototype.options,
+                                    prototype.autoscale,
+                                    prototype.autotemp,
+                                    true);
+                        })
                         .collect(Collectors.toList());
         scope = scopes.pop();
 

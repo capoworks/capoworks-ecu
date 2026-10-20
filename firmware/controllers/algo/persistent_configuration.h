@@ -43,6 +43,12 @@ static_assert(
 		sizeof(persistent_config_container_s) == offsetof(persistent_config_container_s, value) + 4,
 		"Unexpected persistent container size");
 static_assert(alignof(persistent_config_container_s) == 4, "Persistent configuration must remain 4-byte aligned");
+#if defined(STM32F7XX) && !defined(EFI_BOOTLOADER)
+// The minimum supported F7 copy slot is 32 KiB in the dual-bank 2 MB layout.
+static_assert(
+		sizeof(persistent_config_container_s) <= 32U * 1024U,
+		"F7 persistent record exceeds 32 KiB slot; reduce cylinder trim count, modules, or table sizes");
+#endif
 
 static inline uint64_t getPersistentConfigLayoutId(const persistent_config_header_s& header) {
 	return (static_cast<uint64_t>(header.layoutIdHigh) << 32) | header.layoutIdLow;

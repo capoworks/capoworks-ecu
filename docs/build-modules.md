@@ -61,6 +61,46 @@ cd firmware/config/boards/core8
 FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging" bash compile_core8.sh
 ```
 
+## Fuel table dimensions
+
+Two optional build-profile values control fuel calibration table sizes:
+
+| Option | Values | Default | Effect |
+|---|---|---|---|
+| `FOME_VE_RPM_COUNT` | `16`, `32` | `16` | RPM points in both the Speed Density VE table and the Alpha-N table |
+| `FOME_AIRMASS_BLEND_SIZE` | `8`, `16` | `8` | Both axes of the SD + Alpha-N authority table |
+
+The VE tables retain 16 load points. Neither option changes load-table quantization or table value packing. `FOME_VE_RPM_COUNT` uses a dedicated VE RPM dimension. The shared `FUEL_RPM_COUNT` remains 16, so lambda, MAP-estimate, and injection-phase tables do not grow with the VE table.
+
+The resolver validates both values during Make configuration. Omitted values use the defaults, while explicitly empty or unsupported values fail configuration:
+
+```bash
+FOME_VE_RPM_COUNT=32 FOME_AIRMASS_BLEND_SIZE=16 \
+  FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging" \
+  bash compile_core8.sh
+```
+
+The resolved values are recorded as `ve_rpm_count` and `airmass_blend_size` in `firmware/generated/module_profile.txt`. `module_profile.sh` renders them into `module_profile_defines.h`; both generators prepend that file, and the resulting `firmware/generated/rusefi_generated.h` is authoritative. These dimensions are not compiler command-line definitions.
+
+The 16-point defaults preserve the existing VE and blend axes. A 32-point VE axis explicitly spans 650 through 7000 RPM monotonically for both VE maps, rather than inheriting the low-RPM bunching of the generic 32-point RPM-bin helper. A 16-point blend uses monotonic load defaults ending at 100% TPS and RPM defaults ending at 18000 RPM.
+
+## Engine presets
+
+`FOME_ENGINE_PRESETS` selects which engine-specific preset dispatch code is available in a firmware build. It accepts `all`, `none`, or a whitespace-separated list of exact `engine_type_e` symbol names without the `engine_type_e::` prefix, for example:
+
+```bash
+cd firmware/config/boards/proteus
+FOME_ENGINE_PRESETS="PROTEUS_BMW_M73" FOME_CYLINDER_TRIM_COUNT=12 bash compile_proteus_f7.sh
+```
+
+An explicitly empty value, an unknown symbol, or mixing `all` or `none` with other tokens fails during Make configuration.
+
+With the default 16 RPM-point VE and 8-point blend dimensions, omitting `FOME_ENGINE_PRESETS` keeps the legacy behavior and includes all presets. Omitting it in any expanded-dimension build includes no engine-specific presets. `none` is valid in every build. An explicit symbol list, including `all`, is rejected when either table dimension is expanded; use `none` for those builds.
+
+The canonical `firmware/generated/module_profile.txt` records the resolved `engine_preset_mode`, `engine_presets` list, and `engine_preset_default`. The board generator consumes the matching generated per-preset visibility definitions, so changing the selection regenerates the configuration, embedded INI, and objects without requiring a clean build. Profiles created before these fields existed remain readable with the legacy defaults above.
+
+Selection is a build-time filter only; there is no runtime preset registry. It does not remove entries from the persisted `engineType` enum, and enumerator numeric IDs and labels remain unchanged. Changing only `FOME_ENGINE_PRESETS` therefore does not change the saved-tune layout. Preset action buttons still require the existing board and board-family visibility conditions in addition to the per-preset condition, so a selected preset may remain inapplicable to the current board. The reset-to-default command remains available independently of preset selection.
+
 On `hellen128`, for example, explicitly adding `lua` to a profile fails during Make configuration with:
 
 ```text
@@ -108,6 +148,7 @@ These are compile-time defaults and placements, not calculated free-RAM margins.
 - The default Lua heap is 20,000 bytes on F407, 60,000 bytes on non-Ethernet F429, and 25,000 bytes on Ethernet F429. The F7 and H7 defaults remain 200,000 and 100,000 bytes respectively. The F407 reduction from 30,000 to 20,000 bytes lowers script capacity. A 32-bit simulator check with a 572-byte script reported 14,085 bytes used across startup, execute, and reload; that is not a hardware or real-workload guarantee.
 - On all F4 boards, CAN and USB background objects use ordinary SRAM, and the Lua CAN filter table remains one static 48-entry array there (768 bytes at 16 bytes per entry). The main loop remains in CCM on F407. Non-Ethernet F429 builds move it to ordinary SRAM; Ethernet F429 builds retain CCM. The main-loop stack remains 5,120 bytes in every case.
 - Compressed embedded INI mass storage uses one shared 16 KiB DEFLATE dictionary. A static assertion enforces that the firmware dictionary is at least as large as the generated image's declared window.
+- On STM32F7, every persistent configuration copy must fit the minimum runtime flash slot of 32 KiB. Dual-bank 2 MB places its copies 32 KiB apart (`0x08100000` and `0x08108000`); a larger record overlaps the second copy's sector and `writeConfigurationCopies()` rejects the layout. A static assertion in `persistent_configuration.h` enforces this limit only for F7 builds. The measured Proteus F7 profile with the expanded 32-point VE, 16-point blend, and default six cylinder trims is 31,332 bytes (31,312-byte payload plus 16-byte header and 4-byte CRC), leaving 1,436 bytes. In the measured Proteus F7 profile, raising cylinder-trim capacity from 6 to 12 adds 1,540 bytes: the 32,872-byte record exceeds the slot by 104 bytes and is rejected during compilation. Exact sizes remain board- and profile-dependent. This check adds no RAM cost; F4 and H7 layouts are unchanged.
 - F7 functions use 4-byte alignment and retain the default `-O2`; timing for these changes has not been benchmarked.
 
 ## Generated configuration
@@ -116,7 +157,7 @@ The selected profile drives both live-data generation and `gen_config_board.sh`.
 
 Generated headers, configuration structures, and `firmware/tunerstudio/generated/*.ini` files are build products and are not committed. Treat a generated INI and its firmware as one matching pair.
 
-Cylinder fuel trim renders its exact 1-to-N TunerStudio rows into `firmware/generated/cylinder_fuel_trim.ini`. This is a small fixed renderer for the module's single repeated row pattern, not a general template language. The profile is refreshed before generation, so changing the count or disabling the module updates the generated fragment and configuration stamp on the first Make invocation without requiring a clean build.
+Cylinder fuel trim renders its exact 1-to-N TunerStudio rows into `firmware/generated/cylinder_fuel_trim.ini`. This is a small fixed renderer for the module's single repeated row pattern, not a general template language. The profile is refreshed before generation, so changing the count, fuel table dimensions, or blend size updates the generated headers and configuration stamp on the first Make invocation without requiring a clean build.
 
 The flash header identifies a snapshot by version, container size, and a static configuration-layout ID. A snapshot with an incompatible layout is rejected even when its byte size is unchanged, and defaults are restored. There is no binary migration or retention of values from inactive modules; use the matching generated INI to export and manually re-import values after an intentional layout change.
 

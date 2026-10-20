@@ -105,6 +105,139 @@ public class ModuleProfileTest {
     }
 
     @Test
+    public void defaultFuelTableDimensionsRenderLegacyProfileAndMacros() throws Exception {
+        Path directory = temporaryFolder.newFolder("default-dimensions").toPath();
+        Path profile = directory.resolve("module_profile.txt");
+        Path definitions = directory.resolve("module_profile_defines.h");
+
+        ProcessResult result = runProfileMake(profile, "fan", null);
+        assertEquals(result.output, 0, result.exitCode);
+        assertTableDimensions(profile, definitions, "16", "8");
+        assertEquals("default_all", profileValue(profile, "engine_preset_mode"));
+        assertEquals("MINIMAL_PINS", profileValue(profile, "engine_preset_default"));
+        assertTrue(profileValue(profile, "engine_presets").contains("MINIMAL_PINS"));
+    }
+
+    @Test
+    public void supportedFuelTableDimensionPairsRenderMatchingProfileAndMacros() throws Exception {
+        String[][] choices = {
+                {"16", "8"},
+                {"16", "16"},
+                {"32", "8"},
+                {"32", "16"},
+        };
+
+        for (String[] choice : choices) {
+            String veRpmCount = choice[0];
+            String airmassBlendSize = choice[1];
+            Path directory = temporaryFolder.newFolder("dimensions-" + veRpmCount + "-" + airmassBlendSize).toPath();
+            Path profile = directory.resolve("module_profile.txt");
+            Path definitions = directory.resolve("module_profile_defines.h");
+
+            ProcessResult result = runProfileMake(
+                    profile, "fan", null, veRpmCount, airmassBlendSize);
+            assertEquals(result.output, 0, result.exitCode);
+            assertTableDimensions(profile, definitions, veRpmCount, airmassBlendSize);
+            if (veRpmCount.equals("16") && airmassBlendSize.equals("8")) {
+                assertEquals("default_all", profileValue(profile, "engine_preset_mode"));
+            } else {
+                assertEquals("default_none", profileValue(profile, "engine_preset_mode"));
+                assertEquals("MINIMAL_PINS", profileValue(profile, "engine_presets"));
+            }
+        }
+    }
+
+    @Test
+    public void enginePresetSelectionIsCanonicalAndExpandedBuildsRejectSymbols() throws Exception {
+        Path directory = temporaryFolder.newFolder("engine-presets").toPath();
+        Path profile = directory.resolve("module_profile.txt");
+
+        ProcessResult first = runProfileMake(
+                profile, "fan", null, "16", "8", "HELLEN_NA6");
+        assertEquals(first.output, 0, first.exitCode);
+        assertEquals("explicit", profileValue(profile, "engine_preset_mode"));
+        assertTrue(profileValue(profile, "engine_presets").contains("HELLEN_NA6"));
+        assertTrue(profileValue(profile, "engine_presets").contains("MINIMAL_PINS"));
+
+        Files.setLastModifiedTime(profile, FileTime.fromMillis(1000));
+        ProcessResult second = runProfileMake(
+                profile, "fan", null, "16", "8", "HELLEN_NB2_36");
+        assertEquals(second.output, 0, second.exitCode);
+        assertTrue(profileValue(profile, "engine_presets").contains("HELLEN_NB2_36"));
+        assertFalse(profileValue(profile, "engine_presets").contains("HELLEN_NA6"));
+        assertTrue(Files.getLastModifiedTime(profile).toMillis() > 1000);
+
+        ProcessResult none = runProfileMake(
+                profile, "fan", null, "32", "16", "none");
+        assertEquals(none.output, 0, none.exitCode);
+        assertEquals("explicit_none", profileValue(profile, "engine_preset_mode"));
+        assertEquals("MINIMAL_PINS", profileValue(profile, "engine_presets"));
+
+        ProcessResult rejected = runProfileMake(
+                profile, "fan", null, "32", "16", "HELLEN_NA6");
+        assertNotEquals(rejected.output, 0, rejected.exitCode);
+        assertTrue(rejected.output, rejected.output.contains("cannot include literal engine presets"));
+    }
+
+    @Test
+    public void fuelTableDimensionValidationRejectsUnsupportedValues() throws Exception {
+        for (String value : Arrays.asList("", "8", "24", "16 32", "not-a-count")) {
+            assertDimensionRejected(value, null, "FOME_VE_RPM_COUNT");
+        }
+        for (String value : Arrays.asList("", "4", "12", "8 16", "not-a-count")) {
+            assertDimensionRejected(null, value, "FOME_AIRMASS_BLEND_SIZE");
+        }
+    }
+
+    @Test
+    public void fuelTableDimensionRoundTripRefreshesWithoutClean() throws Exception {
+        Path directory = temporaryFolder.newFolder("dimension-round-trip").toPath();
+        Path profile = directory.resolve("module_profile.txt");
+        Path definitions = directory.resolve("module_profile_defines.h");
+        Path object = directory.resolve("object.o");
+        Path configStamp = directory.resolve("config.stamp");
+        Path makefile = directory.resolve("profile-deps.mk");
+        Path buildDirectory = directory.resolve("build");
+        Path generatedDirectory = directory.resolve("generated");
+
+        Files.createDirectories(buildDirectory);
+        Files.createDirectories(generatedDirectory);
+        Files.write(makefile, Arrays.asList(
+                "PROJECT_DIR := " + FIRMWARE,
+                "BOARD_DIR := " + BOARD,
+                "include $(PROJECT_DIR)/controllers/modules/module_profile.mk",
+                "include $(PROJECT_DIR)/fome_generated.mk",
+                "all: $(OBJS)",
+                "$(OBJS):",
+                "\t@touch $@"
+        ), StandardCharsets.UTF_8);
+
+        ProcessResult first = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan", null, "32", "16", true);
+        assertEquals(first.output, 0, first.exitCode);
+        assertTableDimensions(profile, definitions, "32", "16");
+
+        Files.setLastModifiedTime(object, FileTime.fromMillis(1000));
+        ProcessResult middle = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan", null, "16", "8", true);
+        assertEquals(middle.output, 0, middle.exitCode);
+        assertTableDimensions(profile, definitions, "16", "8");
+        assertTrue("dimension A -> B did not stale the object",
+                Files.getLastModifiedTime(object).toMillis() > 1000);
+
+        Files.setLastModifiedTime(object, FileTime.fromMillis(1000));
+        ProcessResult returned = runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                "fan", null, "32", "16", true);
+        assertEquals(returned.output, 0, returned.exitCode);
+        assertTableDimensions(profile, definitions, "32", "16");
+        assertTrue("dimension B -> A did not stale the object",
+                Files.getLastModifiedTime(object).toMillis() > 1000);
+    }
+
+    @Test
     public void legacyProfileInvocationsRemainReadable() throws Exception {
         Path directory = temporaryFolder.newFolder("legacy-profile").toPath();
         Path legacyProfile = directory.resolve("legacy.txt");
@@ -125,12 +258,37 @@ public class ModuleProfileTest {
         assertEquals(count.output, 0, count.exitCode);
         assertEquals("0\n", count.output);
 
+        ProcessResult veRpmCount = runCommand(Arrays.asList(
+                "bash", PROFILE_TOOL.toString(), "read", legacyProfile.toString(), "ve_rpm_count"
+        ));
+        assertEquals(veRpmCount.output, 0, veRpmCount.exitCode);
+        assertEquals("16\n", veRpmCount.output);
+
+        ProcessResult airmassBlendSize = runCommand(Arrays.asList(
+                "bash", PROFILE_TOOL.toString(), "read", legacyProfile.toString(), "airmass_blend_size"
+        ));
+        assertEquals(airmassBlendSize.output, 0, airmassBlendSize.exitCode);
+        assertEquals("8\n", airmassBlendSize.output);
+
+        for (String[] expected : new String[][] {
+                {"engine_preset_mode", "default_all\n"},
+                {"engine_presets", "all\n"},
+                {"engine_preset_default", "MINIMAL_PINS\n"},
+        }) {
+            ProcessResult presetField = runCommand(Arrays.asList(
+                    "bash", PROFILE_TOOL.toString(), "read", legacyProfile.toString(), expected[0]
+            ));
+            assertEquals(presetField.output, 0, presetField.exitCode);
+            assertEquals(expected[1], presetField.output);
+        }
+
         ProcessResult definitions = runCommand(Arrays.asList(
                 "bash", PROFILE_TOOL.toString(), "definitions", legacyProfile.toString()
         ));
         assertEquals(definitions.output, 0, definitions.exitCode);
         Path legacyDefinitions = directory.resolve("legacy_defines.h");
         assertEquals(legacyDefinitions.toString() + "\n", definitions.output);
+        assertTableMacros(legacyDefinitions, "16", "8");
         assertTrue(read(legacyDefinitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 0"));
 
         Path writtenProfile = directory.resolve("written.txt");
@@ -239,7 +397,56 @@ public class ModuleProfileTest {
         assertTrue(result.output, result.output.contains(expectedError));
     }
 
+    private void assertDimensionRejected(String veRpmCount, String airmassBlendSize, String expectedOption)
+            throws Exception {
+        Path directory = temporaryFolder.newFolder().toPath();
+        ProcessResult result = runProfileMake(
+                directory.resolve("module_profile.txt"),
+                "fan",
+                null,
+                veRpmCount,
+                airmassBlendSize);
+
+        assertNotEquals(result.output, 0, result.exitCode);
+        assertTrue(result.output, result.output.contains(expectedOption));
+    }
+
+    private static void assertTableDimensions(
+            Path profile, Path definitions, String veRpmCount, String airmassBlendSize) throws Exception {
+        assertEquals(veRpmCount, profileValue(profile, "ve_rpm_count"));
+        assertEquals(airmassBlendSize, profileValue(profile, "airmass_blend_size"));
+        assertTableMacros(definitions, veRpmCount, airmassBlendSize);
+    }
+
+    private static void assertTableMacros(Path definitions, String veRpmCount, String airmassBlendSize)
+            throws Exception {
+        String header = read(definitions);
+        assertTrue(header.contains("#define FOME_VE_RPM_COUNT " + veRpmCount + "\n"));
+        assertTrue(header.contains("#define VE_RPM_COUNT " + veRpmCount + "\n"));
+        assertTrue(header.contains("#define ALPHA_N_RPM_COUNT " + veRpmCount + "\n"));
+        assertTrue(header.contains("#define FOME_AIRMASS_BLEND_SIZE " + airmassBlendSize + "\n"));
+        assertTrue(header.contains("#define AIRMASS_BLEND_LOAD_COUNT " + airmassBlendSize + "\n"));
+        assertTrue(header.contains("#define AIRMASS_BLEND_RPM_COUNT " + airmassBlendSize + "\n"));
+    }
+
     private ProcessResult runProfileMake(Path profile, String modules, String count) throws Exception {
+        return runProfileMake(profile, modules, count, null, null);
+    }
+
+    private ProcessResult runProfileMake(
+            Path profile, String modules, String count, String veRpmCount, String airmassBlendSize)
+            throws Exception {
+        return runProfileMake(
+                profile, modules, count, veRpmCount, airmassBlendSize, null);
+    }
+
+    private ProcessResult runProfileMake(
+            Path profile,
+            String modules,
+            String count,
+            String veRpmCount,
+            String airmassBlendSize,
+            String enginePresets) throws Exception {
         List<String> command = new ArrayList<>(Arrays.asList(
                 "make", "-s", "--no-print-directory",
                 "-f", PROFILE_MAKE.toString(),
@@ -254,6 +461,15 @@ public class ModuleProfileTest {
         if (count != null) {
             command.add("FOME_CYLINDER_TRIM_COUNT=" + count);
         }
+        if (veRpmCount != null) {
+            command.add("FOME_VE_RPM_COUNT=" + veRpmCount);
+        }
+        if (airmassBlendSize != null) {
+            command.add("FOME_AIRMASS_BLEND_SIZE=" + airmassBlendSize);
+        }
+        if (enginePresets != null) {
+            command.add("FOME_ENGINE_PRESETS=" + enginePresets);
+        }
         return runCommand(command);
     }
 
@@ -266,6 +482,24 @@ public class ModuleProfileTest {
             Path generatedDirectory,
             String modules,
             String count,
+            boolean assumeConfigCurrent
+    ) throws Exception {
+        return runDependencyMake(
+                makefile, profile, object, configStamp, buildDirectory, generatedDirectory,
+                modules, count, null, null, assumeConfigCurrent);
+    }
+
+    private ProcessResult runDependencyMake(
+            Path makefile,
+            Path profile,
+            Path object,
+            Path configStamp,
+            Path buildDirectory,
+            Path generatedDirectory,
+            String modules,
+            String count,
+            String veRpmCount,
+            String airmassBlendSize,
             boolean assumeConfigCurrent
     ) throws Exception {
         Files.createDirectories(profile.getParent());
@@ -305,6 +539,12 @@ public class ModuleProfileTest {
                 "FOME_MODULES=" + modules,
                 "FOME_CYLINDER_TRIM_COUNT=" + count
         ));
+        if (veRpmCount != null) {
+            command.add("FOME_VE_RPM_COUNT=" + veRpmCount);
+        }
+        if (airmassBlendSize != null) {
+            command.add("FOME_AIRMASS_BLEND_SIZE=" + airmassBlendSize);
+        }
         return runCommand(command);
     }
 
@@ -314,6 +554,9 @@ public class ModuleProfileTest {
         processBuilder.redirectErrorStream(true);
         processBuilder.environment().remove("FOME_MODULES");
         processBuilder.environment().remove("FOME_CYLINDER_TRIM_COUNT");
+        processBuilder.environment().remove("FOME_VE_RPM_COUNT");
+        processBuilder.environment().remove("FOME_AIRMASS_BLEND_SIZE");
+        processBuilder.environment().remove("FOME_ENGINE_PRESETS");
 
         Process process = processBuilder.start();
         StringBuilder output = new StringBuilder();

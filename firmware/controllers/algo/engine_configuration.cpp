@@ -581,6 +581,22 @@ static void setDefaultEngineConfiguration() {
 #define IGNORE_FLASH_CONFIGURATION false
 #endif
 
+static bool applyEnginePreset(engine_type_e engineType, bool apply);
+
+bool isEnginePresetAvailable(engine_type_e engineType) {
+	return applyEnginePreset(engineType, false);
+}
+
+engine_type_e getDefaultEngineType() {
+#if FOME_ENGINE_PRESET_DEFAULT_ENGINE_TYPE_ENABLED
+	constexpr engine_type_e configuredDefault = engine_type_e::DEFAULT_ENGINE_TYPE;
+	if (isEnginePresetAvailable(configuredDefault)) {
+		return configuredDefault;
+	}
+#endif
+	return engine_type_e::MINIMAL_PINS;
+}
+
 void loadConfiguration() {
 	engine->airmassInjectionState.onConfigurationWrite(engineConfiguration->fuelAlgorithm, false);
 	// Clear the active configuration so that registered output pins (etc) detect the change on startup and init
@@ -589,17 +605,19 @@ void loadConfiguration() {
 
 #if EFI_INTERNAL_FLASH
 	if (IGNORE_FLASH_CONFIGURATION) {
-		engineConfiguration->engineType = engine_type_e::DEFAULT_ENGINE_TYPE;
+		engineConfiguration->engineType = getDefaultEngineType();
 		resetConfigurationExt(engineConfiguration->engineType);
 		writeToFlashNow();
 	} else {
 		// this call reads configuration from flash memory or sets default configuration
 		// if flash state does not look right.
+		// A loaded calibration is data, not a preset application. Preserve it even
+		// when its historical engineType is excluded from this build's dispatch.
 		readFromFlash();
 	}
 #else  // not EFI_INTERNAL_FLASH
 	// This board doesn't load configuration, initialize the default
-	engineConfiguration->engineType = engine_type_e::DEFAULT_ENGINE_TYPE;
+	engineConfiguration->engineType = getDefaultEngineType();
 	resetConfigurationExt(engineConfiguration->engineType);
 #endif /* EFI_INTERNAL_FLASH */
 
@@ -608,6 +626,14 @@ void loadConfiguration() {
 }
 
 void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e engineType) {
+	if (!isEnginePresetAvailable(engineType)) {
+		firmwareError(
+				ObdCode::CUSTOM_UNEXPECTED_ENGINE_TYPE,
+				"Engine preset unavailable or unknown in this build: %d",
+				(int)engineType);
+		return;
+	}
+
 	engine->airmassInjectionState.onConfigurationWrite(engineConfiguration->fuelAlgorithm, false);
 	enginePins.reset(); // that's mostly important for functional tests
 	/**
@@ -627,6 +653,11 @@ void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e
 
 	engineConfiguration->engineType = engineType;
 
+	applyEnginePreset(engineType, true);
+	applyNonPersistentConfiguration();
+}
+
+static bool applyEnginePreset(engine_type_e engineType, bool apply) {
 	/**
 	 * And override them with engine-specific defaults
 	 */
@@ -636,219 +667,489 @@ void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e
 			// nothing to do - we do it all in setBoardDefaultConfiguration
 			break;
 #if EFI_UNIT_TEST
+#if FOME_ENGINE_PRESET_ENABLED(TEST_ISSUE_366_BOTH)
 		case engine_type_e::TEST_ISSUE_366_BOTH:
-			setTestEngineIssue366both();
+			if (apply) {
+				setTestEngineIssue366both();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TEST_ISSUE_366_RISE)
 		case engine_type_e::TEST_ISSUE_366_RISE:
-			setTestEngineIssue366rise();
+			if (apply) {
+				setTestEngineIssue366rise();
+			}
 			break;
+#endif
 #endif // EFI_UNIT_TEST
 #if HW_MICRO_RUSEFI
+#if FOME_ENGINE_PRESET_ENABLED(MRE_VW_B6)
 		case engine_type_e::MRE_VW_B6:
-			setMreVwPassatB6();
+			if (apply) {
+				setMreVwPassatB6();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(MRE_M111)
 		case engine_type_e::MRE_M111:
-			setM111EngineConfiguration();
+			if (apply) {
+				setM111EngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(MRE_BOARD_NEW_TEST)
 		case engine_type_e::MRE_BOARD_NEW_TEST:
-			mreBoardNewTest();
+			if (apply) {
+				mreBoardNewTest();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(BMW_M73_MRE)
 		case engine_type_e::BMW_M73_MRE:
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(BMW_M73_MRE_SLAVE)
 		case engine_type_e::BMW_M73_MRE_SLAVE:
-			setEngineBMW_M73_microRusEfi();
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(BMW_M73_MRE) || FOME_ENGINE_PRESET_ENABLED(BMW_M73_MRE_SLAVE)
+			if (apply) {
+				setEngineBMW_M73_microRusEfi();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(MRE_BODY_CONTROL)
 		case engine_type_e::MRE_BODY_CONTROL:
-			mreBCM();
+			if (apply) {
+				mreBCM();
+			}
 			break;
+#endif
 #endif // HW_MICRO_RUSEFI
 #if HW_PROTEUS
+#if FOME_ENGINE_PRESET_ENABLED(WASTEGATE_PROTEUS_TEST)
 		case engine_type_e::WASTEGATE_PROTEUS_TEST:
-			proteusDcWastegateTest();
+			if (apply) {
+				proteusDcWastegateTest();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_GM_LS_4)
 		case engine_type_e::PROTEUS_GM_LS_4:
-			setProteusGmLs4();
+			if (apply) {
+				setProteusGmLs4();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_VW_B6)
 		case engine_type_e::PROTEUS_VW_B6:
-			setProteusVwPassatB6();
+			if (apply) {
+				setProteusVwPassatB6();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_QC_TEST_BOARD)
 		case engine_type_e::PROTEUS_QC_TEST_BOARD:
-			proteusBoardTest();
+			if (apply) {
+				proteusBoardTest();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_LUA_DEMO)
 		case engine_type_e::PROTEUS_LUA_DEMO:
-			proteusLuaDemo();
+			if (apply) {
+				proteusLuaDemo();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_BMW_M73)
 		case engine_type_e::PROTEUS_BMW_M73:
-			setEngineBMW_M73_Proteus();
+			if (apply) {
+				setEngineBMW_M73_Proteus();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_HONDA_K)
 		case engine_type_e::PROTEUS_HONDA_K:
-			setProteusHondaElement2003();
+			if (apply) {
+				setProteusHondaElement2003();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_E65_6H_MAN_IN_THE_MIDDLE)
 		case engine_type_e::PROTEUS_E65_6H_MAN_IN_THE_MIDDLE:
-			setEngineProteusGearboxManInTheMiddle();
+			if (apply) {
+				setEngineProteusGearboxManInTheMiddle();
+			}
 			break;
+#endif
 #ifdef HARDWARE_CI
+#if FOME_ENGINE_PRESET_ENABLED(PROTEUS_ANALOG_PWM_TEST)
 		case engine_type_e::PROTEUS_ANALOG_PWM_TEST:
-			setProteusAnalogPwmTest();
+			if (apply) {
+				setProteusAnalogPwmTest();
+			}
 			break;
+#endif
 #endif // HARDWARE_CI
 #endif // HW_PROTEUS
 #if HW_POLYGONUS_PRESETS
+#if FOME_ENGINE_PRESET_ENABLED(POLYGONUS_MIATA_NA6)
 		case engine_type_e::POLYGONUS_MIATA_NA6:
-			setMiataNa6_Polygonus();
+			if (apply) {
+				setMiataNa6_Polygonus();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(POLYGONUS_MIATA_NB1)
 		case engine_type_e::POLYGONUS_MIATA_NB1:
-			setMiataNB1_Polygonus();
+			if (apply) {
+				setMiataNB1_Polygonus();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(POLYGONUS_MIATA_NB2)
 		case engine_type_e::POLYGONUS_MIATA_NB2:
-			setMiataNB2_Polygonus();
+			if (apply) {
+				setMiataNB2_Polygonus();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(POLYGONUS_MIATA_MSM)
 		case engine_type_e::POLYGONUS_MIATA_MSM:
-			setMiataNB_MSM_Polygonus();
+			if (apply) {
+				setMiataNB_MSM_Polygonus();
+			}
 			break;
+#endif
 #endif // HW_POLYGONUS_PRESETS
 #if HW_HELLEN
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_128_MERCEDES_4_CYL)
 		case engine_type_e::HELLEN_128_MERCEDES_4_CYL:
-			setHellenMercedes128_4_cyl();
+			if (apply) {
+				setHellenMercedes128_4_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_128_MERCEDES_6_CYL)
 		case engine_type_e::HELLEN_128_MERCEDES_6_CYL:
-			setHellenMercedes128_6_cyl();
+			if (apply) {
+				setHellenMercedes128_6_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_128_MERCEDES_8_CYL)
 		case engine_type_e::HELLEN_128_MERCEDES_8_CYL:
-			setHellenMercedes128_8_cyl();
+			if (apply) {
+				setHellenMercedes128_8_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_NB2)
 		case engine_type_e::HELLEN_NB2:
-			setMiataNB2_Hellen72();
+			if (apply) {
+				setMiataNB2_Hellen72();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_NB2_36)
 		case engine_type_e::HELLEN_NB2_36:
-			setMiataNB2_Hellen72_36();
+			if (apply) {
+				setMiataNB2_Hellen72_36();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_NA8_96)
 		case engine_type_e::HELLEN_NA8_96:
-			setHellenMiata96();
+			if (apply) {
+				setHellenMiata96();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_NB1)
 		case engine_type_e::HELLEN_NB1:
-			setHellenNB1();
+			if (apply) {
+				setHellenNB1();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_NISSAN_4_CYL)
 		case engine_type_e::HELLEN_121_NISSAN_4_CYL:
-			setHellen121nissanQR();
+			if (apply) {
+				setHellen121nissanQR();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_NISSAN_6_CYL)
 		case engine_type_e::HELLEN_121_NISSAN_6_CYL:
-			setHellen121nissanVQ();
+			if (apply) {
+				setHellen121nissanVQ();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_VAG_5_CYL)
 		case engine_type_e::HELLEN_121_VAG_5_CYL:
-			setHellen121Vag_5_cyl();
+			if (apply) {
+				setHellen121Vag_5_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_VAG_V6_CYL)
 		case engine_type_e::HELLEN_121_VAG_V6_CYL:
-			setHellen121Vag_v6_cyl();
+			if (apply) {
+				setHellen121Vag_v6_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_VAG_VR6_CYL)
 		case engine_type_e::HELLEN_121_VAG_VR6_CYL:
-			setHellen121Vag_vr6_cyl();
+			if (apply) {
+				setHellen121Vag_vr6_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_VAG_8_CYL)
 		case engine_type_e::HELLEN_121_VAG_8_CYL:
-			setHellen121Vag_8_cyl();
+			if (apply) {
+				setHellen121Vag_8_cyl();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_VAG_4_CYL)
 		case engine_type_e::HELLEN_121_VAG_4_CYL:
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_55_BMW)
 		case engine_type_e::HELLEN_55_BMW:
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_88_BMW)
 		case engine_type_e::HELLEN_88_BMW:
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_134_BMW)
 		case engine_type_e::HELLEN_134_BMW:
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_154_VAG)
 		case engine_type_e::HELLEN_154_VAG:
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_121_VAG_4_CYL) || FOME_ENGINE_PRESET_ENABLED(HELLEN_55_BMW) ||                   \
+		FOME_ENGINE_PRESET_ENABLED(HELLEN_88_BMW) || FOME_ENGINE_PRESET_ENABLED(HELLEN_134_BMW) ||                     \
+		FOME_ENGINE_PRESET_ENABLED(HELLEN_154_VAG)
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_154_HYUNDAI_COUPE_BK1)
 		case engine_type_e::HELLEN_154_HYUNDAI_COUPE_BK1:
-			setGenesisCoupeBK1();
+			if (apply) {
+				setGenesisCoupeBK1();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_154_HYUNDAI_COUPE_BK2)
 		case engine_type_e::HELLEN_154_HYUNDAI_COUPE_BK2:
-			setGenesisCoupeBK2();
+			if (apply) {
+				setGenesisCoupeBK2();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_NA6)
 		case engine_type_e::HELLEN_NA6:
-			setHellenNA6();
+			if (apply) {
+				setHellenNA6();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(HELLEN_NA94)
 		case engine_type_e::HELLEN_NA94:
-			setHellenNA94();
+			if (apply) {
+				setHellenNA94();
+			}
 			break;
+#endif
 #endif // HW_HELLEN
 #if HW_FRANKENSO
+#if FOME_ENGINE_PRESET_ENABLED(DEFAULT_FRANKENSO)
 		case engine_type_e::DEFAULT_FRANKENSO:
-			setFrankensoConfiguration();
+			if (apply) {
+				setFrankensoConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TEST_ENGINE)
 		case engine_type_e::TEST_ENGINE:
-			setTestCamEngineConfiguration();
+			if (apply) {
+				setTestCamEngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TEST_CRANK_ENGINE)
 		case engine_type_e::TEST_CRANK_ENGINE:
-			setTestCrankEngineConfiguration();
+			if (apply) {
+				setTestCrankEngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FRANKENSO_QA_ENGINE)
 		case engine_type_e::FRANKENSO_QA_ENGINE:
-			setFrankensoBoardTestConfiguration();
+			if (apply) {
+				setFrankensoBoardTestConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FRANKENSO_BMW_M73_F)
 		case engine_type_e::FRANKENSO_BMW_M73_F:
-			setBMW_M73_TwoCoilUnitTest();
+			if (apply) {
+				setBMW_M73_TwoCoilUnitTest();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(BMW_M73_M)
 		case engine_type_e::BMW_M73_M:
-			setEngineBMW_M73_Manhattan();
+			if (apply) {
+				setEngineBMW_M73_Manhattan();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(DODGE_NEON_1995)
 		case engine_type_e::DODGE_NEON_1995:
-			setDodgeNeon1995EngineConfiguration();
+			if (apply) {
+				setDodgeNeon1995EngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(DODGE_NEON_2003_CRANK)
 		case engine_type_e::DODGE_NEON_2003_CRANK:
-			setDodgeNeonNGCEngineConfiguration();
+			if (apply) {
+				setDodgeNeonNGCEngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FORD_ASPIRE_1996)
 		case engine_type_e::FORD_ASPIRE_1996:
-			setFordAspireEngineConfiguration();
+			if (apply) {
+				setFordAspireEngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FRANKENSO_MIATA_NA6_MAP)
 		case engine_type_e::FRANKENSO_MIATA_NA6_MAP:
-			setMiataNA6_MAP_Frankenso();
+			if (apply) {
+				setMiataNA6_MAP_Frankenso();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(ETB_BENCH_ENGINE)
 		case engine_type_e::ETB_BENCH_ENGINE:
-			setEtbTestConfiguration();
+			if (apply) {
+				setEtbTestConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TLE8888_BENCH_ENGINE)
 		case engine_type_e::TLE8888_BENCH_ENGINE:
-			setTle8888TestConfiguration();
+			if (apply) {
+				setTle8888TestConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FRANKENSO_MAZDA_MIATA_NA8)
 		case engine_type_e::FRANKENSO_MAZDA_MIATA_NA8:
-			setFrankensoMazdaMiataNA8Configuration();
+			if (apply) {
+				setFrankensoMazdaMiataNA8Configuration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FORD_INLINE_6_1995)
 		case engine_type_e::FORD_INLINE_6_1995:
-			setFordInline6();
+			if (apply) {
+				setFordInline6();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FORD_ESCORT_GT)
 		case engine_type_e::FORD_ESCORT_GT:
-			setFordEscortGt();
+			if (apply) {
+				setFordEscortGt();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(CITROEN_TU3JP)
 		case engine_type_e::CITROEN_TU3JP:
-			setCitroenBerlingoTU3JPConfiguration();
+			if (apply) {
+				setCitroenBerlingoTU3JPConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(VW_ABA)
 		case engine_type_e::VW_ABA:
-			setVwAba();
+			if (apply) {
+				setVwAba();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(FRANKENSO_MAZDA_MIATA_2003)
 		case engine_type_e::FRANKENSO_MAZDA_MIATA_2003:
-			setMazdaMiata2003EngineConfiguration();
+			if (apply) {
+				setMazdaMiata2003EngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(MAZDA_MIATA_2003_NA_RAIL)
 		case engine_type_e::MAZDA_MIATA_2003_NA_RAIL:
-			setMazdaMiata2003EngineConfigurationNaFuelRail();
+			if (apply) {
+				setMazdaMiata2003EngineConfigurationNaFuelRail();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(MAZDA_MIATA_2003_BOARD_TEST)
 		case engine_type_e::MAZDA_MIATA_2003_BOARD_TEST:
-			setMazdaMiata2003EngineConfigurationBoardTest();
+			if (apply) {
+				setMazdaMiata2003EngineConfigurationBoardTest();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TEST_ENGINE_VVT)
 		case engine_type_e::TEST_ENGINE_VVT:
-			setTestVVTEngineConfiguration();
+			if (apply) {
+				setTestVVTEngineConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TEST_DC_WASTEGATE_DISCOVERY)
 		case engine_type_e::TEST_DC_WASTEGATE_DISCOVERY:
-			setTestDcWastegateConfiguration();
+			if (apply) {
+				setTestDcWastegateConfiguration();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(SACHS)
 		case engine_type_e::SACHS:
-			setSachs();
+			if (apply) {
+				setSachs();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(CAMARO_4)
 		case engine_type_e::CAMARO_4:
-			setCamaro4();
+			if (apply) {
+				setCamaro4();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TOYOTA_2JZ_GTE_VVTi)
 		case engine_type_e::TOYOTA_2JZ_GTE_VVTi:
-			setToyota_2jz_vics();
+			if (apply) {
+				setToyota_2jz_vics();
+			}
 			break;
+#endif
+#if FOME_ENGINE_PRESET_ENABLED(TEST_33816)
 		case engine_type_e::TEST_33816:
-			setTest33816EngineConfiguration();
+			if (apply) {
+				setTest33816EngineConfiguration();
+			}
 			break;
+#endif
 #endif // HW_FRANKENSO
 		default:
-			firmwareError(ObdCode::CUSTOM_UNEXPECTED_ENGINE_TYPE, "Unexpected engine type: %d", (int)engineType);
+			return false;
 	}
-	applyNonPersistentConfiguration();
+	return true;
 }
 
 void emptyCallbackWithConfiguration(engine_configuration_s*) {}

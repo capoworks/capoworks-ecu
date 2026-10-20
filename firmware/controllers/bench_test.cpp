@@ -492,13 +492,21 @@ void executeTSCommand(uint16_t subsystem, uint16_t index) {
 			break;
 
 		case TS_SET_ENGINE_TYPE:
+			if (!isEnginePresetAvailable((engine_type_e)index)) {
+				setEngineType(index);
+				break;
+			}
 			fatalErrorForPresetApply();
 			setEngineType(index);
 			break;
 
 		case TS_SET_DEFAULT_ENGINE:
+			if (!isEnginePresetAvailable(getDefaultEngineType())) {
+				setEngineType(getDefaultEngineType());
+				break;
+			}
 			fatalErrorForPresetApply();
-			setEngineType(engine_type_e::DEFAULT_ENGINE_TYPE);
+			setEngineType(getDefaultEngineType());
 			break;
 
 		case 0x79:
