@@ -22,7 +22,9 @@ concurrency:
 
 jobs:
   build-firmware:
-    runs-on: ubuntu-latest-selfhost
+    runs-on: ubuntu-24.04
+    env:
+      JOBS: '4'
 
     strategy:
       # Let all builds finish even if one fails early
@@ -176,18 +178,30 @@ jobs:
       with:
         submodules: true
 
-    # - uses: actions/setup-java@v4
-    #   with:
-    #     distribution: 'zulu'
-    #     java-version: '8'
+    - name: Configure ARM binutils
+      run: |
+        toolchain_dir="$GITHUB_WORKSPACE/firmware/ext/build-tools/arm-gnu-toolchain-11.3.rel1-x86_64-arm-none-eabi/bin"
+        binutils_dir="$GITHUB_WORKSPACE/build/capoworks-tools"
+        mkdir -p "$binutils_dir"
+        for tool in objcopy objdump; do
+          test -x "$toolchain_dir/arm-none-eabi-$tool"
+          ln -sf "$toolchain_dir/arm-none-eabi-$tool" "$binutils_dir/$tool"
+        done
+        echo "$binutils_dir" >> "$GITHUB_PATH"
 
-    # - name: Install multilib, mingw, sshpass and mtools
-    #   working-directory: ./.github/workflows/
-    #   run: |
-    #     sudo ./add-ubuntu-latest-apt-mirrors.sh
-    #     sudo apt-get install gcc-multilib g++-multilib g++-mingw-w64 gcc-mingw-w64 sshpass mtools
-    #     sudo apt-get install zip
-    #     sudo apt-get install dosfstools
+    - uses: actions/setup-java@v6.0.1
+      with:
+        distribution: 'zulu'
+        java-version: '21'
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential gcc-multilib g++-multilib mtools dosfstools zip xxd rsync
+
+    - name: Install Windows simulator toolchain
+      if: ${{ env.full == 'true' }}
+      run: sudo apt-get install -y gcc-mingw-w64-i686 g++-mingw-w64-i686
 
     # Build the firmware!
     - name: Build Firmware
