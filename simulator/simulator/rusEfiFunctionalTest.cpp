@@ -118,8 +118,8 @@ static void assertBatchOrder(BatchOrderContext* context, const int* expected, si
 	}
 
 	if (context->callbackCount != expectedCount) {
-		firmwareError("SleepExecutor batch %s: expected %zu callbacks, got %zu", testName,
-				expectedCount, context->callbackCount);
+		firmwareError("SleepExecutor batch %s: expected %d callbacks, got %d", testName,
+				static_cast<int>(expectedCount), static_cast<int>(context->callbackCount));
 		return;
 	}
 
