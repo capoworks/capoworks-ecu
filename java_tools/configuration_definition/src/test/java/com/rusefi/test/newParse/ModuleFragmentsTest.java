@@ -263,6 +263,34 @@ public class ModuleFragmentsTest {
     }
 
     @Test
+    public void optionalLinesRequireEveryIndependentCondition() throws Exception {
+        File template = write("multiple-conditions.ini",
+                "[UserDefined]\n" +
+                        "both = 1@@if_show_family@@if_show_preset\n" +
+                        "familyOnly = 1@@if_show_family\n" +
+                        "missingPreset = 1@@if_show_family@@if_show_missing\n" +
+                        "falsePreset = 1@@if_show_family@@if_show_disabled\n" +
+                        "presetOnly = 1@@if_show_preset\n");
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        PrintStream printStream = new PrintStreamAlwaysUnix(output, true, StandardCharsets.UTF_8.name());
+        new TsWriter().writeTunerstudio(
+                NewParseHelper.parse(
+                        "#define show_family true\n" +
+                                "#define show_preset true\n" +
+                                "#define show_disabled false\n"),
+                template.getPath(), printStream);
+        String result = output.toString(StandardCharsets.UTF_8.name());
+
+        assertTrue(result, result.contains("both = 1\n"));
+        assertTrue(result, result.contains("familyOnly = 1\n"));
+        assertTrue(result, result.contains("presetOnly = 1\n"));
+        assertFalse(result, result.contains("missingPreset"));
+        assertFalse(result, result.contains("falsePreset"));
+        assertFalse(result, result.contains("@@if_"));
+    }
+
+    @Test
     public void namedIniContextsAreFixedKeysAndStayInsideTheirTemplateSections() throws Exception {
         File template = write("named-contexts.ini",
                 "[PcVariables]\n" +

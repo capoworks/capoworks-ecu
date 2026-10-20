@@ -45,11 +45,61 @@ static void setDefaultWarmupFuelEnrichment() {
 	copyArray(config->cltFuelCorr, values);
 }
 
+template <size_t TSize>
+static void setDefaultVeRpmBins(uint16_t (&bins)[TSize]) {
+	static_assert(TSize == 16 || TSize == 32);
+
+	if constexpr (TSize == 16) {
+		// Preserve the historical default axis exactly.
+		setRpmBin(bins, TSize, 800, 7000);
+	} else {
+		// The generic setRpmBin() rounds the inner step to 50 RPM and bunches a
+		// 32-point axis at low RPM. Keep the same 650-7000 RPM range while
+		// spreading all 32 points monotonically.
+		copyArray(bins, {650,  850,	 1050, 1250, 1450, 1650, 1900, 2100, 2300, 2500, 2700,
+						 2900, 3100, 3300, 3500, 3700, 3950, 4150, 4350, 4550, 4750, 4950,
+						 5150, 5350, 5550, 5750, 6000, 6200, 6400, 6600, 6800, 7000});
+	}
+}
+
+template <size_t TSize>
+static void setDefaultAirmassBlendBins(float (&loadBins)[TSize], uint16_t (&rpmBins)[TSize]) {
+	static_assert(TSize == 8 || TSize == 16);
+
+	if constexpr (TSize == 8) {
+		// Preserve the historical blend axes exactly.
+		copyArray(loadBins, {0.0f, 1.0f, 3.0f, 7.0f, 15.0f, 30.0f, 60.0f, 100.0f});
+		copyArray(rpmBins, {800, 1200, 2000, 3000, 4000, 5000, 6000, 8000});
+	} else {
+		copyArray(
+				loadBins,
+				{0.0f,
+				 1.0f,
+				 2.0f,
+				 4.0f,
+				 7.0f,
+				 10.0f,
+				 15.0f,
+				 20.0f,
+				 28.0f,
+				 36.0f,
+				 45.0f,
+				 55.0f,
+				 65.0f,
+				 75.0f,
+				 88.0f,
+				 100.0f});
+		copyArray(
+				rpmBins,
+				{800, 1000, 1200, 1500, 1800, 2200, 2600, 3000, 3500, 4000, 4500, 5000, 6000, 7500, 10000, 18000});
+	}
+}
+
 static void setDefaultVETable() {
-	setRpmTableBin(config->veRpmBins);
+	setDefaultVeRpmBins(config->veRpmBins);
 	setTable(config->veTable, 80);
 
-	setRpmTableBin(config->alphaNRpmBins);
+	setDefaultVeRpmBins(config->alphaNRpmBins);
 	copyArray(
 			config->alphaNTpsBins,
 			{0.0f, 0.5f, 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 15.0f, 20.0f, 30.0f, 40.0f, 55.0f, 70.0f, 85.0f, 100.0f});
@@ -62,8 +112,7 @@ static void setDefaultVETable() {
 	config->airmassTemperatureSource = AirmassTemperatureSource::Tcharge;
 	config->idleVeLoadSource = IdleVeLoadSource::EffectiveMap;
 	config->airmassBlendLoadSource = AirmassBlendLoadSource::Tps;
-	copyArray(config->airmassBlendLoadBins, {0.0f, 1.0f, 3.0f, 7.0f, 15.0f, 30.0f, 60.0f, 100.0f});
-	copyArray(config->airmassBlendRpmBins, {800, 1200, 2000, 3000, 4000, 5000, 6000, 8000});
+	setDefaultAirmassBlendBins(config->airmassBlendLoadBins, config->airmassBlendRpmBins);
 	setTable(config->airmassBlendTable, 0);
 	config->injectionPhaseLoadSource = AFR_None;
 	for (auto& source : config->ignitionTrimLoadSource) {

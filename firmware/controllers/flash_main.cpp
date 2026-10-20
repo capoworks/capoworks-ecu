@@ -239,11 +239,11 @@ void readFromFlash() {
 			efiPrintf("Need to reset flash to default due to CRC mismatch");
 			[[fallthrough]];
 		case ConfigurationFlashState::BlankChip:
-			resetConfigurationExt(engine_type_e::DEFAULT_ENGINE_TYPE);
+			resetConfigurationExt(getDefaultEngineType());
 			break;
 		case ConfigurationFlashState::IncompatibleVersion:
 			efiPrintf("Resetting due to incompatible configuration header");
-			resetConfigurationExt(engine_type_e::DEFAULT_ENGINE_TYPE);
+			resetConfigurationExt(getDefaultEngineType());
 			break;
 		case ConfigurationFlashState::Ok:
 			// At this point we know that CRC and version number is what we expect. Safe to assume it's a valid

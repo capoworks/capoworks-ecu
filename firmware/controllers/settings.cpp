@@ -543,6 +543,14 @@ void setEngineType(int value) {
 }
 
 void setEngineType(engine_type_e value) {
+	if (!isEnginePresetAvailable(value)) {
+		firmwareError(
+				ObdCode::CUSTOM_UNEXPECTED_ENGINE_TYPE,
+				"Engine preset unavailable or unknown in this build: %d",
+				(int)value);
+		return;
+	}
+
 	{
 #if EFI_PROD_CODE
 		chibios_rt::CriticalSectionLocker csl;

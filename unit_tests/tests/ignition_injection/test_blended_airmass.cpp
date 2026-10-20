@@ -19,7 +19,18 @@ mass_t expectedIdealGasMass(float displacement, int cylinders, float vePercent, 
 }
 
 void configureAuthorityMapAxis() {
-	copyArray(config->airmassBlendLoadBins, {0.0f, 20.0f, 40.0f, 80.0f, 110.0f, 150.0f, 200.0f, 250.0f});
+	constexpr float preservedLoadBins[] = {0.0f, 20.0f, 40.0f, 80.0f, 110.0f, 150.0f, 200.0f, 250.0f};
+	static_assert(AIRMASS_BLEND_LOAD_COUNT == 8 || AIRMASS_BLEND_LOAD_COUNT == 16);
+	for (size_t i = 0; i < std::size(preservedLoadBins); i++) {
+		config->airmassBlendLoadBins[i] = preservedLoadBins[i];
+	}
+
+	if constexpr (AIRMASS_BLEND_LOAD_COUNT == 16) {
+		constexpr float appendedLoadBins[] = {300.0f, 400.0f, 500.0f, 600.0f, 700.0f, 800.0f, 900.0f, 1000.0f};
+		for (size_t i = 0; i < std::size(appendedLoadBins); i++) {
+			config->airmassBlendLoadBins[std::size(preservedLoadBins) + i] = appendedLoadBins[i];
+		}
+	}
 }
 
 void configureFlatCorrection(blend_table_s& blend, float correctionPercent) {
@@ -232,6 +243,65 @@ TEST_F(BlendedAirmassModelTest, MapEstimateCanRunSdButNeverQualifiesMeasuredMapA
 	EXPECT_FLOAT_EQ(result.LambdaLoad.Value, 200);
 	EXPECT_EQ(result.Fault, AirmassInjectionFault::Sensor);
 }
+
+#if AIRMASS_BLEND_LOAD_COUNT == 16
+TEST(BlendedAirmassTableDimensions, ExpandedBlendInterpolatesLastCellsWithMinimumPins) {
+	EngineTestHelper eth(engine_type_e::MINIMAL_PINS);
+	engineConfiguration->fuelAlgorithm = LM_SD_ALPHA_N;
+	engineConfiguration->displacement = 2.4f;
+	engineConfiguration->useSeparateVeForIdle = false;
+	config->airmassTemperatureSource = AirmassTemperatureSource::Tcharge;
+	setCylinderCount(4);
+	engine->engineState.sd.tChargeK = 300;
+
+	setLinearCurve(config->veLoadBins, 0, 200, 1);
+	setLinearCurve(config->veRpmBins, 500, 18000, 1);
+	setTable(config->veTable, 60);
+	setLinearCurve(config->alphaNTpsBins, 0, 100, 1);
+	setLinearCurve(config->alphaNRpmBins, 500, 18000, 1);
+	setTable(config->alphaNTable, 40);
+
+	config->airmassBlendLoadSource = AirmassBlendLoadSource::MeasuredMap;
+	configureAuthorityMapAxis();
+	setTable(config->airmassBlendTable, 0);
+	config->airmassBlendTable[AIRMASS_BLEND_LOAD_COUNT - 2][AIRMASS_BLEND_RPM_COUNT - 2] = 40;
+	config->airmassBlendTable[AIRMASS_BLEND_LOAD_COUNT - 1][AIRMASS_BLEND_RPM_COUNT - 2] = 60;
+	config->airmassBlendTable[AIRMASS_BLEND_LOAD_COUNT - 2][AIRMASS_BLEND_RPM_COUNT - 1] = 80;
+	config->airmassBlendTable[AIRMASS_BLEND_LOAD_COUNT - 1][AIRMASS_BLEND_RPM_COUNT - 1] = 100;
+
+	const float loadMidpoint = (config->airmassBlendLoadBins[AIRMASS_BLEND_LOAD_COUNT - 2] +
+								config->airmassBlendLoadBins[AIRMASS_BLEND_LOAD_COUNT - 1]) *
+							   0.5f;
+	const float rpmMidpoint = (config->airmassBlendRpmBins[AIRMASS_BLEND_RPM_COUNT - 2] +
+							   config->airmassBlendRpmBins[AIRMASS_BLEND_RPM_COUNT - 1]) *
+							  0.5f;
+	EXPECT_FLOAT_EQ(loadMidpoint, 950);
+	EXPECT_FLOAT_EQ(rpmMidpoint, 14000);
+	EXPECT_FLOAT_EQ(
+			70,
+			interpolate3d(
+					config->airmassBlendTable,
+					config->airmassBlendLoadBins,
+					loadMidpoint,
+					config->airmassBlendRpmBins,
+					rpmMidpoint));
+
+	Sensor::setMockValue(SensorType::Map, loadMidpoint);
+	Sensor::setMockValue(SensorType::Tps1, 20);
+	NiceMock<MockVp3d> mapEstimate;
+	SpeedDensityAirmass sd(nullptr, mapEstimate);
+	AlphaNAirmass alphaN;
+	BlendedAirmass blended(sd, alphaN);
+
+	BlendedAirmassDiagnostics diagnostics;
+	const auto result = blended.evaluateAirmass(rpmMidpoint, &diagnostics);
+	ASSERT_TRUE(result.Airmass.Valid);
+	EXPECT_TRUE(diagnostics.AuthorityLoadValid);
+	EXPECT_FLOAT_EQ(diagnostics.AuthorityLoad, loadMidpoint);
+	EXPECT_FLOAT_EQ(diagnostics.RequestedAuthority, 70);
+	EXPECT_FLOAT_EQ(diagnostics.EffectiveAuthority, 70);
+}
+#endif
 
 TEST_F(BlendedAirmassModelTest, InvalidAuthorityConfigurationFallsBackOnlyToHealthyBranch) {
 	config->airmassBlendLoadSource = AirmassBlendLoadSource::MeasuredMap;

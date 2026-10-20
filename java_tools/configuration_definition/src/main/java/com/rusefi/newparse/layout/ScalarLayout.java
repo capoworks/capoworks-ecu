@@ -13,6 +13,7 @@ public class ScalarLayout extends Layout {
     public final FieldOptions options;
     public final boolean autoscale;
     public final boolean autotemp;
+    public final boolean tableValues;
 
     public ScalarLayout(ScalarField field) {
         this.name = field.name;
@@ -20,6 +21,7 @@ public class ScalarLayout extends Layout {
         this.type = field.type;
         this.autoscale = field.autoscale;
         this.autotemp = field.autotemp;
+        this.tableValues = field.tableValues;
     }
 
     @Override

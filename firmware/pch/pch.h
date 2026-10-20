@@ -26,6 +26,7 @@
 #include "global.h"
 #include "efifeatures.h"
 #include "rusefi_generated.h"
+#include "../controllers/modules/engine_preset_profile.h"
 #include "loggingcentral.h"
 #include "error_handling.h"
 #include "efi_gpio.h"
