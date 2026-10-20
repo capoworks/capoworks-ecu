@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        trim_count: [4, 12]
+        trim_count: [4, 6, 12]
 
     steps:
     - uses: actions/checkout@v7
@@ -108,8 +108,8 @@ jobs:
       working-directory: ./unit_tests/
       run: build/fome_test
 
-    - name: Run focused native suite (4-cylinder profile)
-      if: ${{ matrix.trim_count == 4 }}
+    - name: Run focused native suite
+      if: ${{ matrix.trim_count != 12 }}
       working-directory: ./unit_tests/
       run: build/fome_test --gtest_filter='CylinderFuelTrim.*:CylinderFuelTrimIntegration.*'
 

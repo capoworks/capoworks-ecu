@@ -41,6 +41,8 @@ bash compile_core8.sh
 
 `FOME_CYLINDER_TRIM_COUNT` is optional when the module is selected and defaults to 6. An explicit command-line or environment value must be an integer from 1 through 12; values such as 0, 13, or an empty value fail during Make configuration. The count sets the number of cylinder-trim tables. Whenever injection is enabled, it must cover the engine's configured cylinder count: an 8- or 12-cylinder engine must explicitly set `FOME_CYLINDER_TRIM_COUNT` to at least its cylinder count, or omit `cylinder_fuel_trim` from `FOME_MODULES`. The default count of 6 is only the cylinder-trim table capacity; it does not reduce or otherwise override the global `MAX_CYLINDER_COUNT` of 12. Because `FOME_MODULES` replaces the default profile, omitting `cylinder_fuel_trim` disables the module, records a count of zero even if a stale `FOME_CYLINDER_TRIM_COUNT` value is present, and generates no cylinder-trim storage, output channels, or TunerStudio UI.
 
+Native unit tests default `FOME_CYLINDER_TRIM_COUNT` to 12 for fixtures covering engines up to 12 cylinders; explicitly testing 6 cylinders should use focused tests. This test-only default does not change the firmware default of 6.
+
 Other legacy modules have not been newly audited for removal. Explicitly selecting `lua` on `hellen128` is an error rather than a silent omission. `emp_pump` reads both fan-controller states for ram-air relief, so selecting it without `fan` is rejected during Make configuration.
 
 To select the full 13-token catalog on Core8, which is not `hellen128`, spell out the complete profile. This example also overrides the cylinder-trim capacity to 12:
