@@ -39,6 +39,9 @@
 #include "local_version_holder.h"
 #include "alternator_controller.h"
 #include "fuel_math.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 #include "spark_logic.h"
 #include "vvt.h"
 #ifdef MODULE_BOOST
@@ -336,6 +339,16 @@ bool validateConfig() {
 		firmwareError("Invalid cylinder count: %d", getFiringOrderLength());
 		return false;
 	}
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	if (engineConfiguration->isInjectionEnabled && getFiringOrderLength() > CYLINDER_FUEL_TRIM_COUNT) {
+		firmwareError(
+				ObdCode::CUSTOM_ERR_ASSERT,
+				"Cylinder fuel trim supports %d cylinders, engine requests %d",
+				static_cast<int>(CYLINDER_FUEL_TRIM_COUNT),
+				static_cast<int>(getFiringOrderLength()));
+		return false;
+	}
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	ensureArrayIsAscending("Injector deadtime", engineConfiguration->injector.battLagCorrBins);
 

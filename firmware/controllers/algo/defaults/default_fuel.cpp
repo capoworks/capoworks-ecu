@@ -4,6 +4,10 @@
 #include "table_helper.h"
 #include "mazda_miata_vvt.h"
 
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
+
 static void setBosch02880155868(injector_s& cfg) {
 	// http://www.boschdealer.com/specsheets/0280155868cs.jpg
 	cfg.battLagCorrBins[0] = 6;
@@ -95,27 +99,6 @@ static void setDefaultVETable() {
 
 		setLinearCurve(blend.blendBins, 0, 100);
 		setLinearCurve(blend.blendValues, 0, 100);
-	}
-}
-
-static void setDefaultCylinderModelFuelTrims() {
-	// 16x16 per-cylinder model fuel trims. All cells default neutral (0 percent).
-	static const uint16_t sdLoadBins[CYLINDER_FUEL_TRIM_SIZE] = {
-			10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 180, 220, 260, 300};
-	static const uint16_t rpmBins[CYLINDER_FUEL_TRIM_SIZE] = {
-			500, 750, 1000, 1250, 1500, 2000, 2500, 3000, 3500, 4000, 5000, 6000, 7000, 8000, 10000, 12000};
-
-	// SD and Alpha-N families have independent axes, each shared by all cylinders of the family.
-	copyArray(config->sdCylinderFuelTrimLoadBins, sdLoadBins);
-	copyArray(config->sdCylinderFuelTrimRpmBins, rpmBins);
-	copyArray(
-			config->alphaNCylinderFuelTrimTpsBins,
-			{0.0f, 0.5f, 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 15.0f, 20.0f, 30.0f, 40.0f, 55.0f, 70.0f, 85.0f, 100.0f});
-	copyArray(config->alphaNCylinderFuelTrimRpmBins, rpmBins);
-
-	for (size_t i = 0; i < efi::size(config->sdCylinderFuelTrims); i++) {
-		setTable(config->sdCylinderFuelTrims[i].table, 0);
-		setTable(config->alphaNCylinderFuelTrims[i].table, 0);
 	}
 }
 
@@ -293,7 +276,9 @@ void setDefaultFuel() {
 	setLinearCurve(config->tpsTspCorrValues, 1, 1);
 
 	setDefaultVETable();
-	setDefaultCylinderModelFuelTrims();
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	setDefaultCylinderFuelTrims();
+#endif // MODULE_CYLINDER_FUEL_TRIM
 	setDefaultLambdaTable();
 
 	setLinearCurve(config->injectorStagingLoadBins, 0, 100, 10);
