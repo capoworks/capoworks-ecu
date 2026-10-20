@@ -9,6 +9,9 @@ GENERATED_DIR = $(PROJECT_DIR)/generated
 
 NO_MAP_AVERAGING = yes
 
+# The native full suite includes fixtures with engines up to 12 cylinders.
+FOME_CYLINDER_TRIM_COUNT ?= 12
+
 # Imported source files and paths
 include $(PROJECT_DIR)/console/console.mk
 include $(PROJECT_DIR)/console/binary/tunerstudio.mk

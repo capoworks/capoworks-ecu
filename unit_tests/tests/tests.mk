@@ -70,8 +70,6 @@ TESTS_SRC_CPP = \
 	tests/ignition_injection/test_airmass_consumer_infrastructure.cpp \
 	tests/ignition_injection/test_airmass_injection_gate.cpp \
 	tests/ignition_injection/test_airmass_fuel_publication.cpp \
-	tests/ignition_injection/test_cylinder_model_fuel_trim.cpp \
-	tests/ignition_injection/test_cylinder_fuel_trim_integration.cpp \
 	tests/test_fuel_map.cpp \
 	tests/test_gear_detector.cpp \
 	tests/ignition_injection/test_fuel_wall_wetting.cpp \
@@ -135,6 +133,12 @@ TESTS_SRC_CPP = \
 	tests/test_obd2.cpp \
 	tests/test_trip_odometer.cpp \
 
+ifneq ($(filter cylinder_fuel_trim,$(FOME_MODULES_RESOLVED)),)
+TESTS_SRC_CPP += \
+	tests/ignition_injection/test_cylinder_fuel_trim.cpp \
+	tests/ignition_injection/test_cylinder_fuel_trim_integration.cpp
+endif
+
 ifneq ($(filter lua,$(FOME_MODULES_RESOLVED)),)
 TESTS_SRC_CPP += \
 	tests/lua/test_lua_basic.cpp \
@@ -153,4 +157,9 @@ endif
 ifneq ($(filter emp_pump,$(FOME_MODULES_RESOLVED)),)
 TESTS_SRC_CPP += \
 	tests/test_emp_pump.cpp
+endif
+
+ifneq ($(filter shock_preload,$(FOME_MODULES_RESOLVED)),)
+TESTS_SRC_CPP += \
+	tests/test_shock_preload.cpp
 endif

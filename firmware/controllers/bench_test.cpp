@@ -461,6 +461,12 @@ void executeTSCommand(uint16_t subsystem, uint16_t index) {
 			break;
 #endif // MODULE_LUA
 
+#ifdef MODULE_SHOCK_PRELOAD
+		case TS_SHOCK_PRELOAD_CATEGORY:
+			engine->module<ShockPreload>()->handleTsCommand(index);
+			break;
+#endif
+
 #ifdef MODULE_EMP_PUMP
 		case TS_EMP_PUMP_CATEGORY:
 			// The EMP module itself rejects a start while the engine is running

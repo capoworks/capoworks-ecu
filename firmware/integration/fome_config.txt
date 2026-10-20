@@ -1590,14 +1590,6 @@ struct cyl_trim_s
 	int8_t[TRIM_SIZE x TRIM_SIZE] autoscale table;;"", 0.2, 0, -25, 25, 1
 end_struct
 
-! Per-cylinder model fuel trims are 16x16 and belong to the SD or Alpha-N airmass family.
-! Independent of the TRIM_SIZE ignition trim tables above.
-#define CYLINDER_FUEL_TRIM_SIZE 16
-
-struct cylinder_model_fuel_trim_s
-	int8_t[CYLINDER_FUEL_TRIM_SIZE x CYLINDER_FUEL_TRIM_SIZE] autoscale table;;"%", 0.2, 0, -25, 25, 1
-end_struct
-
 ! All ign trim tables share axes
 uint16_t[TRIM_SIZE] ignTrimLoadBins;;"", 1, 0, 0, 1000, 0
 uint16_t[TRIM_SIZE] ignTrimRpmBins;;"rpm", 1, 0, 0, 20000, 0
@@ -1791,15 +1783,6 @@ uint8_t[8] postCrankingEnrichRuntimeBins;;"sec", 1, 0, 0, 180, 0
 		table_values uint8_t airmassBlendTable;Alpha-N contribution to cylinder air mass. 0% uses SD only, 100% uses Alpha-N only.;"% Alpha-N", 1, 0, 0, 100, 0
 	end_table
 
-	! Per-cylinder model fuel trims: the only per-cylinder fuel trims. The former
-	! 4x4 residual fuel trims were removed, so this layout is not backward compatible.
-	! Each family shares one set of axes across all cylinders; SD and Alpha-N axes are independent.
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimLoadBins;;"kPa", 1, 0, 0, 1000, 0
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] sdCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
-	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] sdCylinderFuelTrims
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] autoscale alphaNCylinderFuelTrimTpsBins;;"% TPS", {1/@@TPS_2_BYTE_PACKING_MULT@@}, 0, 0, 100, 2
-	uint16_t[CYLINDER_FUEL_TRIM_SIZE] alphaNCylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
-	cylinder_model_fuel_trim_s[MAX_CYLINDER_COUNT iterate] alphaNCylinderFuelTrims
 ! MODULE_PERSISTENT_CONFIG
 end_struct
 

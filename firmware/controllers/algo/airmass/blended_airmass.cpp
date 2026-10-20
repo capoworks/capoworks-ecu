@@ -271,19 +271,6 @@ BlendedAirmass::evaluateAirmass(const AirmassInputs& inputs, BlendedAirmassDiagn
 	evaluation.Airmass.Valid = true;
 	evaluation.Airmass.Degraded = isDegraded(flags);
 
-	// Trim evidence follows the effective authority after any branch fallback.
-	// Branch masses carry only their blend weight; the common correction is
-	// shared by every cylinder and cancels in the trim ratio.
-	const float sdWeight = authority < 100 ? 1 - weight : 0;
-	const float alphaNWeight = authority > 0 ? weight : 0;
-	evaluation.Airmass.TrimSdActive = sdWeight > 0 && sd.Valid;
-	evaluation.Airmass.TrimAlphaNActive = alphaNWeight > 0 && alphaN.Valid;
-	evaluation.Airmass.TrimSdWeightedMass = evaluation.Airmass.TrimSdActive ? sd.Result.CylinderAirmass * sdWeight : 0;
-	evaluation.Airmass.TrimAlphaNWeightedMass =
-			evaluation.Airmass.TrimAlphaNActive ? alphaN.Result.CylinderAirmass * alphaNWeight : 0;
-	evaluation.Airmass.TrimSdLoadKpa = evaluation.Airmass.TrimSdActive ? sd.TrimSdLoadKpa : 0;
-	evaluation.Airmass.TrimAlphaNTps = evaluation.Airmass.TrimAlphaNActive ? alphaN.TrimAlphaNTps : 0;
-
 	if (evaluation.Airmass.Degraded) {
 		flags |= BlendedCalculationValid;
 		evaluation.Fault = fallback ? activeBranchFault : AirmassInjectionFault::None;
