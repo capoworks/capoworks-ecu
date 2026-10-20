@@ -15,6 +15,10 @@ DDEFS += -DEFI_MAIN_RELAY_CONTROL=TRUE
 DDEFS += -DFIRMWARE_ID=\"hellen128\" $(VAR_DEF_ENGINE_TYPE)
 DDEFS += -DEFI_SOFTWARE_KNOCK=TRUE -DSTM32_ADC_USE_ADC3=TRUE
 
+# Lua is not supported on this board. Keep this append higher priority than a
+# command-line assignment so the prohibition cannot be cleared.
+override FOME_MODULES_BOARD_UNSUPPORTED += lua
+
 SHORT_BOARD_NAME = hellen128
 
 include $(BOARDS_DIR)/hellen/hellen-common176.mk

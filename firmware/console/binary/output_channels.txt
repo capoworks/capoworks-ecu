@@ -157,12 +157,6 @@ struct_no_prefix output_channels_s
 	uint8_t detectedGear;@@GAUGE_NAME_DETECTED_GEAR@@;"", 1, 0, 0, @@GEARS_COUNT@@, 0
 	uint8_t maxTriggerReentrant;;"", 1, 0, 0, 100, 0
 
-! Lua
-	float[LUA_GAUGE_COUNT iterate] luaGauges;Lua: Gauge;"value",1, 0, 0, 50000, 3
-	uint16_t luaLastCycleDuration;Lua: Last tick duration;"us",1, 0, 0, 0, 0
-	uint8_t luaInvocationCounter;Lua: Tick counter;"count",1, 0, 0, 0, 0
-
-
 	uint8_t widebandUpdateProgress;;"%", 1, 0, 0, 100, 0
 	uint8_t widebandUpdateState;;"", 1, 0, 0, 0, 0
 	uint8_t orderingErrorCounter;;"",1, 0, 0, 0, 0
@@ -276,7 +270,6 @@ struct_no_prefix output_channels_s
 	pid_status_s alternatorStatus
 	pid_status_s idleStatus
 	pid_status_s etbStatus
-	pid_status_s boostStatus
 	pid_status_s wastegateDcStatus
 
 	uint8_t[4 iterate] autoscale gppwmOutput;GPPWM Output;"%", 0.5, 0, 0, 100, 2
@@ -333,12 +326,5 @@ struct_no_prefix output_channels_s
 	float blendedAuthorityLoad;Air blend: authority Y coordinate;"", 1, 0, 0, 0, 2
 	uint8_t blendedVeAnalyzeEndpoint;Air blend: qualified analyze endpoint;"code", 1, 0, 0, 2, 0
 
-	! Per-cylinder model fuel trim telemetry (16x16 SD/Alpha-N families). Appended after the existing
-	! channels so existing output-channel offsets are unchanged, though the overall output layout grows.
-	! The runtime resets inactive coordinates to 0 and clears the branch bits.
-	float sdCylinderFuelTrimLoad;Fuel trim: SD model load;"kPa", 1, 0, 0, 0, 2
-	float alphaNCylinderFuelTrimLoad;Fuel trim: Alpha-N model load;"% TPS", 1, 0, 0, 0, 2
-	float[12 iterate] cylinderModelFuelTrim;Fuel trim: effective per-cylinder percent;"%", 1, 0, 0, 0, 2
-	uint8_t cylinderModelFuelTrimBranches;Fuel trim: active model branch;"bits", 1, 0, 0, 0, 0
 ! MODULE_OUTPUTS
 end_struct

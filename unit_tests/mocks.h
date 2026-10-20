@@ -46,7 +46,9 @@ public:
 	MOCK_METHOD(void, setWastegatePosition, (percent_t pos), (override));
 	MOCK_METHOD(void, autoCalibrateTps, (), (override));
 	MOCK_METHOD(const pid_state_s&, getPidState, (), (const, override));
+#if EFI_LUA
 	MOCK_METHOD(void, setLuaAdjustment, (percent_t adjustment), (override));
+#endif // EFI_LUA
 
 	// ClosedLoopController mocks
 	MOCK_METHOD(expected<percent_t>, getSetpoint, (), (override));

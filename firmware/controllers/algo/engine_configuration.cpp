@@ -61,7 +61,9 @@
 #include "chevrolet_camaro_4.h"
 #include "toyota_jzs147.h"
 #include "ford_festiva.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #if EFI_IDLE_CONTROL
 #include "idle_thread.h"
 #endif /* EFI_IDLE_CONTROL */
@@ -349,9 +351,9 @@ static void setDefaultEngineConfiguration() {
 	setDefaultEtbParameters();
 	setDefaultEtbBiasCurve();
 #endif /* EFI_ELECTRONIC_THROTTLE_BODY */
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 	setDefaultBoostParameters();
-#endif // EFI_ENGINE_CONTROL
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 
 	// OBD-II default rate is 500kbps
 	engineConfiguration->canBaudRate = B500KBPS;
@@ -396,6 +398,7 @@ static void setDefaultEngineConfiguration() {
 	engineConfiguration->alternatorControl.minValue = 0;
 	engineConfiguration->alternatorControl.maxValue = 90;
 
+#ifdef MODULE_LUA
 	setLinearCurve(config->scriptCurve1Bins, 0, 100, 1);
 	setLinearCurve(config->scriptCurve1, 0, 100, 1);
 
@@ -406,6 +409,7 @@ static void setDefaultEngineConfiguration() {
 	setLinearCurve(config->scriptCurve4Bins, 0, 100, 1);
 	setLinearCurve(config->scriptCurve5Bins, 0, 100, 1);
 	setLinearCurve(config->scriptCurve6Bins, 0, 100, 1);
+#endif // MODULE_LUA
 
 	setLinearCurve(config->alsIgnRetardLoadBins, 2, 10, 1);
 	setRpmTableBin(config->alsIgnRetardrpmBins);
@@ -431,12 +435,14 @@ static void setDefaultEngineConfiguration() {
 
 	setLinearCurve(config->scriptTable1LoadBins, 20, 120, 10);
 	setRpmTableBin(config->scriptTable1RpmBins);
+#ifdef MODULE_LUA
 	setLinearCurve(config->scriptTable2LoadBins, 20, 120, 10);
 	setRpmTableBin(config->scriptTable2RpmBins);
 	setLinearCurve(config->scriptTable3LoadBins, 20, 120, 10);
 	setRpmTableBin(config->scriptTable3RpmBins);
 	setLinearCurve(config->scriptTable4LoadBins, 20, 120, 10);
 	setRpmTableBin(config->scriptTable4RpmBins);
+#endif // MODULE_LUA
 
 	setDefaultEngineNoiseTable();
 
@@ -529,16 +535,20 @@ static void setDefaultEngineConfiguration() {
 	engineConfiguration->baroSensor.lowValue = 0;
 	engineConfiguration->baroSensor.highValue = 500;
 
+#if EFI_ENGINE_SNIFFER
 #if EFI_PROD_CODE
 	engineConfiguration->engineChartSize = 300;
 #else
 	// need more events for automated test
 	engineConfiguration->engineChartSize = 400;
 #endif
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->isMapAveragingEnabled = true;
 	engineConfiguration->mapAveragingCylinderBalanceMinRpm = 1500;
+#if EFI_ENGINE_SNIFFER
 	engineConfiguration->isWaveAnalyzerEnabled = true;
+#endif // EFI_ENGINE_SNIFFER
 
 	engineConfiguration->acIdleRpmBump = 200;
 
@@ -561,7 +571,9 @@ static void setDefaultEngineConfiguration() {
 	setLinearCurve(config->throttleEstimateEffectiveAreaBins, 0, 100);
 
 #endif // EFI_ENGINE_CONTROL
+#ifdef MODULE_LUA
 #include "default_script.lua"
+#endif // MODULE_LUA
 }
 
 // by default, do not ignore config from flash! use it!

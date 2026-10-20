@@ -30,7 +30,9 @@ void setHellen121nissanQR() {
 }
 
 void setHellen121nissanVQ() {
+#if EFI_LUA
 #include "nissan_vq.lua"
+#endif // EFI_LUA
 
 	engineConfiguration->trigger.type = trigger_type_e::TT_NISSAN_VQ35;
 

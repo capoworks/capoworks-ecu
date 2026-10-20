@@ -1,0 +1,13 @@
+	bit shockPreloadOnline;Shock preload: Online
+	bit shockPreloadAtPreset;Shock preload: At saved preset
+	bit shockPreloadPreset0Active;Shock preload: Preset 0 selected and reached
+	bit shockPreloadPreset1Active;Shock preload: Preset 1 selected and reached
+	bit shockPreloadPreset2Active;Shock preload: Preset 2 selected and reached
+	bit shockPreloadPreset3Active;Shock preload: Preset 3 selected and reached
+	bit shockPreloadPreset4Active;Shock preload: Preset 4 selected and reached
+	uint8_t shockPreloadPosition;Shock preload: Position;"%",1, 0, 0, 100, 0
+	uint8_t shockPreloadTarget;Shock preload: Controller target;"%",1, 0, 0, 100, 0
+	uint8_t shockPreloadState;Shock preload: State;"",1, 0, 0, 0, 0
+	uint16_t shockPreloadAlarms;Shock preload: Alarms;"",1, 0, 0, 65535, 0
+	uint16_t shockPreloadCurrent;Shock preload: Current;"raw",1, 0, 0, 65535, 0
+	uint8_t shockPreloadPreset;Shock preload: Selected preset (255 = invalid);"",1, 0, 0, 255, 0

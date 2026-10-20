@@ -5,7 +5,8 @@
 static constexpr size_t maxFilterCount = 48;
 
 static size_t filterCount = 0;
-static CCM_OPTIONAL CanFilter filters[maxFilterCount];
+// CPU-only filter storage stays in ordinary SRAM to leave CCM available for engine state.
+static CanFilter filters[maxFilterCount];
 
 CanFilter* getFilterForId(CanBusIndex busIndex, int Id) {
 	for (size_t i = 0; i < filterCount; i++) {

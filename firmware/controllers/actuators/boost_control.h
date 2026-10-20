@@ -14,6 +14,10 @@ struct IPwm;
 
 class BoostController : public EngineModule, public boost_control_s, public ClosedLoopController<float, percent_t> {
 public:
+	BoostController() {
+		resetLua();
+	}
+
 	void
 	init(IPwm* pmw, const ValueProvider3D* openLoopMap, const ValueProvider3D* closedLoopTargetMap, pid_s* pidParams);
 

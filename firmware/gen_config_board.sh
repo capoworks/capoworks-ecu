@@ -67,6 +67,7 @@ if [ -z "$PROFILE_FILE" ]; then
 fi
 
 "$PROFILE_READER" check "$PROFILE_FILE"
+PROFILE_DEFINITIONS=$("$PROFILE_READER" definitions "$PROFILE_FILE")
 
 CONFIG_FRAGMENTS=()
 while IFS= read -r fragment; do
@@ -127,6 +128,7 @@ java \
 	-board ${BOARD_DIR} \
 	-boardName ${SHORT_BOARDNAME} \
 	-prepend generated/total_live_data_generated.h \
+	-prepend "${PROFILE_DEFINITIONS}" \
 	-prepend integration/fome_config_shared.txt \
 	-prepend ${BOARD_DIR}/prepend.txt \
 	-definition integration/fome_config.txt \

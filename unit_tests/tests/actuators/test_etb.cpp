@@ -494,6 +494,7 @@ TEST(etb, setpointWastegateController) {
 	EXPECT_FLOAT_EQ(100, etb.getSetpoint().value_or(-1));
 }
 
+#if EFI_LUA
 TEST(etb, setpointLuaAdder) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
@@ -540,6 +541,7 @@ TEST(etb, setpointLuaAdder) {
 	setTimeNowUs(startTime + 0.21 * 1e6);
 	EXPECT_EQ(50, etb.getSetpoint().value_or(-1));
 }
+#endif // EFI_LUA
 
 TEST(etb, etbTpsSensor) {
 	// Throw some distinct values on the TPS sensors so we can identify that we're getting the correct one

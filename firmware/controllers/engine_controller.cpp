@@ -24,7 +24,9 @@
 #include "pch.h"
 
 #include "trigger_central.h"
+#ifdef MODULE_LUA
 #include "script_impl.h"
+#endif // MODULE_LUA
 #include "idle_thread.h"
 #include "main_trigger_callback.h"
 #include "flash_main.h"
@@ -37,9 +39,14 @@
 #include "local_version_holder.h"
 #include "alternator_controller.h"
 #include "fuel_math.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 #include "spark_logic.h"
 #include "vvt.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #include "fan_control.h"
 #include "launch_control.h"
 #include "speedometer.h"
@@ -285,7 +292,9 @@ void commonInitEngineController() {
 
 	initAccelEnrichment();
 
+#ifdef MODULE_LUA
 	initScriptImpl();
+#endif // MODULE_LUA
 
 	initGpPwm();
 
@@ -304,8 +313,10 @@ void commonInitEngineController() {
 	initMapAveraging();
 #endif /* MODULE_MAP_AVERAGING */
 
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 	initBoostCtrl();
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
+#if EFI_ENGINE_CONTROL
 	initFanControl();
 #endif /* EFI_ENGINE_CONTROL */
 
@@ -328,6 +339,16 @@ bool validateConfig() {
 		firmwareError("Invalid cylinder count: %d", getFiringOrderLength());
 		return false;
 	}
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	if (engineConfiguration->isInjectionEnabled && getFiringOrderLength() > CYLINDER_FUEL_TRIM_COUNT) {
+		firmwareError(
+				ObdCode::CUSTOM_ERR_ASSERT,
+				"Cylinder fuel trim supports %d cylinders, engine requests %d",
+				static_cast<int>(CYLINDER_FUEL_TRIM_COUNT),
+				static_cast<int>(getFiringOrderLength()));
+		return false;
+	}
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	ensureArrayIsAscending("Injector deadtime", engineConfiguration->injector.battLagCorrBins);
 
@@ -377,12 +398,14 @@ bool validateConfig() {
 	ensureArrayIsAscendingOrDefault("Map estimate TPS", config->mapEstimateTpsBins);
 	ensureArrayIsAscendingOrDefault("Map estimate RPM", config->mapEstimateRpmBins);
 
+#ifdef MODULE_LUA
 	ensureArrayIsAscendingOrDefault("Script Curve 1", config->scriptCurve1Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 2", config->scriptCurve2Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 3", config->scriptCurve3Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 4", config->scriptCurve4Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 5", config->scriptCurve5Bins);
 	ensureArrayIsAscendingOrDefault("Script Curve 6", config->scriptCurve6Bins);
+#endif // MODULE_LUA
 
 	// todo: huh? why does this not work on CI?	ensureArrayIsAscendingOrDefault("Dwell Correction Voltage",
 	// engineConfiguration->dwellVoltageCorrVoltBins);
@@ -430,6 +453,7 @@ bool validateConfig() {
 	}
 
 	// Boost
+#ifdef MODULE_BOOST
 	if (engineConfiguration->isBoostControlEnabled) {
 		ensureArrayIsAscending("Boost open loop Y axis", config->boostTpsBins);
 		ensureArrayIsAscending("Boost open loop X axis", config->boostRpmBins);
@@ -439,6 +463,7 @@ bool validateConfig() {
 			ensureArrayIsAscending("Boost closed loop Y axis", config->boostClosedLoopYAxisBins);
 		}
 	}
+#endif // MODULE_BOOST
 
 #if EFI_ANTILAG_SYSTEM
 	// ALS

@@ -35,9 +35,6 @@
 			waveChart.addEvent3((timestamp), (name), (msg));                                                           \
 		}                                                                                                              \
 	}
-#else
-#define addEngineSnifferEvent(n, msg)                                                                                  \
-	{}
 #endif /* EFI_ENGINE_SNIFFER */
 
 #if EFI_ENGINE_SNIFFER
@@ -258,8 +255,4 @@ void addEngineSnifferVvtEvent(efitick_t timestamp, int vvtIndex, bool isRise) {
 	addEngineSnifferEvent(timestamp, vvtName, isRise ? PROTOCOL_ES_UP : PROTOCOL_ES_DOWN);
 }
 
-#else  // EFI_ENGINE_SNIFFER
-void addEngineSnifferCrankEvent(efitick_t, int, int, bool) {}
-void addEngineSnifferVvtEvent(int, bool) {}
-void addEngineSnifferTdcEvent(int) {}
 #endif /* EFI_ENGINE_SNIFFER */

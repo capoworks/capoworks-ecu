@@ -114,7 +114,9 @@
 #include "sd_file_log.h"
 #include "mass_storage_init.h"
 #include "trigger_emulator_algo.h"
+#if EFI_LUA
 #include "rusefi_lua.h"
+#endif // EFI_LUA
 #include "bootloader_updater.h"
 
 #include <setjmp.h>

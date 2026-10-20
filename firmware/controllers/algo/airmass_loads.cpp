@@ -2,9 +2,11 @@
 
 #include "airmass_loads.h"
 #include "closed_loop_fuel.h"
-#include "cylinder_model_fuel_trim.h"
 #include "fuel_math.h"
 #include "lambda_monitor.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 namespace {
 using PackedLoad = decltype(output_channels_s::injectionPhaseLoad);
@@ -23,7 +25,11 @@ bool revisedModel() {
 }
 
 bool cylinderConsumer(AirmassConsumer consumer) {
-	return consumer == AirmassConsumer::IgnitionTrim || consumer == AirmassConsumer::KnockGain;
+	return consumer == AirmassConsumer::IgnitionTrim || consumer == AirmassConsumer::KnockGain
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+		|| consumer == AirmassConsumer::CylinderFuelTrim
+#endif // MODULE_CYLINDER_FUEL_TRIM
+			;
 }
 
 load_override_e selector(AirmassConsumer consumer, size_t index) {
@@ -50,6 +56,10 @@ load_override_e selector(AirmassConsumer consumer, size_t index) {
 			return index < MAX_CYLINDER_COUNT ? config->knockGainLoadSource[index] : AFR_Invalid;
 		case AirmassConsumer::HpfpTarget:
 			return config->hpfpTargetLoadSource;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+		case AirmassConsumer::CylinderFuelTrim:
+			return index < CYLINDER_FUEL_TRIM_COUNT ? config->cylinderFuelTrimLoadSource[index] : AFR_Invalid;
+#endif // MODULE_CYLINDER_FUEL_TRIM
 		default:
 			return AFR_Invalid;
 	}
@@ -110,6 +120,9 @@ AirmassConsumerMask enabledConsumerMask(const AirmassInputs& inputs) {
 	include(AirmassConsumer::HpfpTarget,
 			inputs.Rpm >= 60 && enginePins.hpfpValve.isInitialized() && engineConfiguration->hpfpCamLobes > 0 &&
 					engineConfiguration->hpfpPumpVolume > 0);
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	include(AirmassConsumer::CylinderFuelTrim, engineConfiguration->isInjectionEnabled);
+#endif // MODULE_CYLINDER_FUEL_TRIM
 	return result;
 }
 
@@ -280,7 +293,7 @@ void fillSnapshot(
 
 void publishCursors(const AirmassConsumerLoadCandidate& candidate) {
 	auto& out = engine->outputChannels;
-	for (size_t i = 0; i < static_cast<size_t>(AirmassConsumer::Count); i++) {
+	for (size_t i = 0; i < AIRMASS_PACKED_CONSUMER_COUNT; i++) {
 		const auto consumer = static_cast<AirmassConsumer>(i);
 		const size_t count = cylinderConsumer(consumer) ? MAX_CYLINDER_COUNT : 1;
 		for (size_t cylinder = 0; cylinder < count && cylinder < MAX_CYLINDER_COUNT; cylinder++) {
@@ -362,9 +375,17 @@ void readLegacySource(
 
 AirmassConsumerLoadCandidate prepareAirmassConsumerLoads(const AirmassInputs& inputs, mass_t finalMass) {
 	AirmassConsumerLoadCandidate candidate;
-	if (!inputs.HasPublicationContext || !revisedModel()) {
+	if (!inputs.HasPublicationContext || !revisedModel() || !std::isfinite(inputs.CylinderCount) ||
+		inputs.CylinderCount < 1 || inputs.CylinderCount > MAX_CYLINDER_COUNT ||
+		inputs.CylinderCount != static_cast<float>(static_cast<uint8_t>(inputs.CylinderCount))) {
 		return candidate;
 	}
+
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	if (engineConfiguration->isInjectionEnabled && inputs.CylinderCount > CYLINDER_FUEL_TRIM_COUNT) {
+		return candidate;
+	}
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	CapturedConsumerSelection selection;
 	{
@@ -384,7 +405,7 @@ AirmassConsumerLoadCandidate prepareAirmassConsumerLoads(const AirmassInputs& in
 	const AirmassResolvedLoads loads(inputs, finalMass);
 	fillSnapshot(candidate.Snapshot, inputs, finalMass, loads, selection);
 
-	for (size_t i = 0; i < static_cast<size_t>(AirmassConsumer::Count); i++) {
+	for (size_t i = 0; i < AIRMASS_PACKED_CONSUMER_COUNT; i++) {
 		const auto consumer = static_cast<AirmassConsumer>(i);
 		if (!(candidate.Snapshot.EnabledConsumers & consumerBit(consumer))) {
 			continue;
@@ -459,7 +480,9 @@ void invalidateAirmassConsumerLoadsLocked() {
 	clearAirmassConsumerCursorFields(engine->outputChannels);
 	// A stop, fault or actual configuration invalidation must clear both the
 	// published factors and their model-coordinate cursors on this owner.
-	resetCylinderModelFuelTrim(*engine);
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	resetCylinderFuelTrim(*engine);
+#endif // MODULE_CYLINDER_FUEL_TRIM
 }
 
 void invalidateAirmassConsumerLoads() {

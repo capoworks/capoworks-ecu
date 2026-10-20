@@ -83,7 +83,9 @@ EngineTestHelper::EngineTestHelper(
 	enginePins.reset();
 	enginePins.unregisterPins();
 
+#if EFI_ENGINE_SNIFFER
 	waveChart.init();
+#endif // EFI_ENGINE_SNIFFER
 
 	setCurveValue(config->cltFuelCorrBins, config->cltFuelCorr, CLT_CURVE_SIZE, -40, 1.5);
 	setCurveValue(config->cltFuelCorrBins, config->cltFuelCorr, CLT_CURVE_SIZE, -30, 1.5);

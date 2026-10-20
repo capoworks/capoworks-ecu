@@ -29,7 +29,9 @@
 #include "gitversion.h"
 #include "vvt.h"
 #include "trigger_emulator_algo.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #include "software_knock.h"
 #include "trigger_scope.h"
 #include "init.h"
@@ -209,9 +211,9 @@ void applyNewHardwareSettings() {
 	}
 #endif
 
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 	startBoostPin();
-#endif // EFI_ENGINE_CONTROL
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 #if EFI_EMULATE_POSITION_SENSORS
 	startTriggerEmulatorPins();
 #endif /* EFI_EMULATE_POSITION_SENSORS */

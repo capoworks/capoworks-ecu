@@ -57,9 +57,11 @@ void setTestCrankEngineConfiguration() {
 }
 
 void setTestDcWastegateConfiguration() {
+#ifdef MODULE_BOOST
 	engineConfiguration->isBoostControlEnabled = 1;
-	engineConfiguration->etbFunctions[0] = DC_Wastegate;
 	setTable(config->boostTableOpenLoop, 50);
+#endif // MODULE_BOOST
+	engineConfiguration->etbFunctions[0] = DC_Wastegate;
 	engineConfiguration->tps1_1AdcChannel = EFI_ADC_1; // PA1
 
 	// PWM pin

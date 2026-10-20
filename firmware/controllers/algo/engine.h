@@ -33,7 +33,9 @@
 #include "main_relay.h"
 #include "ac_control.h"
 #include "type_list.h"
+#ifdef MODULE_BOOST
 #include "boost_control.h"
+#endif // MODULE_BOOST
 #include "ignition_controller.h"
 #include "alternator_controller.h"
 #include "harley_acr.h"
@@ -45,6 +47,9 @@
 #include "fuel_schedule.h"
 #include "airmass_injection_state.h"
 #include "airmass_calibration.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 #include "prime_injection.h"
 #include "throttle_model.h"
 #include "lambda_monitor.h"
@@ -222,9 +227,9 @@ public:
 			VvtController3,
 			VvtController4,
 #endif // EFI_VVT_PID
-#if EFI_ENGINE_CONTROL
+#if EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 			BoostController,
-#endif // EFI_ENGINE_CONTROL
+#endif // EFI_ENGINE_CONTROL && defined(MODULE_BOOST)
 			LedBlinkingTask,
 			TpsAccelEnrichment,
 
@@ -348,14 +353,17 @@ public:
 	 */
 	bool isFunctionalTestMode = false;
 
+#if EFI_ENGINE_SNIFFER
 	void resetEngineSnifferIfInTestMode();
+#endif // EFI_ENGINE_SNIFFER
 
 	EngineState engineState;
 	AirmassInjectionState airmassInjectionState;
 	AirmassCalibrationCache airmassCalibration;
-	// Per-calculation model fuel trim publication and its calibration scan cache.
-	CylinderModelFuelTrimState cylinderModelFuelTrim;
-	CylinderTrimCalibrationCache cylinderTrimCalibration;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	// Calibration scan cache for cylinder fuel trim calculations.
+	CylinderFuelTrimCalibrationCache cylinderFuelTrimCalibration;
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	/**
 	 * idle blip is a development tool: alternator PID research for instance have benefited from a repetitive change of

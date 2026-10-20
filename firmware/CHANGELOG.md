@@ -32,18 +32,23 @@ or
 ## Unreleased
 
 ### Breaking Changes
- - Advance the flash data version to `20032` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, per-model 16x16 cylinder fuel trims, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI, recreating former 4x4 fuel-trim values in the new model families.
- - Tune images now carry a static configuration-layout identity for module-aware snapshots. Binary tunes with an incompatible layout are intentionally rejected and defaults are restored; export and re-import values with matching definitions because binary migration is not provided. Default behavior is unchanged until module-selection features are enabled in follow-up PRs.
+ - Advance the flash data version to `20032` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI.
+ - Tune images now carry a static configuration-layout identity for module-aware snapshots. Binary tunes with an incompatible layout are intentionally rejected and defaults are restored; export and re-import values with matching definitions because binary migration is not provided.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
  - MAF trim is split out as its own table, rather than sharing the VE table. Most setups should have this table set to all 100, but if yours isn't, just copy values over from the VE table.
 
 ### Added
- - Add separate per-cylinder Speed Density (MAP kPa/RPM) and Alpha-N (TPS/RPM) model fuel trims with shared axes and neutral defaults.
+ - Add an optional Caponord electronic shock preload controller on CAN2, including preset, position, target, alarm and current telemetry, command service controls, and a default-off `enableShockPreload` runtime setting. The build module is opt-in.
+ - Add an optional EMP coolant pump module with its Caponord J1939 state machine, configuration and fallback tables, telemetry, service controls, after-run power hold, and CAN TX-thread queue. The build module is opt-in and remains disabled at runtime by `enableEmpPump`; selecting it requires the fan module.
+ - Add an optional Engine Sniffer event recorder while preserving the shared RPM guard for the binary tooth logger and verbose trigger logging.
+ - Lua core support is now a board-aware build module, included by default on every board except `hellen128`, with its VM, tune fields, gauges, bench outputs, and digital inputs omitted when the module is not selected.
+ - Add an optional, default-on cylinder fuel trim build module with one 16x16 factor table per configured cylinder, all six selectable load coordinates, shared load/RPM axes, and materialized TunerStudio tables, load-source dialog, gauges, and output channels. Its default capacity is 6 and can be overridden from 1 to 12; explicitly replacing the module profile without `cylinder_fuel_trim` disables it. Enabling it or changing its count changes the persistent layout; no binary tune migration is provided for an incompatible layout.
  - Add an SD + Alpha-N airmass blend authority table with selectable TPS or measured-MAP load axes.
  - Add opt-in full-engine-cycle RPM feedback for closed-loop idle air and ignition timing, with instantaneous fallback until a complete cycle is valid and a `rollingCycleRpm` diagnostic channel. Instantaneous feedback remains the default.
  - Add experimental opt-in ignition cycle-profile conversion and time-budget dwell planning on supported rising-only missing-tooth crank wheels with full cam sync. Time-budget planning requires individual coils, admits each target for one TDC occurrence, and retargets only within causal timing and physical dwell windows. Legacy timing remains the default and fallback; RPM and injection policies are unchanged.
  - Independent full-precision load coordinates for injection phase, ignition trims, staged injection, STFT, lambda protection, knock, trailing spark, IAT correction and HPFP, with per-function selector UI and diagnostic cursors.
- - Support for the Hella OPS+T (6PR 010 378-207) combined digital oil pressure and temperature sensor
+ - Add optional support for the Hella OPS+T (6PR 010 378-207) combined digital oil pressure and temperature sensor.
+ - Add optional support for boost control at build time, including its configuration, tables, telemetry, Lua hooks, and TunerStudio controls. Overboost fuel cut and the generic DC/ETB wastegate path remain available independently.
  - SD card logs are now organized into `YYYY/MM/DD` folders when the real-time clock is set. If the clock is not set, logs are still written to the root of the card with a sequential name.
  - Add an opt-in "Service / Workshop" flood-clear mode that keeps fuel cut through the cranking-to-running transition until the accelerator is released. Roadside remains the default and restores fuel at running RPM; cranking priming now follows driver throttle intent and its flood-clear help reflects the 90% threshold.
  - Scheduler batches can atomically reserve paired output transitions, preventing partially scheduled pulses when the event queue is full or a request is invalid.
@@ -73,6 +78,7 @@ or
  - The embedded compressed INI drive now uses a 16 KiB DEFLATE dictionary, reducing firmware RAM use by 16 KiB.
  - STM32F7 function alignment now uses 4-byte word alignment instead of 16-byte function alignment to reduce inter-function flash padding; timing has not been benchmarked.
  - Firmware CI now runs on master pushes and cancels superseded runs, while hardware CI is manual-dispatch only because it flashes connected ECUs.
+ - Module profiles now omit Hella OPS-T, EMP pump, and shock preload by default on every board, and omit Lua by default only on `hellen128`. Select modules explicitly with `FOME_MODULES`; selecting Lua on `hellen128` is an error, while non-`hellen128` boards retain Lua by default.
  - Cylinder count is now derived automatically from the firing order instead of being a separate setting, so the two can no longer disagree.
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
