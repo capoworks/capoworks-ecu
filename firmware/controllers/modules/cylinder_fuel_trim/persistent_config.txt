@@ -1,0 +1,11 @@
+! One factor table per selected cylinder. All cylinders share the load and RPM axes.
+#define CYLINDER_FUEL_TRIM_SIZE 16
+
+struct cylinder_fuel_trim_s
+	int8_t[CYLINDER_FUEL_TRIM_SIZE x CYLINDER_FUEL_TRIM_SIZE] autoscale table;;"%", 0.2, 0, -25, 25, 1
+end_struct
+
+uint16_t[CYLINDER_FUEL_TRIM_SIZE] autoscale cylinderFuelTrimLoadBins;;"", 0.1, 0, 0, 1000, 1
+uint16_t[CYLINDER_FUEL_TRIM_SIZE] cylinderFuelTrimRpmBins;;"RPM", 1, 0, 0, 18000, 0
+cylinder_fuel_trim_s[CYLINDER_FUEL_TRIM_COUNT iterate] cylinderFuelTrims
+load_override_e[CYLINDER_FUEL_TRIM_COUNT iterate] cylinderFuelTrimLoadSource

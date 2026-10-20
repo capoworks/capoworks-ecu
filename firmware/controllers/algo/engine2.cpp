@@ -12,7 +12,9 @@
 #include "speed_density.h"
 #include "fuel_math.h"
 #include "airmass_loads.h"
-#include "cylinder_model_fuel_trim.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 #include "closed_loop_fuel.h"
 #include "launch_control.h"
 #include "injector_model.h"
@@ -220,13 +222,18 @@ void EngineState::periodicFastCallback() {
 			config->ignTrimLoadBins, nextIgnitionLoad, config->ignTrimRpmBins, rpm);
 
 	const size_t calculationCylinderCount = fuelCapture.CylinderCount;
-	bool fuelPublicationValid =
-			fuelCandidate.Valid && !fuelCandidate.Stale && std::isfinite(cycleFuelMass) && cycleFuelMass >= 0 &&
-			std::isfinite(luaFuelMult) && std::isfinite(luaFuelAdd) && std::isfinite(rpm) &&
-			(rpm > 0 || (!fuelCapture.Standalone && rpm == 0)) &&
-			(!fuelCandidate.ApplyCylinderModelFuelTrim ||
-			 isCylinderModelFuelTrimCandidateValid(fuelCandidate.CylinderFuelTrim, calculationCylinderCount)) &&
-			calculationCylinderCount > 0 && calculationCylinderCount <= MAX_CYLINDER_COUNT;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	const bool applyCylinderFuelTrim =
+			fuelCandidate.ApplyCylinderFuelTrim &&
+			isCylinderFuelTrimCandidateValid(fuelCandidate.CylinderFuelTrim, calculationCylinderCount);
+#endif // MODULE_CYLINDER_FUEL_TRIM
+	bool fuelPublicationValid = fuelCandidate.Valid && !fuelCandidate.Stale && std::isfinite(cycleFuelMass) &&
+								cycleFuelMass >= 0 && std::isfinite(luaFuelMult) && std::isfinite(luaFuelAdd) &&
+								std::isfinite(rpm) && (rpm > 0 || (!fuelCapture.Standalone && rpm == 0)) &&
+								calculationCylinderCount > 0 && calculationCylinderCount <= MAX_CYLINDER_COUNT;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	fuelPublicationValid &= !fuelCandidate.ApplyCylinderFuelTrim || applyCylinderFuelTrim;
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	for (size_t i = 0; i < STFT_BANK_COUNT; i++) {
 		fuelPublicationValid &= std::isfinite(clResult.banks[i]) && clResult.banks[i] >= 0;
@@ -236,8 +243,12 @@ void EngineState::periodicFastCallback() {
 	float cylinderTiming[MAX_CYLINDER_COUNT] = {};
 	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
 		const uint8_t bankIndex = engineConfiguration->cylinderBankSelect[i];
-		const float cylinderTrim =
-				fuelCandidate.ApplyCylinderModelFuelTrim ? fuelCandidate.CylinderFuelTrim.Factor[i] : 1;
+		float cylinderTrim = 1;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+		if (applyCylinderFuelTrim) {
+			cylinderTrim = fuelCandidate.CylinderFuelTrim.Factor[i];
+		}
+#endif // MODULE_CYLINDER_FUEL_TRIM
 		const float bankTrim = bankIndex < STFT_BANK_COUNT ? clResult.banks[bankIndex] : 0;
 		const float unbankedFuel =
 				injectionActive
@@ -319,14 +330,16 @@ void EngineState::periodicFastCallback() {
 		publicationCurrent = isFuelCaptureCurrentLocked(fuelCapture, admission);
 		if (publicationCurrent) {
 			fuelPublicationValid &= calculationCylinderCount == engine->engineState.cylinderCount;
-			if (fuelCandidate.ApplyCylinderModelFuelTrim) {
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+			if (fuelCandidate.ApplyCylinderFuelTrim) {
 				fuelPublicationValid &=
-						isCylinderModelFuelTrimCandidateValid(fuelCandidate.CylinderFuelTrim, calculationCylinderCount);
+						isCylinderFuelTrimCandidateValid(fuelCandidate.CylinderFuelTrim, calculationCylinderCount);
 				if (fuelCandidate.CylinderFuelTrim.CalibrationGeneration != fuelCapture.CalibrationGeneration ||
 					fuelCandidate.CylinderFuelTrim.ConfigurationVersion != fuelCapture.ConfigurationVersion) {
 					publicationCurrent = false;
 				}
 			}
+#endif // MODULE_CYLINDER_FUEL_TRIM
 			if (fuelCapture.Standalone) {
 				const bool loadShapeValid =
 						fuelCandidate.ConsumerLoads.Prepared && fuelCandidate.ConsumerLoads.Snapshot.Valid;
@@ -346,13 +359,15 @@ void EngineState::periodicFastCallback() {
 		}
 		if (publicationCurrent) {
 			if (fuelPublicationValid) {
-				if (fuelCandidate.ApplyCylinderModelFuelTrim) {
-					publishCylinderModelFuelTrim(*engine, fuelCandidate.CylinderFuelTrim);
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+				if (fuelCandidate.ApplyCylinderFuelTrim) {
+					publishCylinderFuelTrim(*engine, fuelCandidate.CylinderFuelTrim);
 				} else {
-					// MAF, Lua, mock and fixed-cranking paths are neutral. A
-					// completed current publication clears any older factors.
-					resetCylinderModelFuelTrim(*engine);
+					// Disabled injection, fixed cranking and non-standalone models
+					// are neutral. Clear any factors from the prior publication.
+					resetCylinderFuelTrim(*engine);
 				}
+#endif // MODULE_CYLINDER_FUEL_TRIM
 				airmassCalculationValid = true;
 				baseFuel = fuelCandidate.BaseFuelMass;
 				tpsAccelEnrich = fuelCandidate.TpsAccelEnrich;
@@ -432,7 +447,9 @@ void EngineState::periodicFastCallback() {
 				for (auto& cylinder : engine->cylinders) {
 					cylinder.setInjectionMass(0);
 				}
-				resetCylinderModelFuelTrim(*engine);
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+				resetCylinderFuelTrim(*engine);
+#endif // MODULE_CYLINDER_FUEL_TRIM
 				if (fuelCapture.Standalone) {
 					invalidateAirmassConsumerLoadsLocked();
 				}
