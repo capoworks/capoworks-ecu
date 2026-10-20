@@ -145,6 +145,8 @@ Cylinder fuel trim does not persist a factor cache. Published telemetry is quant
 
 These are compile-time defaults and placements, not calculated free-RAM margins. Board-specific `LUA_USER_HEAP` overrides can change the heap figures.
 
+[Build resource evidence and calibration](build-resources.md) describes how CI measures the actual ELF, identifies reusable evidence, and distinguishes verified fit from estimates.
+
 - The default Lua heap is 20,000 bytes on F407, 60,000 bytes on non-Ethernet F429, and 25,000 bytes on Ethernet F429. The F7 and H7 defaults remain 200,000 and 100,000 bytes respectively. The F407 reduction from 30,000 to 20,000 bytes lowers script capacity. A 32-bit simulator check with a 572-byte script reported 14,085 bytes used across startup, execute, and reload; that is not a hardware or real-workload guarantee.
 - On all F4 boards, CAN and USB background objects use ordinary SRAM, and the Lua CAN filter table remains one static 48-entry array there (768 bytes at 16 bytes per entry). The main loop remains in CCM on F407. Non-Ethernet F429 builds move it to ordinary SRAM; Ethernet F429 builds retain CCM. The main-loop stack remains 5,120 bytes in every case.
 - Compressed embedded INI mass storage uses one shared 16 KiB DEFLATE dictionary. A static assertion enforces that the firmware dictionary is at least as large as the generated image's declared window.

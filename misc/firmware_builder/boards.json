@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "boards": [
+    {
+      "id": "hellen72",
+      "board_dir": "firmware/config/boards/hellen/hellen72",
+      "compile_script": "compile_hellen72.sh",
+      "ini_file": "fome_hellen72.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "hellen-nb1",
+      "board_dir": "firmware/config/boards/hellen/hellen-nb1",
+      "compile_script": "compile_hellen-nb1.sh",
+      "ini_file": "fome_hellen-nb1.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "hellenNA8_96",
+      "board_dir": "firmware/config/boards/hellen/hellenNA8_96",
+      "compile_script": "compile_hellenNA8_96.sh",
+      "ini_file": "fome_hellenNA8_96.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "hellenNA6",
+      "board_dir": "firmware/config/boards/hellen/hellen64_miataNA6_94",
+      "compile_script": "compile_hellenNA6.sh",
+      "ini_file": "fome_hellenNA6.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "hellen128",
+      "board_dir": "firmware/config/boards/hellen/hellen128",
+      "compile_script": "compile_hellen128.sh",
+      "ini_file": "fome_hellen128.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "mre_f4",
+      "board_dir": "firmware/config/boards/microrusefi",
+      "compile_script": "compile_mre_f4.sh",
+      "ini_file": "fome_mre_f4.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "mre_f7",
+      "board_dir": "firmware/config/boards/microrusefi",
+      "compile_script": "compile_mre_f7.sh",
+      "ini_file": "fome_mre_f7.ini",
+      "cpu": "ARCH_STM32F7",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "proteus_f4",
+      "board_dir": "firmware/config/boards/proteus",
+      "compile_script": "compile_proteus_f4.sh",
+      "ini_file": "fome_proteus_f4.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": true
+      }
+    },
+    {
+      "id": "proteus_f7",
+      "board_dir": "firmware/config/boards/proteus",
+      "compile_script": "compile_proteus_f7.sh",
+      "ini_file": "fome_proteus_f7.ini",
+      "cpu": "ARCH_STM32F7",
+      "capabilities": {
+        "can2": true
+      }
+    },
+    {
+      "id": "proteus_h7",
+      "board_dir": "firmware/config/boards/proteus",
+      "compile_script": "compile_proteus_h7.sh",
+      "ini_file": "fome_proteus_h7.ini",
+      "cpu": "ARCH_STM32H7",
+      "capabilities": {
+        "can2": true
+      }
+    },
+    {
+      "id": "stm32f429_nucleo",
+      "board_dir": "firmware/config/boards/nucleo_f429",
+      "compile_script": "compile_stm32f429_nucleo.sh",
+      "ini_file": "fome_stm32f429_nucleo.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "f407-discovery",
+      "board_dir": "firmware/config/boards/f407-discovery",
+      "compile_script": "compile_f407-discovery.sh",
+      "ini_file": "fome_f407-discovery.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": false
+      }
+    },
+    {
+      "id": "atlas",
+      "board_dir": "firmware/config/boards/atlas",
+      "compile_script": "compile_atlas.sh",
+      "ini_file": "fome_atlas.ini",
+      "cpu": "ARCH_STM32H7",
+      "capabilities": {
+        "can2": true
+      }
+    },
+    {
+      "id": "core8",
+      "board_dir": "firmware/config/boards/core8",
+      "compile_script": "compile_core8.sh",
+      "ini_file": "fome_core8.ini",
+      "cpu": "ARCH_STM32F4",
+      "capabilities": {
+        "can2": true
+      }
+    }
+  ]
+}
