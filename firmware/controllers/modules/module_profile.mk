@@ -7,7 +7,7 @@ MODULE_PROFILE_TOOL := $(MODULE_ROOT)/module_profile.sh
 
 # These modules are available for explicit selection but are not part of the
 # default profile on any board.
-FOME_MODULES_DEFAULT := $(filter-out hella_opst emp_pump shock_preload cylinder_fuel_trim,$(FOME_MODULE_CATALOG))
+FOME_MODULES_DEFAULT := $(filter-out hella_opst emp_pump shock_preload,$(FOME_MODULE_CATALOG))
 
 # An omitted selection uses the default profile, minus any modules the board
 # declares unsupported. An explicitly empty selection remains empty.
@@ -34,9 +34,7 @@ endif
 # Cylinder fuel trim owns a fixed-capacity subset of MAX_CYLINDER_COUNT. The
 # public build parameter is meaningful only while its module is selected.
 ifneq ($(filter cylinder_fuel_trim,$(FOME_MODULES_RESOLVED)),)
-  ifeq ($(origin FOME_CYLINDER_TRIM_COUNT),undefined)
-    $(error FOME_CYLINDER_TRIM_COUNT is required when FOME_MODULES includes cylinder_fuel_trim)
-  endif
+  FOME_CYLINDER_TRIM_COUNT ?= 6
   ifneq ($(words $(strip $(FOME_CYLINDER_TRIM_COUNT))),1)
     $(error FOME_CYLINDER_TRIM_COUNT must be an integer from 1 to 12 when cylinder_fuel_trim is selected, got '$(FOME_CYLINDER_TRIM_COUNT)')
   endif

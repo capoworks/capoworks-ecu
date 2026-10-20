@@ -31,7 +31,7 @@ public class ModuleProfileTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
-    public void cylinderFuelTrimDefaultsOffAndCanonicalizesToZero() throws Exception {
+    public void cylinderFuelTrimDefaultsOnWithCapacitySixAndIniFragment() throws Exception {
         Path profileDirectory = temporaryFolder.newFolder("default").toPath();
         Path profile = profileDirectory.resolve("module_profile.txt");
         Path definitions = profileDirectory.resolve("module_profile_defines.h");
@@ -41,25 +41,47 @@ public class ModuleProfileTest {
 
         List<String> modules = Arrays.asList(profileValue(profile, "modules").split("\\s+"));
         assertTrue(modules.contains("fan"));
-        assertFalse(modules.contains("cylinder_fuel_trim"));
-        assertEquals("0", profileValue(profile, "cylinder_fuel_trim_count"));
-        assertTrue(read(definitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 0"));
-        assertFalse(read(profile).contains("cylinder_fuel_trim.ini"));
+        assertTrue(modules.contains("cylinder_fuel_trim"));
+        assertEquals("6", profileValue(profile, "cylinder_fuel_trim_count"));
+        assertTrue(read(definitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 6"));
 
-        // A stale parameter is ignored when the optional module is not selected.
+        Path generatedIni = profileDirectory.resolve("cylinder_fuel_trim.ini");
+        assertTrue(read(profile).contains("ini " + generatedIni + "\n"));
+        assertTrue(Files.isRegularFile(generatedIni));
+        assertTrue(read(generatedIni).contains("cylinderFuelTrimTbl6"));
+        assertFalse(read(generatedIni).contains("cylinderFuelTrimTbl7"));
+    }
+
+    @Test
+    public void explicitProfileWithoutCylinderFuelTrimCanonicalizesToZero() throws Exception {
+        // FOME_MODULES replaces the default profile, so stale values are ignored.
         Path offDirectory = temporaryFolder.newFolder("off-with-value").toPath();
         Path offProfile = offDirectory.resolve("module_profile.txt");
         Path offDefinitions = offDirectory.resolve("module_profile_defines.h");
         ProcessResult offResult = runProfileMake(offProfile, "fan", "13");
         assertEquals(offResult.output, 0, offResult.exitCode);
+        assertFalse(profileValue(offProfile, "modules").contains("cylinder_fuel_trim"));
         assertEquals("0", profileValue(offProfile, "cylinder_fuel_trim_count"));
         assertTrue(read(offDefinitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 0"));
         assertFalse(read(offProfile).contains("cylinder_fuel_trim.ini"));
     }
 
     @Test
-    public void selectedCylinderFuelTrimAcceptsSupportedCounts() throws Exception {
-        for (String count : Arrays.asList("1", "4", "12")) {
+    public void selectedCylinderFuelTrimDefaultsToCapacitySix() throws Exception {
+        Path profileDirectory = temporaryFolder.newFolder("selected-default").toPath();
+        Path profile = profileDirectory.resolve("module_profile.txt");
+        Path definitions = profileDirectory.resolve("module_profile_defines.h");
+
+        ProcessResult result = runProfileMake(profile, "fan cylinder_fuel_trim", null);
+        assertEquals(result.output, 0, result.exitCode);
+        assertTrue(profileValue(profile, "modules").contains("cylinder_fuel_trim"));
+        assertEquals("6", profileValue(profile, "cylinder_fuel_trim_count"));
+        assertTrue(read(definitions).contains("#define CYLINDER_FUEL_TRIM_COUNT 6"));
+    }
+
+    @Test
+    public void selectedCylinderFuelTrimAcceptsExplicitSupportedCounts() throws Exception {
+        for (String count : Arrays.asList("1", "4", "6", "12")) {
             Path profileDirectory = temporaryFolder.newFolder("selected-" + count).toPath();
             Path profile = profileDirectory.resolve("module_profile.txt");
             Path definitions = profileDirectory.resolve("module_profile_defines.h");
@@ -73,8 +95,8 @@ public class ModuleProfileTest {
     }
 
     @Test
-    public void selectedCylinderFuelTrimRejectsInvalidOrMissingCount() throws Exception {
-        assertRejected(null, "required");
+    public void selectedCylinderFuelTrimRejectsInvalidCount() throws Exception {
+        assertRejected("", "integer from 1 to 12");
         assertRejected("0", "integer from 1 to 12");
         assertRejected("13", "integer from 1 to 12");
         assertRejected("4.5", "integer from 1 to 12");
@@ -167,7 +189,7 @@ public class ModuleProfileTest {
         assertEquals("6", profileValue(profile, "cylinder_fuel_trim_count"));
         assertTrue(read(generatedIni).contains("cylinderFuelTrimTbl6"));
         assertFalse(read(generatedIni).contains("cylinderFuelTrimTbl7"));
-        assertTrue(profileValue(profile, "ini").endsWith("cylinder_fuel_trim.ini"));
+        assertTrue(read(profile).contains("ini " + generatedIni + "\n"));
         assertTrue("profile count change did not invalidate stale object", Files.getLastModifiedTime(object).toMillis() > 1000);
 
         ProcessResult dryRun = runDependencyMake(

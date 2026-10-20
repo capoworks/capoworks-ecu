@@ -15,10 +15,10 @@ Set `FOME_MODULES` to a whitespace-separated list of these exact, lowercase toke
 An omitted value selects:
 
 ```text
-fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_sniffer lua
+fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_sniffer lua cylinder_fuel_trim
 ```
 
-On `hellen128`, `lua` is removed from that default because this board does not support Lua. Non-`hellen128` boards retain `lua` in their default profile. `hella_opst`, `emp_pump`, `shock_preload`, and `cylinder_fuel_trim` are omitted from the default profile on every board, but remain available for explicit selection. The catalog above lists every token recognized by the resolver; it is not the default profile.
+On `hellen128`, `lua` is removed from that default because this board does not support Lua. Non-`hellen128` boards retain `lua` in their default profile. `cylinder_fuel_trim` is included with a default capacity of 6 on every board. `hella_opst`, `emp_pump`, and `shock_preload` are omitted from the default profile on every board, but remain available for explicit selection. The catalog above lists every token recognized by the resolver; it is not the default profile.
 
 Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in every supported profile. Build availability and default inclusion are:
 
@@ -30,21 +30,20 @@ Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in eve
 | Lua | `lua` | Yes on non-`hellen128` boards |
 | EMP coolant pump | `emp_pump` (requires `fan`) | No |
 | Shock preload | `shock_preload` (CAN2, requires CAN read and write) | No |
-| Cylinder fuel trim | `cylinder_fuel_trim` | No |
+| Cylinder fuel trim | `cylinder_fuel_trim` | Yes, with capacity 6 |
 
-Select `cylinder_fuel_trim` together with the required public capacity, for example:
+An explicitly selected profile that includes `cylinder_fuel_trim` uses a capacity of 6 unless overridden:
 
 ```bash
 FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging cylinder_fuel_trim" \
-FOME_CYLINDER_TRIM_COUNT=6 \
 bash compile_core8.sh
 ```
 
-`FOME_CYLINDER_TRIM_COUNT` must be an integer from 1 through 12 when the module is selected. It is a dedicated cylinder-trim capacity, not an override of the global `MAX_CYLINDER_COUNT`. Omitting the module records a count of zero and generates no cylinder-trim storage, output channels, or TunerStudio UI.
+`FOME_CYLINDER_TRIM_COUNT` is optional when the module is selected and defaults to 6. An explicit command-line or environment value must be an integer from 1 through 12; values such as 0, 13, or an empty value fail during Make configuration. The count sets the number of cylinder-trim tables. Whenever injection is enabled, it must cover the engine's configured cylinder count: an 8- or 12-cylinder engine must explicitly set `FOME_CYLINDER_TRIM_COUNT` to at least its cylinder count, or omit `cylinder_fuel_trim` from `FOME_MODULES`. The default count of 6 is only the cylinder-trim table capacity; it does not reduce or otherwise override the global `MAX_CYLINDER_COUNT` of 12. Because `FOME_MODULES` replaces the default profile, omitting `cylinder_fuel_trim` disables the module, records a count of zero even if a stale `FOME_CYLINDER_TRIM_COUNT` value is present, and generates no cylinder-trim storage, output channels, or TunerStudio UI.
 
 Other legacy modules have not been newly audited for removal. Explicitly selecting `lua` on `hellen128` is an error rather than a silent omission. `emp_pump` reads both fan-controller states for ram-air relief, so selecting it without `fan` is rejected during Make configuration.
 
-To select the full 13-token catalog on Core8, which is not `hellen128`, spell out the complete profile and required cylinder-trim capacity:
+To select the full 13-token catalog on Core8, which is not `hellen128`, spell out the complete profile. This example also overrides the cylinder-trim capacity to 12:
 
 ```bash
 cd firmware/config/boards/core8
