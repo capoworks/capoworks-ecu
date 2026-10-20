@@ -7,7 +7,7 @@ Firmware modules are selected at compile time. `firmware/controllers/modules/mod
 The canonical catalog is:
 
 ```text
-fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload
+fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim
 ```
 
 Set `FOME_MODULES` to a whitespace-separated list of these exact, lowercase tokens. It replaces the default profile rather than adding to it. Unknown tokens fail during Make configuration, and selections are deduplicated and resolved in catalog order. An explicitly empty value remains empty. The existing `NO_MAP_AVERAGING` switch still removes `map_averaging`.
@@ -18,7 +18,7 @@ An omitted value selects:
 fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_sniffer lua
 ```
 
-On `hellen128`, `lua` is removed from that default because this board does not support Lua. Non-`hellen128` boards retain `lua` in their default profile. The three modules `hella_opst`, `emp_pump`, and `shock_preload` are omitted from the default profile on every board, but remain available for explicit selection. The catalog above lists every token recognized by the resolver; it is not the default profile.
+On `hellen128`, `lua` is removed from that default because this board does not support Lua. Non-`hellen128` boards retain `lua` in their default profile. `hella_opst`, `emp_pump`, `shock_preload`, and `cylinder_fuel_trim` are omitted from the default profile on every board, but remain available for explicit selection. The catalog above lists every token recognized by the resolver; it is not the default profile.
 
 Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in every supported profile. Build availability and default inclusion are:
 
@@ -30,17 +30,30 @@ Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in eve
 | Lua | `lua` | Yes on non-`hellen128` boards |
 | EMP coolant pump | `emp_pump` (requires `fan`) | No |
 | Shock preload | `shock_preload` (CAN2, requires CAN read and write) | No |
+| Cylinder fuel trim | `cylinder_fuel_trim` | No |
+
+Select `cylinder_fuel_trim` together with the required public capacity, for example:
+
+```bash
+FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging cylinder_fuel_trim" \
+FOME_CYLINDER_TRIM_COUNT=6 \
+bash compile_core8.sh
+```
+
+`FOME_CYLINDER_TRIM_COUNT` must be an integer from 1 through 12 when the module is selected. It is a dedicated cylinder-trim capacity, not an override of the global `MAX_CYLINDER_COUNT`. Omitting the module records a count of zero and generates no cylinder-trim storage, output channels, or TunerStudio UI.
 
 Other legacy modules have not been newly audited for removal. Explicitly selecting `lua` on `hellen128` is an error rather than a silent omission. `emp_pump` reads both fan-controller states for ram-air relief, so selecting it without `fan` is rejected during Make configuration.
 
-To select all currently default-omitted modules on Core8, which is not `hellen128`, spell out the complete profile:
+To select the full 13-token catalog on Core8, which is not `hellen128`, spell out the complete profile and required cylinder-trim capacity:
 
 ```bash
 cd firmware/config/boards/core8
-FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer emp_pump shock_preload" bash compile_core8.sh
+FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim" \
+FOME_CYLINDER_TRIM_COUNT=12 \
+bash compile_core8.sh
 ```
 
-Adding `lua` to that list selects the full catalog on Core8. A base-only Core8 profile is:
+A base-only Core8 profile is:
 
 ```bash
 cd firmware/config/boards/core8
@@ -81,6 +94,10 @@ The EMP pump owns its CAN protocol, mailbox and queue state machine, configurati
 
 The Shock preload module owns its CAN2 protocol, runtime state, configuration, output channels, TunerStudio contexts, and unit test. Shared code retains only guarded integration seams for status polling on the existing CAN TX thread, telemetry assignments, and TunerStudio service-command dispatch. It uses standard IDs `0x720`-`0x722` on CAN2 and must be explicitly selected at build time; it is disabled at runtime by zero-initialized `enableShockPreload`. CAN read and write must also be enabled.
 
+Cylinder fuel trim owns one persistent 16x16 factor table per configured cylinder, two shared axis arrays, per-cylinder load-source selectors, output channels, and a materialized TunerStudio fragment. The module does not create separate Speed Density and Alpha-N tables: each cylinder selects one of all six load coordinates (`Model default`, measured MAP, TPS, accelerator pedal, cylinder filling, or effective MAP), and the table remains a single factor table. Because every cylinder shares the same load-bin and RPM-bin arrays, a profile whose cylinders use sources with different units must use common breakpoints appropriate for the selected mix; changing a source does not retune those breakpoints.
+The shared load axis preserves fractional TPS breakpoints at 0.1 resolution without additional storage.
+Cylinder fuel trim does not persist a factor cache. Published telemetry is quantized to 0.01 percent trim and 0.1 load for binary transport, while the captured load and factor used by control retain full precision.
+
 `integration/LiveData.yaml` owns live-data usage declarations and marks module-specific usages with `module:`. YAML order fixes `LDS_<usage>` IDs, so an unselected module keeps its declaration and IDs while its fragment and packed output usage disappear. Do not reorder or duplicate usages just to change a profile.
 
 ## Resource budgets
@@ -98,7 +115,11 @@ The selected profile drives both live-data generation and `gen_config_board.sh`.
 
 Generated headers, configuration structures, and `firmware/tunerstudio/generated/*.ini` files are build products and are not committed. Treat a generated INI and its firmware as one matching pair.
 
+Cylinder fuel trim renders its exact 1-to-N TunerStudio rows into `firmware/generated/cylinder_fuel_trim.ini`. This is a small fixed renderer for the module's single repeated row pattern, not a general template language. The profile is refreshed before generation, so changing the count or disabling the module updates the generated fragment and configuration stamp on the first Make invocation without requiring a clean build.
+
 The flash header identifies a snapshot by version, container size, and a static configuration-layout ID. A snapshot with an incompatible layout is rejected even when its byte size is unchanged, and defaults are restored. There is no binary migration or retention of values from inactive modules; use the matching generated INI to export and manually re-import values after an intentional layout change.
+
+Enabling, disabling, or changing the cylinder-trim count changes the persistent layout. No tune migration is provided for an incompatible cylinder-trim layout; the firmware starts from its defined defaults and the matching generated INI must be used to transfer values manually.
 
 ## Retained shared boundaries
 

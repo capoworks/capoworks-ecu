@@ -11,7 +11,9 @@
 #include "airmass_injection_state.h"
 #include "airmass_loads.h"
 #include "blended_airmass.h"
-#include "cylinder_model_fuel_trim.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 #include "rusefi_types.h"
 
 template <unsigned TRowCount, unsigned TColumnCount>
@@ -37,13 +39,17 @@ struct FuelPublicationCandidate {
 	AirmassDiagnostics Diagnostics;
 	BlendedAirmassDiagnostics BlendedDiagnostics;
 	AirmassConsumerLoadCandidate ConsumerLoads;
-	CylinderModelFuelTrimCandidate CylinderFuelTrim;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	CylinderFuelTrimCandidate CylinderFuelTrim;
+#endif // MODULE_CYLINDER_FUEL_TRIM
 	AirmassInjectionFault Fault = AirmassInjectionFault::Result;
 	bool Valid = false;
 	bool Stale = false;
 	bool Degraded = false;
 	bool HasBlendedDiagnostics = false;
-	bool ApplyCylinderModelFuelTrim = false;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	bool ApplyCylinderFuelTrim = false;
+#endif // MODULE_CYLINDER_FUEL_TRIM
 	bool FuelCut = false;
 	uint8_t VeAnalyzeEndpoint = 0;
 

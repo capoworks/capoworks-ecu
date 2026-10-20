@@ -326,12 +326,5 @@ struct_no_prefix output_channels_s
 	float blendedAuthorityLoad;Air blend: authority Y coordinate;"", 1, 0, 0, 0, 2
 	uint8_t blendedVeAnalyzeEndpoint;Air blend: qualified analyze endpoint;"code", 1, 0, 0, 2, 0
 
-	! Per-cylinder model fuel trim telemetry (16x16 SD/Alpha-N families). Appended after the existing
-	! channels so existing output-channel offsets are unchanged, though the overall output layout grows.
-	! The runtime resets inactive coordinates to 0 and clears the branch bits.
-	float sdCylinderFuelTrimLoad;Fuel trim: SD model load;"kPa", 1, 0, 0, 0, 2
-	float alphaNCylinderFuelTrimLoad;Fuel trim: Alpha-N model load;"% TPS", 1, 0, 0, 0, 2
-	float[12 iterate] cylinderModelFuelTrim;Fuel trim: effective per-cylinder percent;"%", 1, 0, 0, 0, 2
-	uint8_t cylinderModelFuelTrimBranches;Fuel trim: active model branch;"bits", 1, 0, 0, 0, 0
 ! MODULE_OUTPUTS
 end_struct

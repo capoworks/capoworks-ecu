@@ -76,3 +76,89 @@ jobs:
       if: ${{ matrix.os != 'macos-latest' }}
       working-directory: ./unit_tests/
       run: valgrind --error-exitcode=1 --exit-on-first-error=yes --leak-check=no --show-error-list=yes build/fome_test
+
+  cylinder-fuel-trim:
+    name: Cylinder Fuel Trim (${{ matrix.trim_count }} cylinders)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        trim_count: [4, 12]
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+
+    - name: Install required software
+      working-directory: ./.github/workflows/
+      run: |
+        sudo ./add-ubuntu-latest-apt-mirrors.sh
+        sudo apt-get install mtools zip dosfstools
+
+    - name: Build native tests with explicit module profile
+      working-directory: ./unit_tests/
+      run: >
+        make -j4 COVERAGE=yes
+        FOME_MODULES='fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_sniffer lua cylinder_fuel_trim'
+        FOME_CYLINDER_TRIM_COUNT=${{ matrix.trim_count }}
+
+    - name: Run full native suite (12-cylinder profile)
+      if: ${{ matrix.trim_count == 12 }}
+      working-directory: ./unit_tests/
+      run: build/fome_test
+
+    - name: Run focused native suite (4-cylinder profile)
+      if: ${{ matrix.trim_count == 4 }}
+      working-directory: ./unit_tests/
+      run: build/fome_test --gtest_filter='CylinderFuelTrim.*:CylinderFuelTrimIntegration.*'
+
+  cylinder-fuel-trim-arm:
+    name: Cylinder Fuel Trim ARM (12 cylinders)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+        persist-credentials: false
+
+    - uses: actions/setup-java@v6.0.1
+      with:
+        distribution: zulu
+        java-version: '21'
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential gcc-multilib g++-multilib mtools dosfstools zip xxd rsync
+
+    - name: Build and verify Core8 max module profile
+      env:
+        FOME_MODULES: 'fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim'
+        FOME_CYLINDER_TRIM_COUNT: '12'
+        JOBS: '4'
+      run: bash misc/ci/capoworks-checks.sh core8
+
+    - name: Upload check logs
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: cylinder-fuel-trim-arm-checks
+        path: build/capoworks-checks/core8/
+        if-no-files-found: warn
+        retention-days: 14
+
+    - name: Upload Core8 firmware and INI
+      if: ${{ success() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: cylinder-fuel-trim-arm-firmware
+        path: |
+          firmware/deliver/fome.bin
+          firmware/deliver/fome_update.srec
+          firmware/deliver/fome_bl.srec
+          firmware/tunerstudio/generated/fome_core8.ini
+        if-no-files-found: error
+        retention-days: 14

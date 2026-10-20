@@ -17,6 +17,7 @@ if [ -z "$PROFILE_FILE" ]; then
 fi
 
 "$PROFILE_READER" check "$PROFILE_FILE"
+PROFILE_DEFINITIONS=$("$PROFILE_READER" definitions "$PROFILE_FILE")
 
 SELECTED_MODULES=$("$PROFILE_READER" read "$PROFILE_FILE" modules)
 
@@ -40,6 +41,7 @@ java -DSystemOut.name=logs/gen_live_documentation \
  com.rusefi.ldmp.LiveDataProcessor integration/LiveData.yaml \
  -makefileDep .dep/fome_live_data.d \
  -modules "$SELECTED_MODULES" \
+ -prepend "$PROFILE_DEFINITIONS" \
  ${FRAGMENT_ARGS[@]+"${FRAGMENT_ARGS[@]}"} \
  ${STAMP_ARGS[@]+"${STAMP_ARGS[@]}"}
 
