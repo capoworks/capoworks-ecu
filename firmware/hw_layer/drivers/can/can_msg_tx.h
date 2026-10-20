@@ -9,6 +9,9 @@
 
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+
 #include "can.h"
 
 /**
@@ -115,6 +118,27 @@ void transmitStruct(uint32_t id, bool isExtended, CanBusIndex canChannel) {
 }
 
 struct ICanTransmitMock {
+	// New frame-aware hook.  The legacy onTx hook remains the default so the
+	// many existing unit-test mocks stay source compatible.  New CAN protocol
+	// tests can verify 29-bit identifiers, IDE and bus selection.
+	virtual void onTxFrame(
+			uint32_t id,
+			uint8_t dlc,
+			bool isExtended,
+			CanBusIndex bus,
+			uint8_t d0,
+			uint8_t d1,
+			uint8_t d2,
+			uint8_t d3,
+			uint8_t d4,
+			uint8_t d5,
+			uint8_t d6,
+			uint8_t d7) {
+		(void)isExtended;
+		(void)bus;
+		onTx(id, dlc, d0, d1, d2, d3, d4, d5, d6, d7);
+	}
+
 	virtual void
 	onTx(uint32_t id,
 		 uint8_t dlc,

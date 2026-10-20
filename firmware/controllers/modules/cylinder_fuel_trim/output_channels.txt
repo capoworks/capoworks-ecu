@@ -1,0 +1,2 @@
+int16_t[CYLINDER_FUEL_TRIM_COUNT iterate] autoscale cylinderFuelTrim;Fuel trim: per-cylinder multiplier deviation;"%", 0.01, 0, -25, 25, 2
+int16_t[CYLINDER_FUEL_TRIM_COUNT iterate] autoscale cylinderFuelTrimLoad;Fuel trim: per-cylinder load coordinate;"", 0.1, 0, 0, 1000, 1

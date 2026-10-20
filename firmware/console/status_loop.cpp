@@ -350,6 +350,52 @@ static void updateRawSensors() {
 	engine->outputChannels.luaGauges[7] = Sensor::getOrZero(SensorType::LuaGauge8);
 #endif // MODULE_LUA
 
+#ifdef MODULE_SHOCK_PRELOAD
+	auto& shockPreload = engine->module<ShockPreload>();
+	engine->outputChannels.shockPreloadOnline = shockPreload->isOnline();
+	engine->outputChannels.shockPreloadAtPreset = shockPreload->isAtSavedPreset();
+	engine->outputChannels.shockPreloadPreset0Active = shockPreload->isPresetActive(0);
+	engine->outputChannels.shockPreloadPreset1Active = shockPreload->isPresetActive(1);
+	engine->outputChannels.shockPreloadPreset2Active = shockPreload->isPresetActive(2);
+	engine->outputChannels.shockPreloadPreset3Active = shockPreload->isPresetActive(3);
+	engine->outputChannels.shockPreloadPreset4Active = shockPreload->isPresetActive(4);
+	engine->outputChannels.shockPreloadPosition = shockPreload->getPosition();
+	engine->outputChannels.shockPreloadTarget = shockPreload->getControllerTarget();
+	engine->outputChannels.shockPreloadState = shockPreload->getState();
+	engine->outputChannels.shockPreloadAlarms = shockPreload->getAlarms();
+	engine->outputChannels.shockPreloadCurrent = shockPreload->getCurrent();
+	engine->outputChannels.shockPreloadPreset = shockPreload->getSelectedPreset();
+#endif
+
+#ifdef MODULE_EMP_PUMP
+	const auto empPumpStatus = engine->module<EmpPump>()->getStatus();
+	engine->outputChannels.empPumpState = static_cast<uint8_t>(empPumpStatus.state);
+	engine->outputChannels.empPumpThermalState = static_cast<uint8_t>(empPumpStatus.thermalState);
+	engine->outputChannels.empPumpFaults = empPumpStatus.faults;
+	engine->outputChannels.empPumpCapabilities = empPumpStatus.capabilities;
+	engine->outputChannels.empPumpTargetRpm = empPumpStatus.targetRpm;
+	engine->outputChannels.empPumpActualRpm = empPumpStatus.actualRpm;
+	engine->outputChannels.empPumpActualPercent = empPumpStatus.actualPercentRaw;
+	engine->outputChannels.empPumpControllerStatus = empPumpStatus.controllerStatus;
+	engine->outputChannels.empPumpStatusSummary = empPumpStatus.statusSummary;
+	engine->outputChannels.empPumpHvilState = empPumpStatus.hvilState;
+	engine->outputChannels.empPumpVoltageRaw = empPumpStatus.voltageRaw;
+	engine->outputChannels.empPumpCurrentRaw = empPumpStatus.currentRaw;
+	engine->outputChannels.empPumpPowerWatts = empPumpStatus.powerWatts;
+	engine->outputChannels.empPumpStatusAgeMs = empPumpStatus.mainStatusAgeMs;
+	engine->outputChannels.empPumpAfterRunRemaining = empPumpStatus.afterRunRemainingSeconds;
+	engine->outputChannels.empPumpLastControl = empPumpStatus.lastCommandControl;
+	engine->outputChannels.empPumpControlFlags = empPumpStatus.controlFlags;
+	engine->outputChannels.empPumpFilteredIat = empPumpStatus.filteredIat;
+	engine->outputChannels.empPumpTemperatureError = empPumpStatus.temperatureError;
+	engine->outputChannels.empPumpCoolantSlope = empPumpStatus.coolantSlopePerMinute;
+	engine->outputChannels.empPumpMinimumFlow = empPumpStatus.minimumFlowRpm;
+	engine->outputChannels.empPumpFeedForward = empPumpStatus.feedForwardRpm;
+	engine->outputChannels.empPumpPiCorrection = empPumpStatus.piCorrectionRpm;
+	engine->outputChannels.empPumpCoolingDemand = empPumpStatus.coolingDemandRaw;
+	engine->outputChannels.empPumpSaturationSeconds = empPumpStatus.saturationSeconds;
+#endif
+
 	for (size_t i = 0; i < efi::size(engine->outputChannels.rawAnalogInput); i++) {
 		engine->outputChannels.rawAnalogInput[i] =
 				Sensor::getRaw(static_cast<SensorType>(static_cast<size_t>(SensorType::AuxAnalog1) + i));

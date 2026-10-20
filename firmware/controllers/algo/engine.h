@@ -47,6 +47,9 @@
 #include "fuel_schedule.h"
 #include "airmass_injection_state.h"
 #include "airmass_calibration.h"
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+#include "cylinder_fuel_trim.h"
+#endif // MODULE_CYLINDER_FUEL_TRIM
 #include "prime_injection.h"
 #include "throttle_model.h"
 #include "lambda_monitor.h"
@@ -357,9 +360,10 @@ public:
 	EngineState engineState;
 	AirmassInjectionState airmassInjectionState;
 	AirmassCalibrationCache airmassCalibration;
-	// Per-calculation model fuel trim publication and its calibration scan cache.
-	CylinderModelFuelTrimState cylinderModelFuelTrim;
-	CylinderTrimCalibrationCache cylinderTrimCalibration;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+	// Calibration scan cache for cylinder fuel trim calculations.
+	CylinderFuelTrimCalibrationCache cylinderFuelTrimCalibration;
+#endif // MODULE_CYLINDER_FUEL_TRIM
 
 	/**
 	 * idle blip is a development tool: alternator PID research for instance have benefited from a repetitive change of
