@@ -178,6 +178,17 @@ jobs:
       with:
         submodules: true
 
+    - name: Configure ARM binutils
+      run: |
+        toolchain_dir="$GITHUB_WORKSPACE/firmware/ext/build-tools/arm-gnu-toolchain-11.3.rel1-x86_64-arm-none-eabi/bin"
+        binutils_dir="$GITHUB_WORKSPACE/build/capoworks-tools"
+        mkdir -p "$binutils_dir"
+        for tool in objcopy objdump; do
+          test -x "$toolchain_dir/arm-none-eabi-$tool"
+          ln -sf "$toolchain_dir/arm-none-eabi-$tool" "$binutils_dir/$tool"
+        done
+        echo "$binutils_dir" >> "$GITHUB_PATH"
+
     - uses: actions/setup-java@v6.0.1
       with:
         distribution: 'zulu'
