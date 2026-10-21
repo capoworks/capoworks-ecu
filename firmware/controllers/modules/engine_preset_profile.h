@@ -1,3 +1,8 @@
+/**
+ * @file engine_preset_profile.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 /*

@@ -1,3 +1,8 @@
+/**
+ * @file shock_preload.cpp
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #include "pch.h"
 
 #include "shock_preload.h"

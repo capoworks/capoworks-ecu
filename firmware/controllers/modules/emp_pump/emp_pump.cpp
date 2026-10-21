@@ -1,5 +1,6 @@
 /**
  * @file emp_pump.cpp
+ * Capoworks adaptations and modifications by Giacomo di Ciocco, (C) 2026.
  * @see emp_pump.h for Speeduino provenance and FOME adaptation notes.
  */
 

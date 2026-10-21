@@ -1,3 +1,8 @@
+/**
+ * @file airmass_loads.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 #include "airmass.h"

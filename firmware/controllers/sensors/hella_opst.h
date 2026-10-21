@@ -1,3 +1,8 @@
+/**
+ * @file hella_opst.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 #include <cstdint>

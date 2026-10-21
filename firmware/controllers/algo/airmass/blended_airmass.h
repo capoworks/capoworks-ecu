@@ -1,3 +1,8 @@
+/**
+ * @file blended_airmass.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 #include "airmass.h"

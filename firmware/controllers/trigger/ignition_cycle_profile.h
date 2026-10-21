@@ -1,3 +1,8 @@
+/**
+ * @file ignition_cycle_profile.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 #include "trigger_structure.h"

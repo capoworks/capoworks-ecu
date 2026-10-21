@@ -1,5 +1,6 @@
 /**
  * @file emp_pump.h
+ * Capoworks adaptations and modifications by Giacomo di Ciocco, (C) 2026.
  * @brief Electronic coolant pump (EMP) controller using the Caponord J1939 protocol.
  *
  * Design and protocol are ported from Speeduino commit

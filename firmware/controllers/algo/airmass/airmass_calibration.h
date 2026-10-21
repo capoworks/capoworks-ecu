@@ -1,3 +1,8 @@
+/**
+ * @file airmass_calibration.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 #include "rusefi_enums.h"

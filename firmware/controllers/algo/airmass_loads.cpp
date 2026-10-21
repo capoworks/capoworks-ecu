@@ -1,3 +1,8 @@
+/**
+ * @file airmass_loads.cpp
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #include "pch.h"
 
 #include "airmass_loads.h"

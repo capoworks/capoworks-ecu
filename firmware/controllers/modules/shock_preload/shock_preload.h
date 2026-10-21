@@ -1,5 +1,6 @@
 /**
  * @file shock_preload.h
+ * @author Giacomo di Ciocco, (C) 2026
  * CAN bridge for the Caponord electronic shock preload controller.
  */
 
