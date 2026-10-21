@@ -1,11 +1,8 @@
 /**
  * @file emp_pump.h
- * Capoworks adaptations and modifications by Giacomo di Ciocco, (C) 2026.
+ * @author Giacomo di Ciocco, (C) 2026
  * @brief Electronic coolant pump (EMP) controller using the Caponord J1939 protocol.
  *
- * Design and protocol are ported from Speeduino commit
- * df1df13547cccc9b4875227c28450d13b3f72872 ("emp pump").  The original
- * author has explicitly permitted reuse.  This is a native FOME adaptation:
  * CAN RX values are individual atomics because RX and EngineModule callbacks
  * execute in different threads.
  */
