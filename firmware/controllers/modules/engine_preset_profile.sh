@@ -206,9 +206,13 @@ render() {
 		expanded=1
 	fi
 
-	mapfile -t supported < <(extract_dispatch_symbols "$dispatch_source")
+	while IFS= read -r symbol; do
+		supported+=("$symbol")
+	done < <(extract_dispatch_symbols "$dispatch_source")
 	(( ${#supported[@]} > 0 )) || die "could not derive engine preset dispatch symbols from $dispatch_source"
-	mapfile -t enum_symbols < <(extract_enum_symbols "$enum_source")
+	while IFS= read -r symbol; do
+		enum_symbols+=("$symbol")
+	done < <(extract_enum_symbols "$enum_source")
 	(( ${#enum_symbols[@]} > 0 )) || die "could not derive engine_type_e symbols from $enum_source"
 
 	# The catalog contains every switch case, including cases behind HW_* guards.

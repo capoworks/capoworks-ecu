@@ -211,6 +211,28 @@ jobs:
       working-directory: ./firmware/
       run: bash check_illegal_conversion.sh
 
+    - name: Collect and gate resource evidence
+      env:
+        BOARD_ID: ${{ matrix.build-target }}
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: |
+        python3 misc/firmware_builder/calibration.py collect \
+          --root "$GITHUB_WORKSPACE" \
+          --board "$BOARD_ID" \
+          --output "$RUNNER_TEMP/resource-observation-$BOARD_ID"
+
+    - name: Upload resource observations and index
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: firmware-resources-${{ matrix.build-target }}
+        path: |
+          ${{ runner.temp }}/resource-observation-${{ matrix.build-target }}/resources.json
+          ${{ runner.temp }}/resource-observation-${{ matrix.build-target }}/resource-index.json
+          ${{ runner.temp }}/resource-observation-${{ matrix.build-target }}/catalog.json
+        if-no-files-found: warn
+        retention-days: 14
+
     # Build rusEFI console
     - name: Build console
       if: ${{ env.full == 'true' }}

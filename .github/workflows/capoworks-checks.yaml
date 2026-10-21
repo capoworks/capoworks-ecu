@@ -45,6 +45,15 @@ jobs:
           JOBS: '4'
         run: bash misc/ci/capoworks-checks.sh "$CHECK_TARGET"
 
+      - name: Collect Core8 resource observations
+        id: collect_resources
+        if: ${{ matrix.target == 'core8' }}
+        run: |
+          python3 misc/firmware_builder/calibration.py collect \
+            --root "$GITHUB_WORKSPACE" \
+            --board core8 \
+            --output build/capoworks-checks/core8/resources
+
       - name: Upload logs and test reports
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
@@ -55,7 +64,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Core8 firmware
-        if: ${{ matrix.target == 'core8' && success() }}
+        if: ${{ matrix.target == 'core8' && steps.collect_resources.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: capoworks-core8-firmware
@@ -67,16 +76,34 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  resource-tools:
+    name: Capoworks / firmware resource tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Run firmware resource tool tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s misc/firmware_builder -v
+
   required:
     name: Capoworks checks
     if: ${{ always() }}
-    needs: [check]
+    needs: [check, resource-tools]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every check to pass
         env:
           CHECK_RESULT: ${{ needs.check.result }}
+          RESOURCE_TOOLS_RESULT: ${{ needs.resource-tools.result }}
         run: |
           echo "Capoworks checks: $CHECK_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          echo "Firmware resource tools: $RESOURCE_TOOLS_RESULT" >> "$GITHUB_STEP_SUMMARY"
           test "$CHECK_RESULT" = success
+          test "$RESOURCE_TOOLS_RESULT" = success

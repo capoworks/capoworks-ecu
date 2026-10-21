@@ -73,6 +73,8 @@ or
  - ECUs with WiFi (Atlas) can download the TunerStudio ini matching the installed firmware over WiFi, from the same page as the logs. The page is available even with no SD card inserted.
  - USB mass storage can now be enabled independently of SD-card file logging, allowing INI-only MSD builds without FatFs.
 
+### Tooling
+ - Add deterministic ELF resource observations, bounded calibration plans, and a manual resource-matrix workflow. Normal firmware CI now gates packaging on the current build's resource report and publishes measurement indices separately from firmware artifacts. See [build resource evidence and calibration](../docs/build-resources.md).
 
 ### Changed
  - Build-time engine preset selection through `FOME_ENGINE_PRESETS` is mutually exclusive with expanded fuel table dimensions: presets are available at the default 16 RPM-point / 8-point blend resolution and are not applied to expanded builds.
