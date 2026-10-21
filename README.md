@@ -13,7 +13,11 @@ Capoworks ECU is an independent open-source engine-control firmware project focu
 
 The firmware provides a platform for testing alternative fuel models, ignition scheduling, signal processing, and hardware integration. Experimental features are documented with their operating requirements, limitations, and validation status so developers and tuners can evaluate them deliberately.
 
-**[Wiki and Documentation](https://capoworks.github.io/capoworks-ecu-docs/) · [Recent changes](https://capoworks.github.io/capoworks-ecu-docs/recent-changes/) · [Source](https://github.com/capoworks/capoworks-ecu) · [Issues](https://github.com/capoworks/capoworks-ecu/issues) · [Actions](https://github.com/capoworks/capoworks-ecu/actions)**
+**[On-Demand Firmware Builder](https://capoworks.undo.it/firmware) · [Wiki and Documentation](https://capoworks.github.io/capoworks-ecu-docs/) · [Recent changes](https://capoworks.github.io/capoworks-ecu-docs/recent-changes/) · [Source](https://github.com/capoworks/capoworks-ecu) · [Issues](https://github.com/capoworks/capoworks-ecu/issues) · [Actions](https://github.com/capoworks/capoworks-ecu/actions)**
+
+## On-Demand Firmware Builder
+
+Use the public [on-demand firmware builder](https://capoworks.undo.it/firmware) to create a firmware image for a supported board. Sign in to your account, select the board, and choose any opt-in modules and table dimensions before starting the build. When the build completes, download the matching firmware image and generated TunerStudio INI. Each user can run up to six builds per day. See the [on-demand firmware build documentation](https://capoworks.github.io/capoworks-ecu-docs/Software/On-Demand-Firmware-Build/) for details.
 
 ## Firmware Highlights
 
