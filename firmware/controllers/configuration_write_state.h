@@ -1,3 +1,8 @@
+/**
+ * @file configuration_write_state.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 // Callers serialize state transitions. A failed attempt remains pending, but

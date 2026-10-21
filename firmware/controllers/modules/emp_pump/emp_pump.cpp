@@ -1,6 +1,6 @@
 /**
  * @file emp_pump.cpp
- * @see emp_pump.h for Speeduino provenance and FOME adaptation notes.
+ * @author Giacomo di Ciocco, (C) 2026
  */
 
 #include "pch.h"

@@ -1,3 +1,8 @@
+/**
+ * @file cylinder_fuel_trim.cpp
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #include "pch.h"
 
 #include "cylinder_fuel_trim.h"

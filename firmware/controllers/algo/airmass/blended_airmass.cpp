@@ -1,3 +1,8 @@
+/**
+ * @file blended_airmass.cpp
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #include "pch.h"
 
 #include "alphan_airmass.h"

@@ -1,3 +1,8 @@
+/**
+ * @file cylinder_fuel_trim.h
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #pragma once
 
 #include "airmass_loads.h"

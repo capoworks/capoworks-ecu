@@ -1,3 +1,8 @@
+/**
+ * @file binary_log_header.h
+ * Capoworks adaptations and modifications by Giacomo di Ciocco, (C) 2026.
+ */
+
 #pragma once
 
 #include "buffered_writer.h"

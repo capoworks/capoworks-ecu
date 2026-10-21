@@ -1,3 +1,8 @@
+/**
+ * @file hella_opst.cpp
+ * @author Giacomo di Ciocco, (C) 2026
+ */
+
 #include "pch.h"
 
 #include "hella_opst.h"

@@ -56,6 +56,8 @@ The project license and terms are in [LICENSE](LICENSE). Firmware and bundled th
 
 ## Credits
 
+Author of Capoworks-specific contributions: **Giacomo di Ciocco**.
+
 Capoworks derives from [FOME-Tech/fome-fw](https://github.com/FOME-Tech/fome-fw), which derives from [rusEFI/rusefi](https://github.com/rusefi/rusefi). We thank the authors, contributors, and communities of both projects for the engineering, knowledge, and tools that made this work possible.
 
 Capoworks is independent and is not officially endorsed or supported by FOME or rusEFI. Documentation credits and source acknowledgements are maintained at [Credits and Sources](https://capoworks.github.io/capoworks-ecu-docs/credits-and-sources/).

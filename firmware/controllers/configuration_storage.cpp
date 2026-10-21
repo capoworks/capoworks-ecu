@@ -1,3 +1,8 @@
+/**
+ * @file configuration_storage.cpp
+ * Capoworks adaptations and modifications by Giacomo di Ciocco, (C) 2026.
+ */
+
 #include "pch.h"
 
 #if EFI_INTERNAL_FLASH || EFI_UNIT_TEST
