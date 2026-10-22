@@ -189,6 +189,96 @@ TEST(limp, revLimitCltBased) {
 	EXPECT_TRUE(dut.allowInjection());
 }
 
+TEST(limp, injectorDutyCutIncludesStage2InstantaneousExcursion) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->isInjectionEnabled = true;
+	engineConfiguration->enableStagedInjection = true;
+	engineConfiguration->injectionMode = IM_BATCH;
+	engineConfiguration->crankingInjectionMode = IM_BATCH;
+	engineConfiguration->maxInjectorDutyInstant = 110;
+	engineConfiguration->maxInjectorDutySustained = 96;
+	engineConfiguration->maxInjectorDutySustainedTimeout = 0.5f;
+
+	// At 1000 RPM, batch injection with 6ms duration is 10% duty and 75ms is 125% duty.
+	engine->engineState.injectionDuration = 6;
+	engine->engineState.injectionDurationStage2 = 75;
+
+	LimpManager dut;
+	dut.updateState(1000, getTimeNowNt());
+
+	EXPECT_FALSE(dut.allowInjection());
+	EXPECT_EQ(ClearReason::InjectorDutyCycle, dut.allowInjection().reason);
+}
+
+TEST(limp, injectorDutyStage2SustainedCutRequiresBothStagesToRecover) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->isInjectionEnabled = true;
+	engineConfiguration->enableStagedInjection = true;
+	engineConfiguration->injectionMode = IM_BATCH;
+	engineConfiguration->crankingInjectionMode = IM_BATCH;
+	engineConfiguration->maxInjectorDutyInstant = 110;
+	engineConfiguration->maxInjectorDutySustained = 96;
+	engineConfiguration->maxInjectorDutySustainedTimeout = 0.5f;
+
+	// Start with both stages below the sustained threshold.
+	engine->engineState.injectionDuration = 6;
+	engine->engineState.injectionDurationStage2 = 6;
+
+	LimpManager dut;
+	dut.updateState(1000, getTimeNowNt());
+	ASSERT_TRUE(dut.allowInjection());
+
+	// Stage 2 alone reaches 100% duty for longer than the timeout.
+	engine->engineState.injectionDurationStage2 = 60;
+	advanceTimeUs(4e5);
+	dut.updateState(1000, getTimeNowNt());
+	ASSERT_TRUE(dut.allowInjection());
+
+	advanceTimeUs(2e5);
+	dut.updateState(1000, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+	EXPECT_EQ(ClearReason::InjectorDutyCycle, dut.allowInjection().reason);
+
+	// Stage 2 recovering is not enough while stage 1 is at 50% duty.
+	engine->engineState.injectionDuration = 30;
+	engine->engineState.injectionDurationStage2 = 6;
+	dut.updateState(1000, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+
+	// Stage 1 recovering is not enough while stage 2 is at 100% duty.
+	engine->engineState.injectionDuration = 6;
+	engine->engineState.injectionDurationStage2 = 60;
+	dut.updateState(1000, getTimeNowNt());
+	ASSERT_FALSE(dut.allowInjection());
+
+	// Both active stages below 20% releases the cut.
+	engine->engineState.injectionDurationStage2 = 6;
+	dut.updateState(1000, getTimeNowNt());
+	EXPECT_TRUE(dut.allowInjection());
+}
+
+TEST(limp, injectorDutyIgnoresStage2WhenStagingDisabled) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->isInjectionEnabled = true;
+	engineConfiguration->enableStagedInjection = false;
+	engineConfiguration->injectionMode = IM_BATCH;
+	engineConfiguration->crankingInjectionMode = IM_BATCH;
+	engineConfiguration->maxInjectorDutyInstant = 110;
+	engineConfiguration->maxInjectorDutySustained = 96;
+	engineConfiguration->maxInjectorDutySustainedTimeout = 0.5f;
+
+	engine->engineState.injectionDuration = 6;
+	engine->engineState.injectionDurationStage2 = 75;
+
+	LimpManager dut;
+	dut.updateState(1000, getTimeNowNt());
+
+	EXPECT_TRUE(dut.allowInjection());
+}
+
 TEST(limp, boostCut) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 

@@ -239,6 +239,9 @@ void LimpManager::updateCutsInjectorDuty(float rpm, efitick_t nowNt, Clearable& 
 	// Only reset once below 20% duty to force the driver to lift off the pedal
 
 	auto injDutyCycle = getInjectorDutyCycle(rpm);
+	if (engineConfiguration->enableStagedInjection) {
+		injDutyCycle = std::max(injDutyCycle, getInjectorDutyCycleStage2(rpm));
+	}
 	bool isOverInstantDutyCycle = injDutyCycle > engineConfiguration->maxInjectorDutyInstant;
 	bool isOverSustainedDutyCycle = injDutyCycle > engineConfiguration->maxInjectorDutySustained;
 	bool isUnderLowDuty = injDutyCycle < 20;
