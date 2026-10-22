@@ -223,8 +223,14 @@ void LimpManager::updateCutsBoostCut(Clearable& allowFuel) {
 	// Limit fuel only on boost pressure (limiting spark bends valves)
 	float mapCut = engineConfiguration->boostCutPressure;
 	if (mapCut != 0) {
+		auto map = Sensor::get(SensorType::Map);
+		bool validMap = map && std::isfinite(map.Value);
+
+		bool rising = validMap && map.Value > mapCut;
 		// require drop of 20kPa to resume fuel
-		if (m_boostCutHysteresis.test(Sensor::getOrZero(SensorType::Map), mapCut, mapCut - 20)) {
+		bool falling = validMap && map.Value < mapCut - 20;
+
+		if (m_boostCutHysteresis.test(rising, falling)) {
 			allowFuel.clear(ClearReason::BoostCut);
 		}
 	}
