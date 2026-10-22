@@ -859,6 +859,14 @@ void onTriggerEventSparkLogic(const EnginePhaseInfo& phase) {
 
 	const bool useBudget = timeBudgetSupported();
 	auto& list = engine->ignitionEvents;
+
+#if EFI_ANTILAG_SYSTEM && EFI_LAUNCH_CONTROL
+	const float ALSSkipRatio = engineConfiguration->antiLagEnabled && engine->antilagController.isAntilagCondition
+									 ? static_cast<float>(engineConfiguration->ALSSkipRatio)
+									 : 0.0f;
+	engine->ALSsoftSparkLimiter.setTargetSkipRatio(ALSSkipRatio);
+#endif // EFI_ANTILAG_SYSTEM
+
 	if (useBudget) {
 		if (list.plannerPhaseValid && phase.currentEngPhase.angle < list.plannerLastPhase) {
 			list.plannerCycle++;
@@ -1025,8 +1033,6 @@ void onTriggerEventSparkLogic(const EnginePhaseInfo& phase) {
 			if (engine->ALSsoftSparkLimiter.shouldSkip()) {
 				continue;
 			}
-			auto ALSSkipRatio = engineConfiguration->ALSSkipRatio;
-			engine->ALSsoftSparkLimiter.setTargetSkipRatio(ALSSkipRatio);
 #endif // EFI_ANTILAG_SYSTEM
 
 			scheduleSparkEvent(limitedSpark, event, dwellMs, {dwellAngle}, {sparkAngle}, phase);
