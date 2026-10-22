@@ -72,3 +72,114 @@ TEST(Actuators, AntiLagRequiresValidThrottleIntent) {
 	engine->antilagController.update();
 	EXPECT_TRUE(engine->antilagController.isAntilagCondition);
 }
+
+TEST(Actuators, AntiLagExpiresAtMaxDurationBoundary) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->antiLagEnabled = true;
+	engineConfiguration->antiLagActivationMode = ALWAYS_ON_ANTILAG;
+	engineConfiguration->ALSMaxDuration = 2;
+	Sensor::setMockValue(SensorType::Clt, 70);
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 1);
+
+	engine->antilagController.update();
+	EXPECT_TRUE(engine->antilagController.ALSTimerCondition);
+	EXPECT_TRUE(engine->antilagController.isAntilagCondition);
+
+	advanceTimeUs(1'999'999);
+	engine->antilagController.update();
+	EXPECT_TRUE(engine->antilagController.ALSTimerCondition);
+	EXPECT_TRUE(engine->antilagController.isAntilagCondition);
+
+	advanceTimeUs(1);
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.ALSTimerCondition);
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+}
+
+TEST(Actuators, AntiLagDoesNotRearmAfterMaxDuration) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->antiLagEnabled = true;
+	engineConfiguration->antiLagActivationMode = ALWAYS_ON_ANTILAG;
+	engineConfiguration->ALSMaxDuration = 1;
+	Sensor::setMockValue(SensorType::Clt, 70);
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 1);
+
+	engine->antilagController.update();
+	EXPECT_TRUE(engine->antilagController.isAntilagCondition);
+
+	advanceTimeUs(2'000'000);
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+}
+
+TEST(Actuators, AntiLagRearmsAfterArmingConditionClears) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->antiLagEnabled = true;
+	engineConfiguration->antiLagActivationMode = ALWAYS_ON_ANTILAG;
+	engineConfiguration->ALSMaxDuration = 1;
+	Sensor::setMockValue(SensorType::Clt, 70);
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 1);
+
+	engine->antilagController.update();
+	advanceTimeUs(2'000'000);
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+
+	engineConfiguration->antiLagEnabled = false;
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.ALSTimerCondition);
+
+	engineConfiguration->antiLagEnabled = true;
+	engine->antilagController.update();
+	EXPECT_TRUE(engine->antilagController.ALSTimerCondition);
+	EXPECT_TRUE(engine->antilagController.isAntilagCondition);
+}
+
+TEST(Actuators, AntiLagNonPositiveMaxDurationInhibits) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->antiLagEnabled = true;
+	engineConfiguration->antiLagActivationMode = ALWAYS_ON_ANTILAG;
+	engineConfiguration->ALSMaxDuration = 0;
+	Sensor::setMockValue(SensorType::Clt, 70);
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 1);
+
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.ALSTimerCondition);
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+
+	advanceTimeUs(1'000'000);
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.ALSTimerCondition);
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+
+	engineConfiguration->ALSMaxDuration = -1;
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.ALSTimerCondition);
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+}
+
+TEST(Actuators, AntiLagDisabledInhibits) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->antiLagEnabled = false;
+	engineConfiguration->antiLagActivationMode = ALWAYS_ON_ANTILAG;
+	engineConfiguration->ALSMaxDuration = 1;
+	Sensor::setMockValue(SensorType::Clt, 70);
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+	Sensor::setMockValue(SensorType::DriverThrottleIntent, 1);
+
+	engine->antilagController.update();
+	EXPECT_FALSE(engine->antilagController.ALSTimerCondition);
+	EXPECT_FALSE(engine->antilagController.isAntilagCondition);
+}

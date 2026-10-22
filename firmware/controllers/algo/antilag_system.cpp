@@ -74,7 +74,17 @@ bool AntilagSystemBase::isAntilagConditionMet(float rpm) {
 
 void AntilagSystemBase::update() {
 	float rpm = Sensor::getOrZero(SensorType::Rpm);
-	isAntilagCondition = engineConfiguration->antiLagEnabled && isAntilagConditionMet(rpm);
+	bool durationValid = engineConfiguration->ALSMaxDuration > 0;
+	bool eligible = engineConfiguration->antiLagEnabled && durationValid && isAntilagConditionMet(rpm);
+
+	// A timeout does not clear eligibility, so only a genuine false-to-true transition re-arms.
+	if (eligible && !m_wasEligible) {
+		m_maxDurationTimer.reset();
+	}
+	m_wasEligible = eligible;
+
+	ALSTimerCondition = eligible && m_maxDurationTimer.getElapsedSeconds() < engineConfiguration->ALSMaxDuration;
+	isAntilagCondition = eligible && ALSTimerCondition;
 
 #if EFI_ANTILAG_SYSTEM
 	fuelALSCorrection = getFuelALSCorrection(rpm);
