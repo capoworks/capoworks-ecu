@@ -196,8 +196,8 @@ void PrimeController::onPrimeStart(uintptr_t generation) {
 void PrimeController::onPrimeOpen(uintptr_t generation) {
 	chibios_rt::CriticalSectionLocker csl;
 
-	if (!m_isPriming || m_pulseGeneration != generation || !m_isIgnitionOn ||
-		generation != m_keyCycleGeneration || m_primeOpened) {
+	if (!m_isPriming || m_pulseGeneration != generation || !m_isIgnitionOn || generation != m_keyCycleGeneration ||
+		m_primeOpened) {
 		return;
 	}
 
