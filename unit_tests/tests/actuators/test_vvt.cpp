@@ -4,7 +4,10 @@
 #include "vvt.h"
 
 using ::testing::Return;
+using ::testing::Gt;
+using ::testing::InSequence;
 using ::testing::StrictMock;
+using ::testing::Values;
 
 namespace {
 bool publishPhysicalFuelLoad() {
@@ -253,3 +256,70 @@ TEST(VVT, ClosedLoopInverted) {
 	// Target of -30 with position -20 should yield positive duty, P=1.5 means 15% duty for 10% error
 	EXPECT_EQ(dut.getClosedLoop(-30, -20).value_or(0), 15);
 }
+
+class VvtActivationDelayTest : public ::testing::TestWithParam<uint16_t> {};
+
+TEST_P(VvtActivationDelayTest, PwmStaysInhibitedThroughConfiguredDelay) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	const uint16_t delayMs = GetParam();
+
+	engineConfiguration->vvtActivationDelayMs = delayMs;
+	engineConfiguration->vvtControlMinRpm = 500;
+	engineConfiguration->vvtControlMinClt = 60;
+	engineConfiguration->vvtIntakeYAxisOverride = GPPWM_Tps;
+	engineConfiguration->vvtOutputMin[0] = 0;
+	engineConfiguration->vvtOutputMax[0] = 100;
+
+	Sensor::setMockValue(SensorType::Clt, 80);
+	Sensor::setMockValue(SensorType::Tps1, 20);
+	Sensor::setMockValue(SensorType::BatteryVoltage, 14);
+	Sensor::setMockValue(SensorType::Rpm, 1000);
+
+	copyArray(config->vvtOpenLoop[0].bins, {-20, 0, 20, 40, 60, 80, 100, 120});
+	copyArray(config->vvtOpenLoop[0].values, {10, 10, 10, 10, 10, 10, 10, 10});
+	engineConfiguration->auxPid[0].pFactor = 0;
+	engineConfiguration->auxPid[0].iFactor = 0;
+	engineConfiguration->auxPid[0].dFactor = 0;
+	engineConfiguration->auxPid[0].offset = 0;
+	engineConfiguration->auxPid[0].minValue = 0;
+	engineConfiguration->auxPid[0].maxValue = 100;
+
+	StrictMock<MockVp3d> targetMap;
+	StrictMock<MockPwm> pwm;
+	EXPECT_CALL(targetMap, getValue(1000, 20)).Times(3).WillRepeatedly(Return(20));
+
+	InSequence pwmSequence;
+	EXPECT_CALL(pwm, setSimplePwmDutyCycle(0)); // Before the delay
+	EXPECT_CALL(pwm, setSimplePwmDutyCycle(0)); // Strictly greater-than comparison keeps this inhibited
+	EXPECT_CALL(pwm, setSimplePwmDutyCycle(Gt(0))); // 500ms into the 2s ramp
+
+	VvtController dut(0, 0, 0);
+	dut.init(&targetMap, &pwm);
+
+	auto setVvtPosition = [] {
+		auto& position = engine->triggerCentral.vvtPosition[0][0];
+		position.angle = 20;
+		position.t.reset();
+	};
+
+	setTimeNowUs(0);
+	engine->rpmCalculator.setRpmValue(1000);
+
+	setTimeNowUs((delayMs - 1) * 1000);
+	setVvtPosition();
+	dut.onFastCallback();
+	EXPECT_FLOAT_EQ(float(dut.vvtOutput), 0);
+
+	setTimeNowUs(delayMs * 1000);
+	setVvtPosition();
+	dut.onFastCallback();
+	EXPECT_FLOAT_EQ(float(dut.vvtOutput), 0);
+
+	setTimeNowUs((delayMs + 500) * 1000);
+	setVvtPosition();
+	dut.onFastCallback();
+	EXPECT_FLOAT_EQ(float(dut.vvtTarget), 5);
+	EXPECT_FLOAT_EQ(float(dut.vvtOutput), 10);
+}
+
+INSTANTIATE_TEST_SUITE_P(VvtActivationDelay, VvtActivationDelayTest, Values(500, 1000, 1500));
