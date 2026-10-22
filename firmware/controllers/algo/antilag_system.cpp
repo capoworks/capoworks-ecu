@@ -52,9 +52,12 @@ bool AntilagSystemBase::isALSMaxCLTCondition() const {
 }
 
 bool AntilagSystemBase::isALSMaxThrottleIntentCondition() const {
-	int throttleIntent = Sensor::getOrZero(SensorType::DriverThrottleIntent);
+	auto throttleIntent = Sensor::get(SensorType::DriverThrottleIntent);
+	if (!throttleIntent || !std::isfinite(throttleIntent.Value)) {
+		return false;
+	}
 
-	return engineConfiguration->ALSMaxTPS > throttleIntent;
+	return static_cast<float>(engineConfiguration->ALSMaxTPS) > throttleIntent.Value;
 }
 
 bool AntilagSystemBase::isAntilagConditionMet(float rpm) {

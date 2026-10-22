@@ -422,6 +422,41 @@ TEST(etb, setpointIdle) {
 	EXPECT_FLOAT_EQ(55, etb.getSetpoint().value_or(-1));
 }
 
+TEST(etb, antiLagAdderRequiresEnabledAndValidPedal) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	engineConfiguration->antiLagEnabled = true;
+	engineConfiguration->ALSEtbAdd = 10;
+	engineConfiguration->etbIdleThrottleRange = 0;
+	engineConfiguration->etbMinimumPosition = 0;
+	engineConfiguration->etbMaximumPosition = 100;
+
+	Sensor::setMockValue(SensorType::Tps1Primary, 0);
+	Sensor::setMockValue(SensorType::Tps1, 0.0f, true);
+	Sensor::setMockValue(SensorType::AcceleratorPedal, 20.0f, true);
+
+	EtbController etb;
+	StrictMock<MockVp3d> pedalMap;
+	EXPECT_CALL(pedalMap, getValue(_, _)).WillRepeatedly([](float, float pedal) { return pedal; });
+	ASSERT_TRUE(etb.init(DC_Throttle1, nullptr, nullptr, &pedalMap, true));
+
+	// Simulate a stale active anti-lag state that has not been recomputed yet.
+	engine->antilagController.isAntilagCondition = true;
+	EXPECT_FLOAT_EQ(30, etb.getSetpoint().value_or(-1));
+
+	// An invalid pedal must suppress the anti-lag adder immediately.
+	Sensor::setInvalidMockValue(SensorType::AcceleratorPedal);
+	EXPECT_FLOAT_EQ(0, etb.getSetpoint().value_or(-1));
+
+	// A valid pedal restores the adder.
+	Sensor::setMockValue(SensorType::AcceleratorPedal, 20.0f, true);
+	EXPECT_FLOAT_EQ(30, etb.getSetpoint().value_or(-1));
+
+	// Disabling anti-lag also suppresses the adder even while the stale flag is set.
+	engineConfiguration->antiLagEnabled = false;
+	EXPECT_FLOAT_EQ(20, etb.getSetpoint().value_or(-1));
+}
+
 TEST(etb, setpointRevLimit) {
 	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
 
