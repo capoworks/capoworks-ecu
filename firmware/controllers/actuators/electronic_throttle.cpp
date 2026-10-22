@@ -401,8 +401,11 @@ percent_t EtbController::getSetpointEtbNonTorqueModel(percent_t pedalTableValue)
 #endif // EFI_LUA
 
 #if EFI_ANTILAG_SYSTEM
-	if (engine->antilagController.isAntilagCondition) {
-		targetPosition += engineConfiguration->ALSEtbAdd;
+	if (engineConfiguration->antiLagEnabled && engine->antilagController.isAntilagCondition) {
+		auto pedalPosition = Sensor::get(SensorType::AcceleratorPedal);
+		if (pedalPosition && std::isfinite(pedalPosition.Value)) {
+			targetPosition += engineConfiguration->ALSEtbAdd;
+		}
 	}
 #endif /* EFI_ANTILAG_SYSTEM */
 
