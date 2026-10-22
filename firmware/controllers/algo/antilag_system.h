@@ -22,6 +22,10 @@ public:
 	bool isALSMaxCLTCondition() const;
 	bool isALSMaxThrottleIntentCondition() const;
 	bool isInsideALSSwitchCondition();
-	/* enabled and all conditions above */
+	/* all conditions above */
 	bool isAntilagConditionMet(float rpm);
+
+private:
+	Timer m_maxDurationTimer;
+	bool m_wasEligible = false;
 };
