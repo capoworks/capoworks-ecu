@@ -861,10 +861,9 @@ void onTriggerEventSparkLogic(const EnginePhaseInfo& phase) {
 	auto& list = engine->ignitionEvents;
 
 #if EFI_ANTILAG_SYSTEM && EFI_LAUNCH_CONTROL
-	const float ALSSkipRatio =
-			engineConfiguration->antiLagEnabled && engine->antilagController.isAntilagCondition
-					? static_cast<float>(engineConfiguration->ALSSkipRatio)
-					: 0.0f;
+	const float ALSSkipRatio = engineConfiguration->antiLagEnabled && engine->antilagController.isAntilagCondition
+									 ? static_cast<float>(engineConfiguration->ALSSkipRatio)
+									 : 0.0f;
 	engine->ALSsoftSparkLimiter.setTargetSkipRatio(ALSSkipRatio);
 #endif // EFI_ANTILAG_SYSTEM
 
