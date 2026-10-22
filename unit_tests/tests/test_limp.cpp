@@ -197,8 +197,14 @@ TEST(limp, boostCut) {
 
 	LimpManager dut;
 
-	// Below threshold, injection allowed
-	Sensor::setMockValue(SensorType::Map, 80);
+	// Missing MAP does not create a new cut
+	Sensor::resetMockValue(SensorType::Map);
+	ASSERT_FALSE(Sensor::get(SensorType::Map));
+	dut.updateState(1000, 0);
+	EXPECT_TRUE(dut.allowInjection());
+
+	// Invalid MAP does not create a new cut
+	Sensor::setInvalidMockValue(SensorType::Map);
 	dut.updateState(1000, 0);
 	EXPECT_TRUE(dut.allowInjection());
 
@@ -209,6 +215,17 @@ TEST(limp, boostCut) {
 
 	// Below rising threshold, but should have hysteresis, so not cut yet
 	Sensor::setMockValue(SensorType::Map, 95);
+	dut.updateState(1000, 0);
+	EXPECT_FALSE(dut.allowInjection());
+
+	// Missing MAP preserves the active cut
+	Sensor::resetMockValue(SensorType::Map);
+	ASSERT_FALSE(Sensor::get(SensorType::Map));
+	dut.updateState(1000, 0);
+	EXPECT_FALSE(dut.allowInjection());
+
+	// Non-finite MAP preserves the active cut
+	Sensor::setMockValue(SensorType::Map, std::numeric_limits<float>::quiet_NaN());
 	dut.updateState(1000, 0);
 	EXPECT_FALSE(dut.allowInjection());
 
