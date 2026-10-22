@@ -3,9 +3,9 @@
 #include "airmass_loads.h"
 #include "vvt.h"
 
-using ::testing::Return;
 using ::testing::Gt;
 using ::testing::InSequence;
+using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::Values;
 
@@ -289,8 +289,8 @@ TEST_P(VvtActivationDelayTest, PwmStaysInhibitedThroughConfiguredDelay) {
 	EXPECT_CALL(targetMap, getValue(1000, 20)).Times(3).WillRepeatedly(Return(20));
 
 	InSequence pwmSequence;
-	EXPECT_CALL(pwm, setSimplePwmDutyCycle(0)); // Before the delay
-	EXPECT_CALL(pwm, setSimplePwmDutyCycle(0)); // Strictly greater-than comparison keeps this inhibited
+	EXPECT_CALL(pwm, setSimplePwmDutyCycle(0));		// Before the delay
+	EXPECT_CALL(pwm, setSimplePwmDutyCycle(0));		// Strictly greater-than comparison keeps this inhibited
 	EXPECT_CALL(pwm, setSimplePwmDutyCycle(Gt(0))); // 500ms into the 2s ramp
 
 	VvtController dut(0, 0, 0);
