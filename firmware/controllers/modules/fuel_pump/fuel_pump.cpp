@@ -10,8 +10,8 @@
 void FuelPumpController::onSlowCallback() {
 	auto timeSinceIgn = m_ignOnTimer.getElapsedSeconds();
 
-	// If the ignition just turned on, turn on the fuel pump to prime
-	isPrime = timeSinceIgn >= 0 && timeSinceIgn < engineConfiguration->startUpFuelPumpDuration;
+	// If the ignition is on, run the fuel pump for the startup priming duration
+	isPrime = ignitionOn && timeSinceIgn >= 0 && timeSinceIgn < engineConfiguration->startUpFuelPumpDuration;
 
 #if EFI_SHAFT_POSITION_INPUT
 	// If there was a trigger event recently, turn on the pump, the engine is running!

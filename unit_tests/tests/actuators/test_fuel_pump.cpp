@@ -16,6 +16,7 @@ TEST(Actuators, FuelPump) {
 
 	// Mock a fuel pump pin
 	engineConfiguration->fuelPumpPin = Gpio::A0;
+	engineConfiguration->startUpFuelPumpDuration = 2;
 	// Re-init so it picks up the new config
 	enginePins.fuelPumpRelay.init();
 
@@ -26,14 +27,27 @@ TEST(Actuators, FuelPump) {
 	// Pump should be on!
 	EXPECT_TRUE(efiReadPin(Gpio::A0));
 
-	// Long time since ecu start, haven't seen trigger yet
-	dut.onIgnitionStateChanged(true);
-	advanceTimeUs(10e6);
+	// Prime must stop on the first slow callback after ignition turns off
+	dut.onIgnitionStateChanged(false);
 	dut.onSlowCallback();
-	// Pump should be off!
 	EXPECT_FALSE(efiReadPin(Gpio::A0));
 
-	// Test "force pump" mode
+	// Turning ignition back on starts a fresh priming interval
+	advanceTimeUs(2.1e6);
+	dut.onSlowCallback();
+	EXPECT_FALSE(efiReadPin(Gpio::A0));
+	dut.onIgnitionStateChanged(true);
+	dut.onSlowCallback();
+	EXPECT_TRUE(efiReadPin(Gpio::A0));
+	advanceTimeUs(1.9e6);
+	dut.onSlowCallback();
+	EXPECT_TRUE(efiReadPin(Gpio::A0));
+	advanceTimeUs(0.2e6);
+	dut.onSlowCallback();
+	EXPECT_FALSE(efiReadPin(Gpio::A0));
+
+	// Test "force pump" mode while ignition is off
+	dut.onIgnitionStateChanged(false);
 	dut.forcePumpState(true);
 	dut.onSlowCallback();
 	EXPECT_TRUE(efiReadPin(Gpio::A0));
@@ -41,18 +55,20 @@ TEST(Actuators, FuelPump) {
 	dut.onSlowCallback();
 	EXPECT_FALSE(efiReadPin(Gpio::A0));
 
-	// Long time since ecu start, just saw a trigger!
+	// Existing conservative coast policy: a recent trigger still runs the pump with ignition off.
+	// FOME-004 only gates the timed startup prime, so this behavior remains unchanged.
+	engine->triggerCentral.handleShaftSignal(TriggerEvent::PrimaryFalling, getTimeNowNt());
+	dut.onSlowCallback();
+	EXPECT_TRUE(efiReadPin(Gpio::A0));
+	advanceTimeUs(10e6);
+	EXPECT_FALSE(engine->triggerCentral.engineMovedRecently());
+	dut.onSlowCallback();
+	EXPECT_FALSE(efiReadPin(Gpio::A0));
+
+	// Long time since ignition turned on, just saw a trigger
 	dut.onIgnitionStateChanged(true);
 	advanceTimeUs(10e6);
 	engine->triggerCentral.handleShaftSignal(TriggerEvent::PrimaryFalling, getTimeNowNt());
 	dut.onSlowCallback();
-	// Pump should be on!
-	EXPECT_TRUE(efiReadPin(Gpio::A0));
-
-	// ECU just started, and we just saw a trigger!
-	dut.onIgnitionStateChanged(true);
-	engine->triggerCentral.handleShaftSignal(TriggerEvent::PrimaryFalling, getTimeNowNt());
-	dut.onSlowCallback();
-	// Pump should be on!
 	EXPECT_TRUE(efiReadPin(Gpio::A0));
 }
