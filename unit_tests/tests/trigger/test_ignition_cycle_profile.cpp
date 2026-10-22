@@ -733,6 +733,30 @@ struct RetargetFixture {
 };
 } // namespace
 
+TEST(IgnitionTimeBudget, ALSSoftCutUsesLiveAntiLagState) {
+	{
+		RetargetFixture f;
+		engineConfiguration->ALSSkipRatio = 2;
+		engineConfiguration->antiLagEnabled = true;
+		engine->antilagController.isAntilagCondition = true;
+		f.command(25);
+		f.step(10, 20);
+		EXPECT_EQ(1u, engine->engineState.sparkCounter);
+		EXPECT_TRUE(f.event.wasSparkLimited);
+	}
+
+	for (bool configured : {false, true}) {
+		RetargetFixture f;
+		engineConfiguration->ALSSkipRatio = 2;
+		engineConfiguration->antiLagEnabled = configured;
+		engine->antilagController.isAntilagCondition = !configured;
+		f.command(25);
+		f.step(10, 20);
+		EXPECT_EQ(1u, engine->engineState.sparkCounter);
+		EXPECT_FALSE(f.event.wasSparkLimited);
+	}
+}
+
 TEST(IgnitionRetarget, RetainedCandidateAppliesPartialAdvanceBeforeArming) {
 	RetargetFixture f;
 	f.command(40);

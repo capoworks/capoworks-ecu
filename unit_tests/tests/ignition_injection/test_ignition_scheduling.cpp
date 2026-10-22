@@ -167,3 +167,61 @@ TEST(ignition, oddCylinderWastedSpark) {
 		EXPECT_EQ(0, engine->scheduler.size());
 	}
 }
+
+TEST(ignition, ALSSoftCutIgnoresRatioWhenDisabledOrDisarmed) {
+	for (bool configured : {false, true}) {
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		setCylinderCount(1);
+		engineConfiguration->isIgnitionEnabled = true;
+		engineConfiguration->isInjectionEnabled = false;
+		engineConfiguration->ignitionMode = IM_INDIVIDUAL_COILS;
+		engineConfiguration->minimumIgnitionTiming = -25;
+		engineConfiguration->ALSSkipRatio = 2;
+		engine->rpmCalculator.oneDegreeUs = 100;
+		engine->ignitionState.sparkDwell = 1;
+		engine->ignitionState.dwellAngle = 10;
+		engine->cylinders[0].setIgnitionTimingBtdc(-25);
+		engineConfiguration->antiLagEnabled = configured;
+		engine->antilagController.isAntilagCondition = !configured;
+
+		for (unsigned sparkIndex = 0; sparkIndex < 2; sparkIndex++) {
+			onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+
+			EXPECT_EQ(sparkIndex + 1, engine->engineState.sparkCounter);
+			EXPECT_FALSE(engine->ignitionEvents.elements[0].wasSparkLimited);
+			eth.moveTimeForwardAndInvokeEventsUs(1500);
+		}
+	}
+}
+
+TEST(ignition, ALSSoftCutRestoresAndRearmsAfterDisable) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	setCylinderCount(1);
+	engineConfiguration->isIgnitionEnabled = true;
+	engineConfiguration->isInjectionEnabled = false;
+	engineConfiguration->ignitionMode = IM_INDIVIDUAL_COILS;
+	engineConfiguration->minimumIgnitionTiming = -25;
+	engineConfiguration->antiLagEnabled = true;
+	engineConfiguration->ALSSkipRatio = 2;
+	engine->antilagController.isAntilagCondition = true;
+	engine->rpmCalculator.oneDegreeUs = 100;
+	engine->ignitionState.sparkDwell = 1;
+	engine->ignitionState.dwellAngle = 10;
+	engine->cylinders[0].setIgnitionTimingBtdc(-25);
+
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	EXPECT_EQ(0u, engine->engineState.sparkCounter);
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, engine->ignitionEvents.elements[0].state);
+	eth.moveTimeForwardAndInvokeEventsUs(2000);
+
+	engineConfiguration->antiLagEnabled = false;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	EXPECT_EQ(1u, engine->engineState.sparkCounter);
+	EXPECT_FALSE(engine->ignitionEvents.elements[0].wasSparkLimited);
+	eth.moveTimeForwardAndInvokeEventsUs(2000);
+
+	engineConfiguration->antiLagEnabled = true;
+	onTriggerEventSparkLogic({getTimeNowNt(), 10, 30, 10, 30});
+	EXPECT_EQ(1u, engine->engineState.sparkCounter);
+	EXPECT_EQ(IgnitionOccurrenceState::Closed, engine->ignitionEvents.elements[0].state);
+}
