@@ -37,8 +37,26 @@ static bool isPrimeInjectionPulseSkipped() {
 }
 
 void PrimeController::onIgnitionStateChanged(bool ignitionOn) {
+	uintptr_t generation;
+
+	{
+		chibios_rt::CriticalSectionLocker csl;
+
+		if (ignitionOn == m_isIgnitionOn) {
+			return;
+		}
+
+		m_isIgnitionOn = ignitionOn;
+		++m_keyCycleGeneration;
+		if (!m_keyCycleGeneration) {
+			++m_keyCycleGeneration;
+		}
+		generation = m_keyCycleGeneration;
+	}
+
 	if (!ignitionOn) {
-		// don't prime on ignition-off
+		// Delayed starts and opens carry this generation, so they become stale
+		// immediately. An already-opened pulse still gets its matching close.
 		return;
 	}
 
@@ -66,7 +84,7 @@ void PrimeController::onIgnitionStateChanged(bool ignitionOn) {
 		float delayUs = MS2US(delayMs);
 		if (std::isfinite(delayUs) && delayUs >= 0 && delayUs < MaximumScheduleDelayUs) {
 			auto startTime = getTimeNowNt() + US2NT(static_cast<int>(delayUs));
-			ScheduledAction request{startTime, {PrimeController::onPrimeStartAdapter, this}};
+			ScheduledAction request{startTime, {PrimeController::onPrimeStartAdapter, generation}};
 			scheduleFuelCallbacks(&request, 1, true);
 		}
 	} else {
@@ -93,25 +111,36 @@ uint32_t PrimeController::getKeyCycleCounter() const {
 void PrimeController::setKeyCycleCounter(uint32_t) {}
 #endif
 
-void PrimeController::onPrimeStartAdapter(PrimeController* instance) {
-	instance->onPrimeStart();
+bool PrimeController::isPriming() const {
+	chibios_rt::CriticalSectionLocker csl;
+	return m_isPriming;
+}
+
+void PrimeController::onPrimeStartAdapter(uintptr_t generation) {
+	engine->module<PrimeController>()->onPrimeStart(generation);
 	// A delayed prime still completes its accepted callback when skipped.
 	engine->airmassInjectionState.callbackCompleted();
 }
 
-void PrimeController::onPrimeOpenAdapter(PrimeController* instance) {
-	instance->onPrimeOpen();
+void PrimeController::onPrimeOpenAdapter(uintptr_t generation) {
+	engine->module<PrimeController>()->onPrimeOpen(generation);
 	engine->airmassInjectionState.callbackCompleted();
 }
 
-void PrimeController::onPrimeEndAdapter(PrimeController* instance) {
-	instance->onPrimeEnd();
+void PrimeController::onPrimeEndAdapter(uintptr_t generation) {
+	engine->module<PrimeController>()->onPrimeEnd(generation);
 	engine->airmassInjectionState.callbackCompleted();
 }
 
-void PrimeController::onPrimeStart() {
-	// Direct calls are unregistered by construction; callback wrappers own the ACK.
-	if (!engine->airmassInjectionState.allowPrime() || m_isPriming || isPrimeInjectionPulseSkipped()) {
+void PrimeController::onPrimeStart(uintptr_t generation) {
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		if (!m_isIgnitionOn || generation != m_keyCycleGeneration || m_isPriming) {
+			return;
+		}
+	}
+
+	if (!engine->airmassInjectionState.allowPrime() || isPrimeInjectionPulseSkipped()) {
 		return;
 	}
 
@@ -129,36 +158,91 @@ void PrimeController::onPrimeStart() {
 		return;
 	}
 
+	uint16_t outputsMask = (1 << engine->engineState.cylinderCount) - 1;
+
+	{
+		chibios_rt::CriticalSectionLocker csl;
+
+		// Recheck after the slower sensor, fuel, and configuration work above.
+		if (!m_isIgnitionOn || generation != m_keyCycleGeneration || m_isPriming) {
+			return;
+		}
+
+		// Capture the mask with the paired callbacks so a later tune change cannot
+		// leave injectors opened by a wider mask.
+		m_primeOutputsMask = outputsMask;
+		m_pulseGeneration = generation;
+		m_primeOpened = false;
+		m_isPriming = true;
+	}
+
 	auto startTime = getTimeNowNt();
 	auto endTime = startTime + US2NT(static_cast<int>(MS2US(durationMs)));
 
-	// Capture the mask with the paired callbacks so a later tune change cannot
-	// leave injectors opened by a wider mask.
-	m_primeOutputsMask = (1 << engine->engineState.cylinderCount) - 1;
-	m_isPriming = true;
-
 	ScheduledAction events[] = {
-			{startTime, {onPrimeOpenAdapter, this}},
-			{endTime, {onPrimeEndAdapter, this}},
+			{startTime, {onPrimeOpenAdapter, generation}},
+			{endTime, {onPrimeEndAdapter, generation}},
 	};
 
 	if (!scheduleFuelCallbacks(events, efi::size(events), true)) {
-		m_isPriming = false;
+		chibios_rt::CriticalSectionLocker csl;
+		if (m_isPriming && m_pulseGeneration == generation) {
+			m_isPriming = false;
+			m_pulseGeneration = 0;
+		}
 	}
 }
 
-void PrimeController::onPrimeOpen() {
+void PrimeController::onPrimeOpen(uintptr_t generation) {
+	chibios_rt::CriticalSectionLocker csl;
+
+	if (!m_isPriming || m_pulseGeneration != generation || !m_isIgnitionOn || generation != m_keyCycleGeneration ||
+		m_primeOpened) {
+		return;
+	}
+
 	InjectorContext ctx;
 	ctx.outputsMask = m_primeOutputsMask;
+	m_primeOpened = true;
 	startInjection(ctx);
 }
 
-void PrimeController::onPrimeEnd() {
+void PrimeController::onPrimeEnd(uintptr_t generation) {
+	bool wasOpened;
 	InjectorContext ctx;
-	ctx.outputsMask = m_primeOutputsMask;
+
+	{
+		chibios_rt::CriticalSectionLocker csl;
+
+		if (!m_isPriming || m_pulseGeneration != generation) {
+			return;
+		}
+
+		wasOpened = m_primeOpened;
+		ctx.outputsMask = m_primeOutputsMask;
+		m_primeOpened = false;
+
+		// Keep m_isPriming set through an opened pulse's close so a replacement
+		// pulse cannot start while the matching output is being released.
+		if (!wasOpened) {
+			m_isPriming = false;
+			m_pulseGeneration = 0;
+		}
+	}
+
+	if (!wasOpened) {
+		return;
+	}
+
 	endInjection(ctx);
 
-	m_isPriming = false;
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		if (m_isPriming && m_pulseGeneration == generation) {
+			m_isPriming = false;
+			m_pulseGeneration = 0;
+		}
+	}
 }
 
 void PrimeController::onSlowCallback() {

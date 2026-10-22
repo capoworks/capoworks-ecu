@@ -16,21 +16,22 @@ public:
 
 	floatms_t getPrimeDuration() const;
 
-	void onPrimeStart();
-	void onPrimeEnd();
-
-	bool isPriming() const {
-		return m_isPriming;
-	}
+	bool isPriming() const;
 
 private:
 	bool m_isPriming = false;
+	bool m_isIgnitionOn = false;
+	bool m_primeOpened = false;
+	uintptr_t m_keyCycleGeneration = 0;
+	uintptr_t m_pulseGeneration = 0;
 	uint16_t m_primeOutputsMask = 0;
-	void onPrimeOpen();
+	void onPrimeStart(uintptr_t generation);
+	void onPrimeOpen(uintptr_t generation);
+	void onPrimeEnd(uintptr_t generation);
 
-	static void onPrimeStartAdapter(PrimeController* instance);
-	static void onPrimeOpenAdapter(PrimeController* instance);
-	static void onPrimeEndAdapter(PrimeController* instance);
+	static void onPrimeStartAdapter(uintptr_t generation);
+	static void onPrimeOpenAdapter(uintptr_t generation);
+	static void onPrimeEndAdapter(uintptr_t generation);
 
 	uint32_t getKeyCycleCounter() const;
 	void setKeyCycleCounter(uint32_t count);
