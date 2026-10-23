@@ -44,7 +44,7 @@ USBDriver* usb_driver = &USBD2;
 #endif
 
 // Block buffer for INI ramdisk LUN
-static NO_CACHE uint8_t blkbufIni[dma_buffers::MsdBlockSize];
+static NO_CACHE uint8_t blkbufIni[dma_buffers::IniBlockSize];
 
 static CCM_OPTIONAL_BACKGROUND MassStorageController msd(usb_driver);
 
@@ -97,7 +97,7 @@ static BaseBlockDevice* getRamdiskDevice() {
 	ramdiskObjectInit(&ramdisk);
 
 	constexpr size_t ramdiskSize = sizeof(ramdisk_image);
-	constexpr size_t blockSize = 512;
+	constexpr size_t blockSize = dma_buffers::IniBlockSize;
 	constexpr size_t blockCount = ramdiskSize / blockSize;
 
 	// Ramdisk should be a round number of blocks
