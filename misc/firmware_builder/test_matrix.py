@@ -216,11 +216,13 @@ def make_request(
     *,
     board_id="core8",
     cpu="ARCH_STM32F4",
+    required_modules=(),
 ):
     return {
         "schema_version": 1,
         "board_id": board_id,
         "cpu": cpu,
+        "required_modules": list(required_modules),
         "profile": profile,
     }
 
@@ -667,6 +669,58 @@ class EvaluationTests(unittest.TestCase):
         self.assertNotIn("ram_total", predicted)
         self.assertNotIn("ram_total", result["estimate"]["summed_deltas"])
 
+    def test_board_required_module_is_part_of_the_estimate_baseline(self):
+        index = make_index(
+            make_report(features=("sd_card",), board_id="atlas"),
+            make_report(
+                features=("sd_card", "boost"),
+                board_id="atlas",
+                feature_usage={"boost": {"flash": 10, "ram0": 20}},
+            ),
+            make_report(
+                features=("sd_card", "lua"),
+                board_id="atlas",
+                feature_usage={"lua": {"flash": 15, "ram0": 30}},
+            ),
+        )
+        result = matrix.evaluate(
+            index,
+            make_request(
+                make_profile(("sd_card", "boost", "lua")),
+                board_id="atlas",
+                required_modules=("sd_card",),
+            ),
+            COMMIT,
+            "arm-none-eabi-g++",
+            DEFAULT_POLICY_ID,
+        )
+
+        self.assertEqual("requires_build", result["status"])
+        self.assertTrue(result["estimate"]["known"])
+        self.assertEqual(
+            ["boost", "lua"], result["estimate"]["target_optional_modules"]
+        )
+        self.assertIn(
+            "sd_card", result["estimate"]["baseline_profile"]["modules"]
+        )
+        self.assertEqual(
+            ["boost", "lua"], list(result["estimate"]["deltas_by_feature"])
+        )
+
+        exact = matrix.evaluate(
+            index,
+            make_request(
+                make_profile(("sd_card", "boost")),
+                board_id="atlas",
+                required_modules=("sd_card",),
+            ),
+            COMMIT,
+            "arm-none-eabi-g++",
+            DEFAULT_POLICY_ID,
+        )
+        self.assertEqual("verified", exact["status"])
+        self.assertEqual("exact_measurement_verified", exact["reason"])
+
     def test_conflicting_exact_observations_are_not_verified(self):
         policy = make_policy()
         accepted = make_report(policy=copy.deepcopy(policy))
@@ -923,7 +977,7 @@ class CliTests(unittest.TestCase):
             resolved = make_request(make_profile())
             with mock.patch.object(
                 matrix.catalog, "resolve", return_value=resolved
-            ):
+            ) as resolve:
                 code = matrix.main(
                     [
                         "evaluate",
@@ -935,6 +989,8 @@ class CliTests(unittest.TestCase):
                         "core8",
                         "--features",
                         "",
+                        "--sd-card",
+                        "false",
                         "--source-commit",
                         COMMIT,
                         "--toolchain-id",
@@ -945,6 +1001,7 @@ class CliTests(unittest.TestCase):
                         str(result_path),
                     ]
                 )
+            self.assertFalse(resolve.call_args.kwargs["sd_card"])
             self.assertEqual(0, code)
             result = json.loads(result_path.read_text(encoding="utf-8"))
             self.assertEqual("requires_build", result["status"])

@@ -22,7 +22,7 @@ except ImportError:  # Allow direct execution from this directory.
 SOURCE_COMMIT = "3060ccd5873a89e6499c9ade5756338ab7c529fd"
 PERSISTENT_SIZE = 4096
 PROFILE = {
-    "modules": ["boost", "fan", "map_averaging"],
+    "modules": ["boost", "fan", "map_averaging", "sd_card"],
     "cylinder_trim_count": 0,
     "ve_rpm_count": 16,
     "airmass_blend_size": 8,
@@ -45,7 +45,7 @@ RESOLVED = {
         "trip_odometer",
         "map_averaging",
     ],
-    "optional_modules": ["boost"],
+    "optional_modules": ["boost", "sd_card"],
     "profile": {**PROFILE, "engine_preset_mode": "default_all"},
 }
 
@@ -99,7 +99,7 @@ def _objdump() -> str:
     )
 
 
-def _realistic_report(elf_sha256: str) -> dict:
+def _realistic_report(elf_sha256: str, *, profile: dict = PROFILE) -> dict:
     symbols: dict[str, int | tuple[int, int | None]] = {
         "__flash0_base__": 0x08008000,
         "__flash0_end__": 0x080C0000,
@@ -123,7 +123,7 @@ def _realistic_report(elf_sha256: str) -> dict:
         board_id="proteus_f4",
         cpu="ARCH_STM32F4",
         source_commit=SOURCE_COMMIT,
-        profile=PROFILE,
+        profile=profile,
         symbols=resources.parse_nm(_nm(symbols)),
         sections=resources.parse_objdump_sections(_objdump()),
         toolchain={
@@ -214,7 +214,7 @@ class PackageTests(unittest.TestCase):
                     }
                 ],
                 "base_modules": RESOLVED["base_modules"],
-                "optional_modules": ["boost"],
+                "optional_modules": ["boost", "sd_card"],
             },
         )
         self.catalog_patch = catalog_patch.start()
@@ -244,11 +244,12 @@ class PackageTests(unittest.TestCase):
         cpu: str = RESOLVED["cpu"],
         ve_rpm_count: int = 16,
         airmass_blend_size: int = 8,
+        modules: list[str] = PROFILE["modules"],
     ) -> None:
         self.module_profile.write_text(
             "\n".join(
                 [
-                    "modules " + " ".join(PROFILE["modules"]),
+                    "modules " + " ".join(modules),
                     "cylinder_fuel_trim_count 0",
                     f"ve_rpm_count {ve_rpm_count}",
                     f"airmass_blend_size {airmass_blend_size}",
@@ -262,6 +263,33 @@ class PackageTests(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+
+    def _select_modules(
+        self,
+        *,
+        sd_card: bool,
+        required_modules: list[str] | None = None,
+    ) -> None:
+        modules = [module for module in PROFILE["modules"] if module != "sd_card"]
+        optional_modules = [
+            module for module in RESOLVED["optional_modules"] if module != "sd_card"
+        ]
+        if sd_card:
+            modules.append("sd_card")
+            optional_modules.append("sd_card")
+
+        profile = {**PROFILE, "modules": modules}
+        resolved = {
+            **RESOLVED,
+            "optional_modules": optional_modules,
+            "profile": {**RESOLVED["profile"], "modules": modules},
+        }
+        if required_modules is not None:
+            resolved["required_modules"] = required_modules
+        self._rewrite_resolved(resolved)
+        self._write_generated_profile(modules=modules)
+        self.report = _realistic_report(_sha256(self.elf), profile=profile)
+        self._rewrite_report(self.report)
 
     def _embed_ini(
         self,
@@ -299,6 +327,9 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(16, manifest["resolved"]["profile"]["ve_rpm_count"])
         self.assertEqual(8, manifest["resolved"]["profile"]["airmass_blend_size"])
         self.assertIn("engine_presets", manifest["resolved"]["profile"])
+        self.assertEqual("boost", manifest["requested"]["features"])
+        self.assertTrue(manifest["requested"]["sd_card"])
+        self.assertEqual([], manifest["resolved"]["required_modules"])
         self.assertIn("regions", manifest["measurements"])
         self.assertEqual(SOURCE_COMMIT, manifest["source"]["commit"])
         self.assertEqual(
@@ -326,6 +357,27 @@ class PackageTests(unittest.TestCase):
         manifest_text = (self.output / "manifest.json").read_text(encoding="utf-8")
         self.assertNotIn(str(self.root), manifest_text)
         self.assertNotIn(str(self.base), manifest_text)
+
+    def test_manifest_keeps_sd_out_of_normalized_feature_selection(self) -> None:
+        self._select_modules(sd_card=False)
+
+        manifest = self.publish()
+
+        self.assertEqual("boost", manifest["requested"]["features"])
+        self.assertFalse(manifest["requested"]["sd_card"])
+        self.assertEqual(["boost"], manifest["resolved"]["optional_modules"])
+        self.assertEqual([], manifest["resolved"]["required_modules"])
+        self.assertNotIn("sd_card", manifest["resolved"]["modules"])
+
+    def test_manifest_preserves_required_module_metadata(self) -> None:
+        self._select_modules(sd_card=True, required_modules=["sd_card"])
+
+        manifest = self.publish()
+
+        self.assertEqual("boost", manifest["requested"]["features"])
+        self.assertTrue(manifest["requested"]["sd_card"])
+        self.assertEqual(["sd_card"], manifest["resolved"]["required_modules"])
+        self.assertIn("sd_card", manifest["resolved"]["modules"])
 
     def test_accepts_matching_embedded_ini(self) -> None:
         self._embed_ini()
@@ -617,6 +669,9 @@ class WorkflowTests(unittest.TestCase):
         cls.workflow = (
             cls.repo / ".github/workflows/custom-firmware-build.yaml"
         ).read_text(encoding="utf-8")
+        cls.resource_workflow = (
+            cls.repo / ".github/workflows/firmware-resource-matrix.yaml"
+        ).read_text(encoding="utf-8")
         cls.boards = json.loads(
             (cls.repo / "misc/firmware_builder/boards.json").read_text(
                 encoding="utf-8"
@@ -648,17 +703,28 @@ class WorkflowTests(unittest.TestCase):
         presets = _input_section(self.workflow, "engine_presets")
         self.assertIn("type: string", presets)
         self.assertIn("default: ''", presets)
+        sd_card = _input_section(self.workflow, "sd_card")
+        self.assertIn("type: boolean", sd_card)
+        self.assertIn("default: true", sd_card)
 
     def test_workflow_uses_catalog_and_gated_package_helper(self) -> None:
         self.assertIn("misc/firmware_builder/catalog.py", self.workflow)
         self.assertIn('resolve_args=(', self.workflow)
         self.assertIn('--board "$INPUT_BOARD"', self.workflow)
         self.assertIn('--features "$INPUT_FEATURES"', self.workflow)
+        self.assertIn(
+            "INPUT_SD_CARD: ${{ inputs.sd_card }}", self.workflow
+        )
+        self.assertIn('--sd-card "$INPUT_SD_CARD"', self.workflow)
         self.assertIn('--github-env "$GITHUB_ENV"', self.workflow)
         self.assertIn("misc/firmware_builder/resources.py", self.workflow)
         self.assertIn("misc/firmware_builder/pipeline.py", self.workflow)
         self.assertNotIn("base_modules=(", self.workflow)
         self.assertNotIn("declare -A selected", self.workflow)
+
+    def test_resource_workflow_forwards_sd_card_boolean(self) -> None:
+        self.assertIn("SD_CARD: ${{ matrix.sd_card }}", self.resource_workflow)
+        self.assertIn('--sd-card "$SD_CARD"', self.resource_workflow)
 
     def test_gate_precedes_firmware_publication(self) -> None:
         extract = self.workflow.index("Extract and gate resources")

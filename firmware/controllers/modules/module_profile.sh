@@ -78,18 +78,23 @@ valid_engine_preset_selection() {
 	esac
 }
 
-module_selected() {
+module_in_profile() {
 	local modules=$1
+	local wanted=$2
 	local module
 	local -a module_tokens
 
 	read -ra module_tokens <<< "$modules"
 	for module in "${module_tokens[@]}"; do
-		if [[ "$module" == cylinder_fuel_trim ]]; then
+		if [[ "$module" == "$wanted" ]]; then
 			return 0
 		fi
 	done
 	return 1
+}
+
+module_selected() {
+	module_in_profile "$1" cylinder_fuel_trim
 }
 
 definitions_path() {
@@ -107,7 +112,13 @@ write_profile_definitions() {
 	local trim_count=$2
 	local ve_rpm_count=$3
 	local airmass_blend_size=$4
+	local modules=$5
 	local definitions definitions_tmp
+	local sd_card_enabled=false
+
+	if module_in_profile "$modules" sd_card; then
+		sd_card_enabled=true
+	fi
 
 	definitions=$(definitions_path "$profile")
 	definitions_tmp="${definitions}.tmp.$$"
@@ -121,6 +132,7 @@ write_profile_definitions() {
 		printf '#define AIRMASS_BLEND_LOAD_COUNT %s\n' "$airmass_blend_size"
 		printf '#define AIRMASS_BLEND_RPM_COUNT %s\n' "$airmass_blend_size"
 		printf '#define CYLINDER_FUEL_TRIM_COUNT %s\n' "$trim_count"
+		printf '#define FOME_SD_CARD_ENABLED %s\n' "$sd_card_enabled"
 	} > "$definitions_tmp"
 	chmod 0644 "$definitions_tmp"
 	if [[ -f "$definitions" ]] && cmp -s "$definitions_tmp" "$definitions"; then
@@ -378,7 +390,7 @@ write_profile() {
 	valid_engine_preset_selection "$engine_preset_mode" "$engine_presets" ||
 		die "engine preset list does not match mode $engine_preset_mode"
 
-	write_profile_definitions "$profile" "$trim_count" "$ve_rpm_count" "$airmass_blend_size"
+	write_profile_definitions "$profile" "$trim_count" "$ve_rpm_count" "$airmass_blend_size" "$modules"
 
 	{
 		printf 'modules %s\n' "$modules"
@@ -466,7 +478,8 @@ case "$mode" in
 		definitions_count=$(read_profile "$2" cylinder_fuel_trim_count)
 		ve_rpm_count=$(read_profile "$2" ve_rpm_count)
 		airmass_blend_size=$(read_profile "$2" airmass_blend_size)
-		write_profile_definitions "$2" "$definitions_count" "$ve_rpm_count" "$airmass_blend_size"
+		modules=$(read_profile "$2" modules)
+		write_profile_definitions "$2" "$definitions_count" "$ve_rpm_count" "$airmass_blend_size" "$modules"
 		printf '%s\n' "$definitions_file"
 		;;
 	generation-count)

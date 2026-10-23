@@ -157,9 +157,9 @@
 #define EFI_FILE_LOGGING TRUE
 #endif
 
-// Preserve the existing default while allowing USB mass storage without SD logging.
+// Embedded-INI USB mass storage is independent of SD logging.
 #ifndef EFI_USB_MSD
-#define EFI_USB_MSD EFI_FILE_LOGGING
+#define EFI_USB_MSD TRUE
 #endif
 
 #ifndef EFI_EMBED_INI_MSD

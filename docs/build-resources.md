@@ -26,7 +26,7 @@ Flash and RAM capacities are derived from ELF linker symbols and LOAD sections, 
 
 The default policy has zero technical-fit margins. A file at `misc/firmware_builder/policies/<board>.json` replaces the default policy for that board and carries its own content hash automatically. Board policies set minimum free bytes and heap capacity; they do not duplicate linker or CPU capacities.
 
-Baseline-plus-single-feature estimates are meaningful only in the same source, board, compiler, policy, dimensions, and preset context. Cylinder trim uses six cylinders in these profiles; twelve-cylinder use is not inferred. Estimates do not account for every LTO, shared INI, alias, or optional-module interaction they have not measured. An estimate that exceeds a policy threshold is a warning and schedules a build; it is never a hard rejection.
+Baseline-plus-single-feature estimates are meaningful only in the same source, board, compiler, policy, dimensions, and preset context. The mandatory baseline is the six base modules plus any board-required modules reported by the canonical catalog; Atlas therefore measures a baseline with `sd_card`, while a non-Atlas base-only baseline omits it. Board-required modules are excluded from optional deltas. Cylinder trim uses six cylinders in these profiles; twelve-cylinder use is not inferred. Estimates do not account for every LTO, shared INI, alias, or optional-module interaction they have not measured. An estimate that exceeds a policy threshold is a warning and schedules a build; it is never a hard rejection.
 
 ## Calibration plan
 
@@ -36,10 +36,12 @@ The coverage choices are:
 
 | Coverage | Bounded profiles per board |
 |---|---|
-| `baseline` | Six mandatory modules, 16 VE RPM points, 8-point airmass blend, no trim, default all presets. |
-| `singles` | The baseline plus each supported optional module, including a six-cylinder trim profile. Capability-blocked modules are absent. |
-| `full` | The baseline and all supported optional modules together. |
-| `expanded` | No-preset base profiles for `16/8`, `32/8`, `16/16`, and `32/16`, plus one all-supported `32/16` no-preset trim-6 probe. |
+| `baseline` | Six base modules plus board-required modules, 16 VE RPM points, 8-point airmass blend, no trim, default all presets. |
+| `singles` | The board baseline plus each non-required supported optional module, including a six-cylinder trim profile. Board-required modules are not duplicated as deltas, and capability-blocked modules are absent. |
+| `full` | The board baseline and all remaining supported optional modules together. |
+| `expanded` | No-preset board-baseline profiles for `16/8`, `32/8`, `16/16`, and `32/16`, plus one all-supported `32/16` no-preset trim-6 probe. |
+
+Calibration emits the `sd_card` selection separately from `features`. Non-Atlas baseline and ordinary single-module rows explicitly pass `sd_card=false`; the non-Atlas SD single and full rows pass `true`. Atlas always passes `true` because its required SD selection is already part of the mandatory baseline. This keeps base-only non-Atlas evidence measurable while making the Atlas required baseline exact.
 
 The plan has stable board and profile ordering, URL-safe profile ids, no duplicate profile entries, and no runner-local absolute paths. Its GitHub matrix contract is:
 
@@ -50,6 +52,7 @@ The plan has stable board and profile ordering, URL-safe profile ids, no duplica
       "board_id": "core8",
       "profile_id": "core8-baseline",
       "features": "",
+      "sd_card": false,
       "ve_rpm_count": 16,
       "airmass_blend_size": 8,
       "cylinder_trim_count": 0,
@@ -59,7 +62,7 @@ The plan has stable board and profile ordering, URL-safe profile ids, no duplica
 }
 ```
 
-The record values are the effective values returned by canonical resolution, and they are passed back as the build controls.
+The record values are the effective values returned by canonical resolution, and they are passed back as the build controls. The resource workflow forwards the boolean `sd_card` alongside `features`, dimensions, trim count, and presets.
 
 ```bash
 python3 misc/firmware_builder/calibration.py plan \
@@ -90,6 +93,7 @@ Resolve one canonical profile:
 ```bash
 python3 misc/firmware_builder/catalog.py resolve \
   --root "$PWD" --board core8 --features boost,lua \
+  --sd-card true \
   --ve-rpm-count 16 --airmass-blend-size 8 \
   --output "$RUNNER_TEMP/resolved-profile.json"
 ```
