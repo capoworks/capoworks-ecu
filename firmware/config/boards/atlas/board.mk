@@ -26,5 +26,6 @@ USE_WIFI = yes
 
 # Enable the SD card bootloader
 SD_BOOTLOADER = yes
+override FOME_MODULES_BOARD_REQUIRED += sd_card
 
 SHORT_BOARD_NAME = atlas

@@ -156,6 +156,9 @@ include $(CHIBIOS)/os/hal/lib/streams/streams.mk
 
 BOARDINC = $(BOARD_DIR)
 include $(BOARD_DIR)/board.mk
+# Validate the same board/module policy as the application. The bootloader's
+# own SD support below remains controlled independently by SD_BOOTLOADER.
+include $(PROJECT_DIR)/controllers/modules/module_profile.mk
 include $(PROJECT_DIR)/init/init.mk
 include $(PROJECT_DIR)/util/util.mk
 
@@ -367,7 +370,6 @@ ULIBS = -lm --specs=nano.specs
 
 include $(RULESFILE)
 include $(PROJECT_DIR)/rusefi_pch.mk
-include $(PROJECT_DIR)/controllers/modules/module_profile.mk
 include $(PROJECT_DIR)/fome_generated.mk
 include $(PROJECT_DIR)/gitversion.mk
 include $(PROJECT_DIR)/controllers/modules/modules_header_gen.mk
