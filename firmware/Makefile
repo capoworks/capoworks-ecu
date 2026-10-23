@@ -158,6 +158,9 @@ ifneq ($(strip $(USE_FATFS)),$(FOME_SD_CARD_ENABLED))
 endif
 endif
 USE_FATFS := $(FOME_SD_CARD_ENABLED)
+# The main firmware profile owns file logging. Boards retain their legacy value
+# for the bootloader, which includes board.mk without this filtering step.
+DDEFS := $(filter-out -DEFI_FILE_LOGGING=%,$(DDEFS))
 DDEFS += -DEFI_FILE_LOGGING=$(if $(filter sd_card,$(FOME_MODULES_RESOLVED)),TRUE,FALSE)
 
 # Include various ChibiOS mk files

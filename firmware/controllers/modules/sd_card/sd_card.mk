@@ -2,7 +2,7 @@
 # @author Giacomo di Ciocco, (C) 2026
 #
 # SD/FatFs sources are shared with existing hardware and mass-storage code and
-# are gated by EFI_FILE_LOGGING. module_profile.mk maps this selection to that
-# global flag and USE_FATFS; this recipe only exposes the conventional module
-# marker.
+# are gated by EFI_FILE_LOGGING. The main firmware Makefile maps the resolved
+# module selection to that global flag and USE_FATFS; this recipe only exposes
+# the conventional module marker.
 DDEFS += -DMODULE_SD_CARD=TRUE
