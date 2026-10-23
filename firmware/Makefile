@@ -106,10 +106,6 @@ ifeq ($(USE_OPENBLT),)
   USE_OPENBLT = no
 endif
 
-ifeq ($(USE_FATFS),)
-  USE_FATFS = yes
-endif
-
 #
 # Build global options
 ##############################################################################
@@ -150,6 +146,22 @@ ifeq ($(SHORT_BOARD_NAME),)
 $(error SHORT_BOARD_NAME not set, something wrong with your board.mk file)
 endif
 DDEFS += -DSHORT_BOARD_NAME=$(SHORT_BOARD_NAME)
+
+# Module selection must be known before FatFs/HAL source lists are assembled.
+# module_profile.mk has an include guard, so modules.mk below only adds recipes.
+include $(PROJECT_DIR)/controllers/modules/module_profile.mk
+
+FOME_SD_CARD_ENABLED := $(if $(filter sd_card,$(FOME_MODULES_RESOLVED)),yes,no)
+ifneq ($(strip $(USE_FATFS)),)
+ifneq ($(strip $(USE_FATFS)),$(FOME_SD_CARD_ENABLED))
+  $(error USE_FATFS=$(USE_FATFS) conflicts with the module profile: sd_card is $(FOME_SD_CARD_ENABLED). Omit USE_FATFS; it is derived from FOME_MODULES)
+endif
+endif
+USE_FATFS := $(FOME_SD_CARD_ENABLED)
+# The main firmware profile owns file logging. Boards retain their legacy value
+# for the bootloader, which includes board.mk without this filtering step.
+DDEFS := $(filter-out -DEFI_FILE_LOGGING=%,$(DDEFS))
+DDEFS += -DEFI_FILE_LOGGING=$(if $(filter sd_card,$(FOME_MODULES_RESOLVED)),TRUE,FALSE)
 
 # Include various ChibiOS mk files
 # Licensing files.

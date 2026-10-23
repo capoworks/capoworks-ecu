@@ -1,10 +1,25 @@
 # Shared resolved module profile. This file intentionally defines no build rules:
 # it is included while Make is still discovering its default goal.
+ifndef FOME_MODULE_PROFILE_INCLUDED
+FOME_MODULE_PROFILE_INCLUDED := 1
 
-FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim
+FOME_MODULE_CATALOG := fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim sd_card
 MODULE_ROOT := $(abspath $(PROJECT_DIR)/controllers/modules)
 MODULE_PROFILE_TOOL := $(MODULE_ROOT)/module_profile.sh
 MODULE_PROFILE_FILE := $(abspath $(PROJECT_DIR)/generated/module_profile.txt)
+
+# Boards own their module policy. Keep the declarations canonical and available
+# to host-only queries as well as normal firmware and bootloader parsing.
+FOME_MODULES_BOARD_REQUIRED := $(sort $(strip $(FOME_MODULES_BOARD_REQUIRED)))
+FOME_MODULES_BOARD_UNSUPPORTED := $(sort $(strip $(FOME_MODULES_BOARD_UNSUPPORTED)))
+FOME_MODULES_BOARD_REQUIRED_UNKNOWN := $(filter-out $(FOME_MODULE_CATALOG),$(FOME_MODULES_BOARD_REQUIRED))
+ifneq ($(strip $(FOME_MODULES_BOARD_REQUIRED_UNKNOWN)),)
+  $(error Board $(notdir $(BOARD_DIR)) requires unknown FOME_MODULES module(s): $(FOME_MODULES_BOARD_REQUIRED_UNKNOWN). Expected modules from: $(FOME_MODULE_CATALOG))
+endif
+FOME_MODULES_BOARD_REQUIRED_UNSUPPORTED := $(filter $(FOME_MODULES_BOARD_REQUIRED),$(FOME_MODULES_BOARD_UNSUPPORTED))
+ifneq ($(strip $(FOME_MODULES_BOARD_REQUIRED_UNSUPPORTED)),)
+  $(error Board $(notdir $(BOARD_DIR)) declares FOME_MODULES module(s) as both required and unsupported: $(FOME_MODULES_BOARD_REQUIRED_UNSUPPORTED))
+endif
 
 # These modules are available for explicit selection but are not part of the
 # default profile on any board.
@@ -26,6 +41,11 @@ FOME_MODULES_RESOLVED := $(filter $(FOME_MODULES),$(FOME_MODULE_CATALOG))
 FOME_MODULES_BOARD_UNSUPPORTED_SELECTED := $(filter $(FOME_MODULES_RESOLVED),$(FOME_MODULES_BOARD_UNSUPPORTED))
 ifneq ($(strip $(FOME_MODULES_BOARD_UNSUPPORTED_SELECTED)),)
   $(error Board $(notdir $(BOARD_DIR)) does not support FOME_MODULES module(s): $(FOME_MODULES_BOARD_UNSUPPORTED_SELECTED). Remove them from FOME_MODULES or select a supported board)
+endif
+
+FOME_MODULES_BOARD_REQUIRED_MISSING := $(filter-out $(FOME_MODULES_RESOLVED),$(FOME_MODULES_BOARD_REQUIRED))
+ifneq ($(strip $(FOME_MODULES_BOARD_REQUIRED_MISSING)),)
+  $(error Board $(notdir $(BOARD_DIR)) requires FOME_MODULES module(s): $(FOME_MODULES_BOARD_REQUIRED_MISSING). Add them to FOME_MODULES)
 endif
 
 ifneq ($(strip $(NO_MAP_AVERAGING)),)
@@ -118,3 +138,5 @@ ifneq ($(filter cylinder_fuel_trim,$(FOME_MODULES_RESOLVED)),)
   MODULE_INI_FRAGMENTS += $(MODULE_CYLINDER_TRIM_INI)
   MODULE_FRAGMENTS += $(MODULE_CYLINDER_TRIM_INI)
 endif
+
+endif # FOME_MODULE_PROFILE_INCLUDED

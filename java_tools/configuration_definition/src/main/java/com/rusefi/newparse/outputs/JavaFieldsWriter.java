@@ -66,6 +66,8 @@ public class JavaFieldsWriter {
                 ps.print("int " + d.getKey() + " = " + d.getValue().asInt());
             } else if (d.getValue().isNumeric()) {
                 ps.print("double " + d.getKey() + " = " + d.getValue().asDouble());
+            } else if (d.getValue().isBoolean()) {
+                ps.print("boolean " + d.getKey() + " = " + d.getValue());
             } else {
                 ps.print("String " + d.getKey() + " = " + d.getValue().toString());
             }

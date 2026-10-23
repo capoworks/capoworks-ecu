@@ -816,6 +816,23 @@ def _request_identity(
     board_id = _text(resolved_request.get("board_id"), "resolved_request.board_id")
     cpu = _text(resolved_request.get("cpu"), "resolved_request.cpu")
     profile = normalize_profile(resolved_request.get("profile"))
+    required_modules = _string_list(
+        resolved_request.get("required_modules", []),
+        "resolved_request.required_modules",
+    )
+    base_overlap = set(required_modules) & set(BASE_MODULES)
+    if base_overlap:
+        raise MatrixError(
+            "resolved_request.required_modules must not repeat base modules"
+        )
+    missing_required = [
+        module for module in required_modules if module not in profile["modules"]
+    ]
+    if missing_required:
+        raise MatrixError(
+            "resolved_request.profile is missing required modules: "
+            + ", ".join(missing_required)
+        )
     source = _source_commit(source_commit)
     compiler = _text(toolchain_id, "toolchain_id")
     policy = _text(policy_id, "policy_id")
@@ -823,6 +840,8 @@ def _request_identity(
         "board_id": board_id,
         "cpu": cpu,
         "profile": profile,
+        "required_modules": required_modules,
+        "mandatory_modules": list(BASE_MODULES) + required_modules,
         "source_commit": source,
         "toolchain_id": compiler,
         "policy_id": policy,
@@ -1030,8 +1049,10 @@ def _interaction_diagnostics(
     baseline: dict[str, Any],
     deltas: dict[str, dict[str, Any]],
     trim_count: int,
+    mandatory_modules: list[str],
 ) -> list[dict[str, Any]]:
     diagnostics = []
+    mandatory_set = set(mandatory_modules)
     for record in records:
         record_trim_count = (
             trim_count
@@ -1043,7 +1064,7 @@ def _interaction_diagnostics(
         features = [
             module
             for module in record["profile"]["modules"]
-            if module not in BASE_MODULES
+            if module not in mandatory_set
         ]
         if len(features) < 2 or not set(features).issubset(deltas):
             continue
@@ -1084,8 +1105,10 @@ def _estimate(
     index: dict[str, Any], identity: dict[str, Any]
 ) -> dict[str, Any]:
     target = identity["profile"]
+    mandatory_modules = identity["mandatory_modules"]
+    mandatory_set = set(mandatory_modules)
     target_optional = [
-        module for module in target["modules"] if module not in BASE_MODULES
+        module for module in target["modules"] if module not in mandatory_set
     ]
     same_context = [
         record
@@ -1114,7 +1137,7 @@ def _estimate(
     baseline_candidates = [
         record
         for record in same_fixed
-        if set(record["profile"]["modules"]) == set(BASE_MODULES)
+        if set(record["profile"]["modules"]) == mandatory_set
         and record["profile"]["cylinder_trim_count"] == 0
     ]
     baseline, baseline_records = _select_consistent(
@@ -1137,7 +1160,7 @@ def _estimate(
                 if baseline_records
                 else "missing_mandatory_baseline"
             ),
-            "required_modules": list(BASE_MODULES),
+            "required_modules": mandatory_modules,
         }
         return estimate_base
 
@@ -1155,7 +1178,7 @@ def _estimate(
             record
             for record in same_fixed
             if set(record["profile"]["modules"])
-            == set(BASE_MODULES) | {feature}
+            == mandatory_set | {feature}
             and record["profile"]["cylinder_trim_count"] == feature_trim_count
         ]
         compatible = []
@@ -1248,7 +1271,11 @@ def _estimate(
             },
             "predicted": predicted,
             "interaction_diagnostics": _interaction_diagnostics(
-                same_fixed, baseline, variants, target["cylinder_trim_count"]
+                same_fixed,
+                baseline,
+                variants,
+                target["cylinder_trim_count"],
+                mandatory_modules,
             ),
             "scope": (
                 "Modules-only model at fixed VE RPM count, airmass blend size, "
@@ -1515,6 +1542,12 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation.add_argument("--airmass-blend-size", type=int, default=8)
     evaluation.add_argument("--cylinder-trim-count", type=int, default=None)
     evaluation.add_argument("--engine-presets", default=None)
+    evaluation.add_argument(
+        "--sd-card",
+        type=catalog.parse_boolean,
+        choices=(True, False),
+        default=True,
+    )
     evaluation.add_argument("--output", metavar="PATH")
     return parser
 
@@ -1568,6 +1601,7 @@ def main(argv: list[str] | None = None) -> int:
                 airmass_blend_size=args.airmass_blend_size,
                 cylinder_trim_count=args.cylinder_trim_count,
                 engine_presets=args.engine_presets,
+                sd_card=args.sd_card,
             )
         except (catalog.CatalogError, OSError) as error:
             result = _invalid_request_result(

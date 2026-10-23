@@ -20,6 +20,7 @@ BASE_MODULES = (
     "trip_odometer",
     "map_averaging",
 )
+DEFAULT_OPTIONAL_MODULES = ("sd_card",)
 CPU_VALUES = {"ARCH_STM32F4", "ARCH_STM32F7", "ARCH_STM32H7"}
 FEATURE_DEPENDENCIES = {"emp_pump": ("fan",)}
 FEATURE_CONSTRAINTS = {
@@ -166,13 +167,37 @@ def _feature_capability_blocked(board, feature):
     )
 
 
+def _ordered_modules(values, catalog, board_id, label):
+    if len(values) != len(set(values)):
+        raise CatalogError(f"board {board_id} declares duplicate {label} modules")
+    unknown = sorted(set(values) - set(catalog))
+    if unknown:
+        raise CatalogError(
+            f"board {board_id} declares unknown {label} modules: "
+            + ", ".join(unknown)
+        )
+    selected = set(values)
+    return tuple(module for module in catalog if module in selected)
+
+
+def _optional_modules(catalog):
+    optional = tuple(module for module in catalog if module not in BASE_MODULES)
+    missing = [module for module in DEFAULT_OPTIONAL_MODULES if module not in optional]
+    if missing:
+        raise CatalogError(
+            "FOME_MODULE_CATALOG is missing default optional modules: "
+            + " ".join(missing)
+        )
+    return optional
+
+
 def catalog_document(root):
     root = _resolve_root(root)
     catalog = _read_module_catalog(root)
-    optional = tuple(module for module in catalog if module not in BASE_MODULES)
+    optional = _optional_modules(catalog)
     boards = []
     for board in _load_boards().values():
-        unsupported = _query_board_unsupported_modules(root, board, catalog)
+        unsupported, required = _query_board_module_metadata(root, board, catalog)
         unsupported_set = set(unsupported)
         supported_optional = tuple(
             module
@@ -185,6 +210,7 @@ def catalog_document(root):
                 **board,
                 "unsupported_modules": list(unsupported),
                 "supported_optional_modules": list(supported_optional),
+                "required_modules": list(required),
             }
         )
     return {
@@ -192,6 +218,7 @@ def catalog_document(root):
         "boards": boards,
         "base_modules": list(BASE_MODULES),
         "optional_modules": list(optional),
+        "default_optional_modules": list(DEFAULT_OPTIONAL_MODULES),
         "feature_dependencies": {
             feature: list(dependencies)
             for feature, dependencies in FEATURE_DEPENDENCIES.items()
@@ -216,6 +243,7 @@ def catalog_document(root):
                 "minimal_symbol": "MINIMAL_PINS",
                 "symbols": _engine_preset_symbols(root),
             },
+            "sd_card": {"default": True, "values": [True, False]},
             "features": {"max_length": 512},
             "request_id": {"pattern": REQUEST_ID_RE.pattern},
         },
@@ -276,6 +304,14 @@ def _normalize_engine_presets(value):
     return " ".join(tokens)
 
 
+def parse_boolean(value):
+    if value is True or value == "true":
+        return True
+    if value is False or value == "false":
+        return False
+    raise CatalogError("sd-card must be true or false")
+
+
 def _enforce_feature_rules(board, selected_optional):
     for feature in selected_optional:
         constraint = FEATURE_CONSTRAINTS.get(feature)
@@ -305,10 +341,10 @@ def _make_error(output):
     return message[-2000:] or "no diagnostic output"
 
 
-def _query_board_unsupported_modules(root, board, catalog):
+def _query_board_module_metadata(root, board, catalog):
     make = shutil.which("make")
     if not make:
-        raise CatalogError("make is required to resolve board module support")
+        raise CatalogError("make is required to resolve board module metadata")
     project_dir = root / "firmware"
     board_dir = (root / board["board_dir"]).resolve()
     if not (board_dir / "board.mk").is_file():
@@ -316,12 +352,14 @@ def _query_board_unsupported_modules(root, board, catalog):
     stdin_makefile = (
         "BOARDS_DIR ?= $(PROJECT_DIR)/config/boards\n"
         "include $(BOARD_DIR)/board.mk\n"
-        ".PHONY: print-unsupported\n"
-        "print-unsupported:\n"
+        ".PHONY: print-module-metadata\n"
+        "print-module-metadata:\n"
         "\t@printf 'FOME_MODULES_BOARD_UNSUPPORTED=%s\\n' "
         "'$(FOME_MODULES_BOARD_UNSUPPORTED)'\n"
+        "\t@printf 'FOME_MODULES_BOARD_REQUIRED=%s\\n' "
+        "'$(FOME_MODULES_BOARD_REQUIRED)'\n"
     )
-    with tempfile.TemporaryDirectory(prefix="fome-web-board-support-") as temp:
+    with tempfile.TemporaryDirectory(prefix="fome-web-board-metadata-") as temp:
         try:
             result = subprocess.run(
                 [
@@ -330,7 +368,7 @@ def _query_board_unsupported_modules(root, board, catalog):
                     "--no-print-directory",
                     "-f",
                     "-",
-                    "print-unsupported",
+                    "print-module-metadata",
                     f"PROJECT_DIR={project_dir}",
                     f"BOARD_DIR={board_dir}",
                     f"PROJECT_CPU={board['cpu']}",
@@ -347,36 +385,36 @@ def _query_board_unsupported_modules(root, board, catalog):
             )
         except subprocess.TimeoutExpired as error:
             raise CatalogError(
-                f"board support query timed out for {board['id']}"
+                f"board metadata query timed out for {board['id']}"
             ) from error
     if result.returncode:
         raise CatalogError(
-            f"board support query failed for {board['id']}: "
+            f"board metadata query failed for {board['id']}: "
             + _make_error(result.stderr + "\n" + result.stdout)
         )
-    marker = "FOME_MODULES_BOARD_UNSUPPORTED="
-    values = [
-        line[len(marker) :].strip()
-        for line in result.stdout.splitlines()
-        if line.startswith(marker)
-    ]
-    if len(values) != 1:
-        raise CatalogError(
-            f"board support query for {board['id']} returned no unique result"
+    metadata = {}
+    for field in ("UNSUPPORTED", "REQUIRED"):
+        marker = f"FOME_MODULES_BOARD_{field}="
+        values = [
+            line[len(marker) :].strip()
+            for line in result.stdout.splitlines()
+            if line.startswith(marker)
+        ]
+        if len(values) != 1:
+            raise CatalogError(
+                f"board metadata query for {board['id']} returned no unique "
+                f"{field.lower()} result"
+            )
+        metadata[field] = _ordered_modules(
+            values[0].split(), catalog, board["id"], field.lower()
         )
-    unsupported = values[0].split()
-    if len(unsupported) != len(set(unsupported)):
+    overlap = set(metadata["UNSUPPORTED"]) & set(metadata["REQUIRED"])
+    if overlap:
         raise CatalogError(
-            f"board support query for {board['id']} returned duplicate modules"
+            f"board {board['id']} declares modules both unsupported and required: "
+            + ", ".join(module for module in catalog if module in overlap)
         )
-    unknown = sorted(set(unsupported) - set(catalog))
-    if unknown:
-        raise CatalogError(
-            f"board {board['id']} declares unsupported unknown modules: "
-            + ", ".join(unknown)
-        )
-    selected = set(unsupported)
-    return tuple(module for module in catalog if module in selected)
+    return metadata["UNSUPPORTED"], metadata["REQUIRED"]
 
 
 def _run_make_profile(root, board, modules, ve_rpm_count, airmass_blend_size,
@@ -507,16 +545,21 @@ def _parse_profile(path):
 
 
 def resolve(root, board_id, features, ve_rpm_count=16, airmass_blend_size=8,
-            cylinder_trim_count=None, engine_presets=None, request_id=None):
+            cylinder_trim_count=None, engine_presets=None, request_id=None,
+            sd_card=True):
     root = _resolve_root(root)
     validate_request_id(request_id)
     catalog = _read_module_catalog(root)
-    optional_catalog = tuple(module for module in catalog if module not in BASE_MODULES)
-    selected_optional = parse_features(features, optional_catalog)
+    optional_catalog = _optional_modules(catalog)
+    requested_optional = parse_features(features, optional_catalog)
     boards = _load_boards()
     board = boards.get(board_id)
     if board is None:
         raise CatalogError(f"unknown board id {board_id!r}")
+    if not isinstance(sd_card, bool):
+        raise CatalogError("sd-card must be a boolean")
+    if not sd_card and "sd_card" in requested_optional:
+        raise CatalogError("sd-card=false contradicts features selecting sd_card")
     if (
         not isinstance(ve_rpm_count, int)
         or isinstance(ve_rpm_count, bool)
@@ -536,6 +579,30 @@ def resolve(root, board_id, features, ve_rpm_count=16, airmass_blend_size=8,
     ):
         raise CatalogError("cylinder-trim-count must be an integer from 1 to 12")
     engine_presets = _normalize_engine_presets(engine_presets)
+
+    unsupported, required = _query_board_module_metadata(root, board, catalog)
+    selected_set = set(requested_optional)
+    if sd_card:
+        selected_set.add("sd_card")
+    selected_optional = [
+        module for module in optional_catalog if module in selected_set
+    ]
+    unsupported_selected = [
+        module for module in selected_optional if module in set(unsupported)
+    ]
+    if unsupported_selected:
+        raise CatalogError(
+            f"board {board_id} does not support FOME_MODULES module(s): "
+            + " ".join(unsupported_selected)
+        )
+    missing_required = [
+        module for module in required if module not in selected_set
+    ]
+    if missing_required:
+        raise CatalogError(
+            f"board {board_id} requires FOME_MODULES module(s): "
+            f"{' '.join(missing_required)}; they cannot be disabled"
+        )
 
     modules = list(BASE_MODULES) + selected_optional
     _enforce_feature_rules(board, selected_optional)
@@ -562,6 +629,10 @@ def resolve(root, board_id, features, ve_rpm_count=16, airmass_blend_size=8,
     resolved_optional = [
         module for module in optional_catalog if module in profile["modules"]
     ]
+    if resolved_optional != selected_optional:
+        raise CatalogError(
+            "canonical profile optional modules do not match the requested selection"
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "board_id": board_id,
@@ -570,6 +641,7 @@ def resolve(root, board_id, features, ve_rpm_count=16, airmass_blend_size=8,
         "ini_file": board["ini_file"],
         "cpu": board["cpu"],
         "base_modules": list(BASE_MODULES),
+        "required_modules": list(required),
         "optional_modules": resolved_optional,
         "profile": profile,
     }
@@ -662,6 +734,9 @@ def build_parser():
     )
     resolve_parser.add_argument("--engine-presets", default=None)
     resolve_parser.add_argument("--request-id", default=None)
+    resolve_parser.add_argument(
+        "--sd-card", type=parse_boolean, choices=(True, False), default=True
+    )
     resolve_parser.add_argument("--output", default=None)
     resolve_parser.add_argument("--github-env", default=None)
     return parser
@@ -683,6 +758,7 @@ def main(argv=None):
                 args.cylinder_trim_count,
                 args.engine_presets,
                 args.request_id,
+                args.sd_card,
             )
         if args.command == "catalog" or not args.output:
             print(json.dumps(document, indent=2, sort_keys=True))

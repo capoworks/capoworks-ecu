@@ -29,6 +29,10 @@ public class Definition {
         return this.value instanceof String;
     }
 
+    public boolean isBoolean() {
+        return "true".equals(this.value) || "false".equals(this.value);
+    }
+
     public boolean isMultilineString() {
         return isString() && ((String)this.value).contains("\n");
     }

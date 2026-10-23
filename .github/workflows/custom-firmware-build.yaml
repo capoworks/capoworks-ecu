@@ -28,10 +28,15 @@ on:
           - atlas
           - core8
       features:
-        description: Comma-separated opt-in modules
+        description: Comma-separated modules other than SD card logging
         required: false
         type: string
         default: ''
+      sd_card:
+        description: Include SD-card file logging
+        required: false
+        type: boolean
+        default: true
       ve_rpm_count:
         description: VE table RPM dimensions
         required: false
@@ -113,6 +118,7 @@ jobs:
           INPUT_REQUEST_ID: ${{ inputs.request_id }}
           INPUT_BOARD: ${{ inputs.board }}
           INPUT_FEATURES: ${{ inputs.features }}
+          INPUT_SD_CARD: ${{ inputs.sd_card }}
           INPUT_VE_RPM_COUNT: ${{ inputs.ve_rpm_count }}
           INPUT_AIRMASS_BLEND_SIZE: ${{ inputs.airmass_blend_size }}
           INPUT_CYLINDER_TRIM_COUNT: ${{ inputs.cylinder_trim_count }}
@@ -132,6 +138,7 @@ jobs:
             --root "$GITHUB_WORKSPACE"
             --board "$INPUT_BOARD"
             --features "$INPUT_FEATURES"
+            --sd-card "$INPUT_SD_CARD"
             --request-id "$INPUT_REQUEST_ID"
             --ve-rpm-count "$INPUT_VE_RPM_COUNT"
             --airmass-blend-size "$INPUT_AIRMASS_BLEND_SIZE"

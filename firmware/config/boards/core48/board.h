@@ -27,9 +27,6 @@
 #undef EFI_USE_OSC
 #define EFI_USE_OSC TRUE
 
-#undef EFI_FILE_LOGGING
-#define EFI_FILE_LOGGING TRUE
-
 #undef EFI_MAX_31855
 #define EFI_MAX_31855 TRUE
 
