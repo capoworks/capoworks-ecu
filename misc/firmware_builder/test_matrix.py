@@ -677,11 +677,16 @@ class EvaluationTests(unittest.TestCase):
                 board_id="atlas",
                 feature_usage={"boost": {"flash": 10, "ram0": 20}},
             ),
+            make_report(
+                features=("sd_card", "lua"),
+                board_id="atlas",
+                feature_usage={"lua": {"flash": 15, "ram0": 30}},
+            ),
         )
         result = matrix.evaluate(
             index,
             make_request(
-                make_profile(("sd_card", "boost")),
+                make_profile(("sd_card", "boost", "lua")),
                 board_id="atlas",
                 required_modules=("sd_card",),
             ),
@@ -693,14 +698,28 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual("requires_build", result["status"])
         self.assertTrue(result["estimate"]["known"])
         self.assertEqual(
-            ["boost"], result["estimate"]["target_optional_modules"]
+            ["boost", "lua"], result["estimate"]["target_optional_modules"]
         )
         self.assertIn(
             "sd_card", result["estimate"]["baseline_profile"]["modules"]
         )
         self.assertEqual(
-            ["boost"], list(result["estimate"]["deltas_by_feature"])
+            ["boost", "lua"], list(result["estimate"]["deltas_by_feature"])
         )
+
+        exact = matrix.evaluate(
+            index,
+            make_request(
+                make_profile(("sd_card", "boost")),
+                board_id="atlas",
+                required_modules=("sd_card",),
+            ),
+            COMMIT,
+            "arm-none-eabi-g++",
+            DEFAULT_POLICY_ID,
+        )
+        self.assertEqual("verified", exact["status"])
+        self.assertEqual("exact_measurement_verified", exact["reason"])
 
     def test_conflicting_exact_observations_are_not_verified(self):
         policy = make_policy()

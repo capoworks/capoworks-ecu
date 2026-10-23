@@ -20,7 +20,7 @@ fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_
 
 On `hellen128`, `lua` is removed from that default because this board does not support Lua. Non-`hellen128` boards retain `lua` in their default profile. `cylinder_fuel_trim` is included with a default capacity of 6 on every board. `hella_opst`, `emp_pump`, and `shock_preload` are omitted from the default profile on every board, but remain available for explicit selection. The catalog above lists every token recognized by the resolver; it is not the default profile.
 
-`sd_card` enables SD-card file logging and is included in the default profile. An explicit `FOME_MODULES` value is still the complete selection: on non-Atlas boards, omitting `sd_card` disables card logging. Atlas declares `sd_card` as a board-required module, so a profile that omits it is rejected. SD-card file logging is independent of USB mass storage and the embedded TunerStudio INI drive; a build may retain USB/INI access without SD-card logging.
+`sd_card` enables SD-card file logging and is included in the default profile on supported boards. `nucleo_f767` and `small-can-board` explicitly declare it unsupported, so it is filtered from their defaults. An explicit `FOME_MODULES` value is still the complete selection: on non-Atlas boards, omitting `sd_card` disables card logging. Atlas declares `sd_card` as a board-required module, so a profile that omits it is rejected. SD-card file logging is independent of USB mass storage and the embedded TunerStudio INI drive; a build may retain USB/INI access without SD-card logging.
 
 The web catalog adds a dedicated boolean `sd_card` input, default `true`, while `features` continues to select the other opt-ins. The resolver submits an explicit `FOME_MODULES` selection so `features=''` still includes SD logging on supported boards. `--sd-card false` removes it on a non-Atlas board; combining that flag with `sd_card` in `features` is rejected as contradictory. The catalog exposes `default_optional_modules=['sd_card']`, `parameters.sd_card`, and per-board `required_modules` metadata derived from `board.mk`; consumers can use `required_modules` to lock required selections in their UI.
 
@@ -35,7 +35,7 @@ Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in eve
 | EMP coolant pump | `emp_pump` (requires `fan`) | No |
 | Shock preload | `shock_preload` (CAN2, requires CAN read and write) | No |
 | Cylinder fuel trim | `cylinder_fuel_trim` | Yes, with capacity 6 |
-| SD-card logging | `sd_card` | Yes; required on Atlas |
+| SD-card logging | `sd_card` | Yes on supported boards; unsupported on `nucleo_f767` and `small-can-board`; required on Atlas |
 
 An explicitly selected profile that includes `cylinder_fuel_trim` uses a capacity of 6 unless overridden:
 

@@ -362,11 +362,12 @@ class CanonicalMakeTests(unittest.TestCase):
         run_profile.assert_not_called()
 
     def test_board_required_modules_come_from_board_makefile(self):
-        boards = {board["id"]: board for board in self.document["boards"]}
+        document = catalog.catalog_document(ROOT)
+        boards = {board["id"]: board for board in document["boards"]}
         unsupported, required = catalog._query_board_module_metadata(
             ROOT,
             boards["atlas"],
-            self.document["base_modules"] + self.document["optional_modules"],
+            document["base_modules"] + document["optional_modules"],
         )
         self.assertEqual((), unsupported)
         self.assertEqual(("sd_card",), required)

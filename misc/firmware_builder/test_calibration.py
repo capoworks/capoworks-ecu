@@ -345,18 +345,25 @@ class CalibrationPlanTests(unittest.TestCase):
             board="core8",
             coverage="singles",
         )
-        by_features = {
-            record["features"]: record for record in matrix["include"]
+        by_profile_id = {
+            record["profile_id"]: record for record in matrix["include"]
         }
-        self.assertFalse(by_features[""]["sd_card"])
-        self.assertEqual("core8-baseline", by_features[""]["profile_id"])
-        sd_record = next(
-            record
-            for record in matrix["include"]
-            if record["profile_id"] == "core8-single-sd-card"
-        )
+        baseline = by_profile_id["core8-baseline"]
+        self.assertEqual("", baseline["features"])
+        self.assertFalse(baseline["sd_card"])
+
+        sd_record = by_profile_id["core8-single-sd-card"]
         self.assertEqual("", sd_record["features"])
         self.assertTrue(sd_record["sd_card"])
+        for record in matrix["include"]:
+            if record["profile_id"] in {
+                "core8-baseline",
+                "core8-single-sd-card",
+            }:
+                continue
+            with self.subTest(profile_id=record["profile_id"]):
+                self.assertNotEqual("", record["features"])
+                self.assertFalse(record["sd_card"])
 
         baseline_call = next(
             call

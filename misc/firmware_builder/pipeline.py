@@ -461,6 +461,9 @@ def package(
     optional_modules = _string_list(
         resolved.get("optional_modules"), "resolved optional_modules"
     )
+    required_modules = _string_list(
+        resolved.get("required_modules", []), "resolved required_modules"
+    )
     try:
         resolved_profile = matrix.normalize_profile(resolved.get("profile"))
         resolved_profile_key = matrix.profile_key(resolved_profile)
@@ -576,12 +579,16 @@ def package(
             "requested": {
                 "request_id": request_id,
                 "board": board_id,
-                "features": ",".join(optional_modules),
+                "features": ",".join(
+                    module for module in optional_modules if module != "sd_card"
+                ),
+                "sd_card": "sd_card" in resolved_profile["modules"],
             },
             "resolved": {
                 "board_id": board_id,
                 "base_modules": base_modules,
                 "optional_modules": optional_modules,
+                "required_modules": required_modules,
                 "modules": resolved_profile["modules"],
                 "profile": resolved_profile,
             },
