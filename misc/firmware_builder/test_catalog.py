@@ -69,8 +69,15 @@ class CatalogTests(unittest.TestCase):
     def test_machine_readable_board_support_gaps(self):
         boards = {board["id"]: board for board in self.document["boards"]}
         self.assertEqual(["lua"], boards["hellen128"]["unsupported_modules"])
+        self.assertEqual(["sd_card"], boards["atlas"]["required_modules"])
+        for board_id, board in boards.items():
+            if board_id != "atlas":
+                self.assertEqual([], board["required_modules"])
         self.assertNotIn(
             "lua", boards["hellen128"]["supported_optional_modules"]
+        )
+        self.assertIn(
+            "sd_card", boards["core8"]["supported_optional_modules"]
         )
         for board_id, board in boards.items():
             with self.subTest(board=board_id):
@@ -99,7 +106,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_board_support_is_queried_for_every_mapping(self):
         with mock.patch.object(
-            catalog, "_query_board_unsupported_modules", return_value=()
+            catalog, "_query_board_module_metadata", return_value=((), ())
         ) as query:
             document = catalog.catalog_document(ROOT)
         self.assertEqual(query.call_count, len(BOARD_IDS))
@@ -118,6 +125,8 @@ class CatalogTests(unittest.TestCase):
         emitted = self.document["base_modules"] + self.document["optional_modules"]
         self.assertEqual(emitted, source_modules)
         self.assertEqual(self.optional, source_modules[len(catalog.BASE_MODULES) :])
+        self.assertEqual(["sd_card"], self.document["default_optional_modules"])
+        self.assertEqual("sd_card", self.optional[-1])
 
     def test_feature_rules_and_supported_values(self):
         self.assertEqual(
@@ -147,12 +156,20 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(["all", "none"], presets["exclusive_keywords"])
         self.assertFalse(presets["mixed_selection_allowed"])
         self.assertFalse(presets["explicit_selection_allowed_when_expanded"])
+        self.assertEqual(
+            {"default": True, "values": [True, False]},
+            self.document["parameters"]["sd_card"],
+        )
 
     def test_feature_csv_validation_and_canonical_order(self):
         self.assertEqual(catalog.parse_features("", self.optional), [])
         self.assertEqual(
             catalog.parse_features(" boost, lua ", self.optional),
             ["boost", "lua"],
+        )
+        self.assertEqual(
+            catalog.parse_features("sd_card,boost", self.optional),
+            ["boost", "sd_card"],
         )
         invalid = {
             ",": "empty token",
@@ -278,7 +295,9 @@ class CanonicalMakeTests(unittest.TestCase):
         self.assertEqual(profile["engine_preset_mode"], "explicit_none")
         self.assertEqual(profile["engine_presets"], ["MINIMAL_PINS"])
         self.assertIn("cylinder_fuel_trim", profile["modules"])
-        self.assertEqual(resolved["optional_modules"], ["cylinder_fuel_trim"])
+        self.assertEqual(
+            resolved["optional_modules"], ["cylinder_fuel_trim", "sd_card"]
+        )
 
     def test_disabled_cylinder_trim_resolves_to_zero(self):
         resolved = catalog.resolve(
@@ -286,6 +305,7 @@ class CanonicalMakeTests(unittest.TestCase):
         )
         self.assertEqual(resolved["profile"]["cylinder_trim_count"], 0)
         self.assertNotIn("cylinder_fuel_trim", resolved["profile"]["modules"])
+        self.assertIn("sd_card", resolved["profile"]["modules"])
 
     def test_reordered_features_have_the_same_profile(self):
         first = catalog.resolve(
@@ -296,9 +316,60 @@ class CanonicalMakeTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
         self.assertEqual(
-            first["optional_modules"], ["boost", "lua", "cylinder_fuel_trim"]
+            first["optional_modules"],
+            ["boost", "lua", "cylinder_fuel_trim", "sd_card"],
         )
         self.assertEqual(first["profile"]["engine_preset_mode"], "default_all")
+
+    def test_sd_card_defaults_on_for_core8_and_atlas(self):
+        for board_id in ("core8", "atlas"):
+            with self.subTest(board=board_id):
+                resolved = catalog.resolve(ROOT, board_id, "")
+                self.assertIn("sd_card", resolved["profile"]["modules"])
+                self.assertIn("sd_card", resolved["optional_modules"])
+                self.assertEqual(
+                    ["sd_card"] if board_id == "atlas" else [],
+                    resolved["required_modules"],
+                )
+
+    def test_sd_card_can_be_disabled_on_core8(self):
+        resolved = catalog.resolve(
+            ROOT, "core8", "boost", sd_card=False
+        )
+        self.assertNotIn("sd_card", resolved["profile"]["modules"])
+        self.assertEqual(["boost"], resolved["optional_modules"])
+
+    def test_atlas_cannot_disable_required_sd_card(self):
+        with mock.patch.object(
+            catalog, "_run_make_profile"
+        ) as run_profile:
+            with self.assertRaisesRegex(
+                catalog.CatalogError, "atlas requires.*sd_card"
+            ):
+                catalog.resolve(ROOT, "atlas", "", sd_card=False)
+        run_profile.assert_not_called()
+
+    def test_false_sd_card_rejects_csv_selection(self):
+        with mock.patch.object(
+            catalog, "_run_make_profile"
+        ) as run_profile:
+            with self.assertRaisesRegex(
+                catalog.CatalogError, "contradicts.*sd_card"
+            ):
+                catalog.resolve(
+                    ROOT, "core8", "sd_card", sd_card=False
+                )
+        run_profile.assert_not_called()
+
+    def test_board_required_modules_come_from_board_makefile(self):
+        boards = {board["id"]: board for board in self.document["boards"]}
+        unsupported, required = catalog._query_board_module_metadata(
+            ROOT,
+            boards["atlas"],
+            self.document["base_modules"] + self.document["optional_modules"],
+        )
+        self.assertEqual((), unsupported)
+        self.assertEqual(("sd_card",), required)
 
     @unittest.skipUnless((ROOT / ".git").exists(), "git metadata is unavailable")
     def test_cli_outputs_stay_outside_the_checkout(self):
@@ -346,7 +417,8 @@ class CanonicalMakeTests(unittest.TestCase):
                 values[key] = value
             self.assertEqual(values["REQUEST_ID"], "request-42")
             self.assertEqual(values["BOARD_ID"], "core8")
-            self.assertEqual(values["REQUESTED_FEATURES"], "boost")
+            self.assertEqual(values["REQUESTED_FEATURES"], "boost sd_card")
+            self.assertIn("sd_card", values["FOME_MODULES"].split())
             self.assertEqual(values["FOME_ENGINE_PRESETS"], "all")
             self.assertEqual(values["FOME_VE_RPM_COUNT"], "16")
             self.assertEqual(values["FOME_AIRMASS_BLEND_SIZE"], "8")

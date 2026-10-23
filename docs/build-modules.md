@@ -7,7 +7,7 @@ Firmware modules are selected at compile time. `firmware/controllers/modules/mod
 The canonical catalog is:
 
 ```text
-fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim
+fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim sd_card
 ```
 
 Set `FOME_MODULES` to a whitespace-separated list of these exact, lowercase tokens. It replaces the default profile rather than adding to it. Unknown tokens fail during Make configuration, and selections are deduplicated and resolved in catalog order. An explicitly empty value remains empty. The existing `NO_MAP_AVERAGING` switch still removes `map_averaging`.
@@ -15,10 +15,14 @@ Set `FOME_MODULES` to a whitespace-separated list of these exact, lowercase toke
 An omitted value selects:
 
 ```text
-fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_sniffer lua cylinder_fuel_trim
+fan fuel_pump gear_detector tachometer trip_odometer map_averaging boost engine_sniffer lua cylinder_fuel_trim sd_card
 ```
 
 On `hellen128`, `lua` is removed from that default because this board does not support Lua. Non-`hellen128` boards retain `lua` in their default profile. `cylinder_fuel_trim` is included with a default capacity of 6 on every board. `hella_opst`, `emp_pump`, and `shock_preload` are omitted from the default profile on every board, but remain available for explicit selection. The catalog above lists every token recognized by the resolver; it is not the default profile.
+
+`sd_card` enables SD-card file logging and is included in the default profile. An explicit `FOME_MODULES` value is still the complete selection: on non-Atlas boards, omitting `sd_card` disables card logging. Atlas declares `sd_card` as a board-required module, so a profile that omits it is rejected. SD-card file logging is independent of USB mass storage and the embedded TunerStudio INI drive; a build may retain USB/INI access without SD-card logging.
+
+The web catalog adds a dedicated boolean `sd_card` input, default `true`, while `features` continues to select the other opt-ins. The resolver submits an explicit `FOME_MODULES` selection so `features=''` still includes SD logging on supported boards. `--sd-card false` removes it on a non-Atlas board; combining that flag with `sd_card` in `features` is rejected as contradictory. The catalog exposes `default_optional_modules=['sd_card']`, `parameters.sd_card`, and per-board `required_modules` metadata derived from `board.mk`; consumers can use `required_modules` to lock required selections in their UI.
 
 Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in every supported profile. Build availability and default inclusion are:
 
@@ -31,11 +35,12 @@ Keep `fan fuel_pump gear_detector tachometer trip_odometer map_averaging` in eve
 | EMP coolant pump | `emp_pump` (requires `fan`) | No |
 | Shock preload | `shock_preload` (CAN2, requires CAN read and write) | No |
 | Cylinder fuel trim | `cylinder_fuel_trim` | Yes, with capacity 6 |
+| SD-card logging | `sd_card` | Yes; required on Atlas |
 
 An explicitly selected profile that includes `cylinder_fuel_trim` uses a capacity of 6 unless overridden:
 
 ```bash
-FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging cylinder_fuel_trim" \
+FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging cylinder_fuel_trim sd_card" \
 bash compile_core8.sh
 ```
 
@@ -45,11 +50,11 @@ Native unit tests default `FOME_CYLINDER_TRIM_COUNT` to 12 for fixtures covering
 
 Other legacy modules have not been newly audited for removal. Explicitly selecting `lua` on `hellen128` is an error rather than a silent omission. `emp_pump` reads both fan-controller states for ram-air relief, so selecting it without `fan` is rejected during Make configuration.
 
-To select the full 13-token catalog on Core8, which is not `hellen128`, spell out the complete profile. This example also overrides the cylinder-trim capacity to 12:
+To select the full 14-token catalog on Core8, which is not `hellen128`, spell out the complete profile. This example also overrides the cylinder-trim capacity to 12:
 
 ```bash
 cd firmware/config/boards/core8
-FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim" \
+FOME_MODULES="fan fuel_pump gear_detector tachometer trip_odometer map_averaging hella_opst boost engine_sniffer lua emp_pump shock_preload cylinder_fuel_trim sd_card" \
 FOME_CYLINDER_TRIM_COUNT=12 \
 bash compile_core8.sh
 ```
@@ -138,6 +143,8 @@ The Shock preload module owns its CAN2 protocol, runtime state, configuration, o
 Cylinder fuel trim owns one persistent 16x16 factor table per configured cylinder, two shared axis arrays, per-cylinder load-source selectors, output channels, and a materialized TunerStudio fragment. The module does not create separate Speed Density and Alpha-N tables: each cylinder selects one of all six load coordinates (`Model default`, measured MAP, TPS, accelerator pedal, cylinder filling, or effective MAP), and the table remains a single factor table. Because every cylinder shares the same load-bin and RPM-bin arrays, a profile whose cylinders use sources with different units must use common breakpoints appropriate for the selected mix; changing a source does not retune those breakpoints.
 The shared load axis preserves fractional TPS breakpoints at 0.1 resolution without additional storage.
 Cylinder fuel trim does not persist a factor cache. Published telemetry is quantized to 0.01 percent trim and 0.1 load for binary transport, while the captured load and factor used by control retain full precision.
+
+The SD-card module retains the existing persisted SD-card configuration fields and status output channels, so enabling the module preserves the established logging configuration and telemetry contract. USB mass storage and the embedded INI drive remain available independently when SD-card logging is not selected.
 
 `integration/LiveData.yaml` owns live-data usage declarations and marks module-specific usages with `module:`. YAML order fixes `LDS_<usage>` IDs, so an unselected module keeps its declaration and IDs while its fragment and packed output usage disappear. Do not reorder or duplicate usages just to change a profile.
 

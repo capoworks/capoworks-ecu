@@ -93,6 +93,7 @@ jobs:
       BOARD_ID: ${{ matrix.board_id }}
       PROFILE_ID: ${{ matrix.profile_id }}
       FEATURES: ${{ matrix.features }}
+      SD_CARD: ${{ matrix.sd_card }}
       VE_RPM_COUNT: ${{ matrix.ve_rpm_count }}
       AIRMASS_BLEND_SIZE: ${{ matrix.airmass_blend_size }}
       CYLINDER_TRIM_COUNT: ${{ matrix.cylinder_trim_count }}
@@ -135,6 +136,7 @@ jobs:
             --root "$GITHUB_WORKSPACE"
             --board "$BOARD_ID"
             --features "$FEATURES"
+            --sd-card "$SD_CARD"
             --ve-rpm-count "$VE_RPM_COUNT"
             --airmass-blend-size "$AIRMASS_BLEND_SIZE"
             --engine-presets "$ENGINE_PRESETS"

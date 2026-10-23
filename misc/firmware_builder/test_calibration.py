@@ -35,6 +35,7 @@ OPTIONAL_MODULES = [
     "emp_pump",
     "shock_preload",
     "cylinder_fuel_trim",
+    "sd_card",
 ]
 SOURCE_COMMIT = "3060ccd5873a89e6499c9ade5756338ab7c529fd"
 
@@ -58,6 +59,9 @@ def _catalog_document() -> dict:
                     if module not in supported
                 ],
                 "supported_optional_modules": supported,
+                "required_modules": (
+                    ["sd_card"] if board["id"] == "atlas" else []
+                ),
             }
         )
     return {
@@ -85,9 +89,15 @@ def _resolved(
     airmass_blend_size: int,
     cylinder_trim_count: int | None,
     engine_presets: str | None,
+    sd_card: bool,
 ) -> dict:
     selected = features.split(",") if features else []
     board = next(item for item in BOARD_DATA if item["id"] == board_id)
+    effective_optional = [
+        module
+        for module in OPTIONAL_MODULES
+        if module in selected or (module == "sd_card" and sd_card)
+    ]
     preset_mode = "default_all" if engine_presets is None else "explicit_none"
     presets = (
         ["MINIMAL_PINS", "PROTEUS_BMW_M73"]
@@ -102,9 +112,12 @@ def _resolved(
         "ini_file": board["ini_file"],
         "cpu": board["cpu"],
         "base_modules": BASE_MODULES,
-        "optional_modules": [item for item in OPTIONAL_MODULES if item in selected],
+        "required_modules": (
+            ["sd_card"] if board_id == "atlas" else []
+        ),
+        "optional_modules": effective_optional,
         "profile": {
-            "modules": BASE_MODULES + selected,
+            "modules": BASE_MODULES + effective_optional,
             "ve_rpm_count": ve_rpm_count,
             "airmass_blend_size": airmass_blend_size,
             "cylinder_trim_count": cylinder_trim_count or 0,
@@ -146,6 +159,11 @@ class CalibrationPlanTests(unittest.TestCase):
             [record["board_id"] for record in records],
         )
         self.assertEqual(14, len(records))
+        sd_by_board = {
+            record["board_id"]: record["sd_card"] for record in records
+        }
+        self.assertFalse(sd_by_board["core8"])
+        self.assertTrue(sd_by_board["atlas"])
         for record in records:
             self.assertEqual("", record["features"])
             self.assertEqual(16, record["ve_rpm_count"])
@@ -174,7 +192,16 @@ class CalibrationPlanTests(unittest.TestCase):
         self.assertNotIn("lua", features)
         self.assertNotIn("shock_preload", features)
         self.assertIn("cylinder_fuel_trim", features)
-        self.assertEqual(1 + 5, len(matrix["include"]))
+        self.assertEqual(
+            1 + len(
+                next(
+                    board
+                    for board in self.document["boards"]
+                    if board["id"] == "hellen128"
+                )["supported_optional_modules"]
+            ),
+            len(matrix["include"]),
+        )
 
     def test_baseline_profile_ids_are_unique_in_all_coverage_plans(self) -> None:
         for coverage in ("baseline", "singles", "full"):
@@ -187,7 +214,7 @@ class CalibrationPlanTests(unittest.TestCase):
                 baselines = [
                     record
                     for record in matrix["include"]
-                    if record["features"] == ""
+                    if record["profile_id"] == "core8-baseline"
                 ]
                 self.assertEqual(1, len(baselines))
                 self.assertEqual("core8-baseline", baselines[0]["profile_id"])
@@ -216,6 +243,7 @@ class CalibrationPlanTests(unittest.TestCase):
         )
         self.assertEqual(6, trim_call.kwargs["cylinder_trim_count"])
         self.assertIsNone(trim_call.kwargs["engine_presets"])
+        self.assertFalse(trim_call.kwargs["sd_card"])
 
         shock_call = next(
             call
@@ -226,6 +254,7 @@ class CalibrationPlanTests(unittest.TestCase):
         self.assertEqual(8, shock_call.kwargs["airmass_blend_size"])
         self.assertIsNone(shock_call.kwargs["cylinder_trim_count"])
         self.assertIsNone(shock_call.kwargs["engine_presets"])
+        self.assertFalse(shock_call.kwargs["sd_card"])
 
     def test_full_selects_all_supported_modules_and_trim_six(self) -> None:
         matrix = calibration.plan(
@@ -236,7 +265,9 @@ class CalibrationPlanTests(unittest.TestCase):
 
         baseline, full = matrix["include"]
         self.assertEqual("", baseline["features"])
-        self.assertEqual(",".join(OPTIONAL_MODULES), full["features"])
+        self.assertEqual(",".join(OPTIONAL_MODULES[:-1]), full["features"])
+        self.assertFalse(baseline["sd_card"])
+        self.assertTrue(full["sd_card"])
         self.assertEqual(6, full["cylinder_trim_count"])
         self.assertEqual("all", full["engine_presets"])
 
@@ -278,7 +309,9 @@ class CalibrationPlanTests(unittest.TestCase):
         expected = {
             "baseline": len(self.document["boards"]),
             "singles": sum(
-                1 + len(board["supported_optional_modules"])
+                1
+                + len(board["supported_optional_modules"])
+                - len(board["required_modules"])
                 for board in self.document["boards"]
             ),
             "full": 2 * len(self.document["boards"]),
@@ -305,6 +338,74 @@ class CalibrationPlanTests(unittest.TestCase):
                 coverage="baseline",
             )
         self.resolve.assert_not_called()
+
+    def test_calibration_requests_sd_card_explicitly(self) -> None:
+        matrix = calibration.plan(
+            root="/source",
+            board="core8",
+            coverage="singles",
+        )
+        by_features = {
+            record["features"]: record for record in matrix["include"]
+        }
+        self.assertFalse(by_features[""]["sd_card"])
+        self.assertEqual("core8-baseline", by_features[""]["profile_id"])
+        sd_record = next(
+            record
+            for record in matrix["include"]
+            if record["profile_id"] == "core8-single-sd-card"
+        )
+        self.assertEqual("", sd_record["features"])
+        self.assertTrue(sd_record["sd_card"])
+
+        baseline_call = next(
+            call
+            for call in self.resolve.call_args_list
+            if call.args[1] == "core8"
+            and call.args[2] == ""
+            and call.kwargs["sd_card"] is False
+        )
+        self.assertEqual("", baseline_call.args[2])
+        boost_call = next(
+            call
+            for call in self.resolve.call_args_list
+            if call.args[1] == "core8" and call.args[2] == "boost"
+        )
+        self.assertFalse(boost_call.kwargs["sd_card"])
+        sd_call = next(
+            call
+            for call in self.resolve.call_args_list
+            if call.args[1] == "core8" and call.kwargs["sd_card"]
+        )
+        self.assertEqual("", sd_call.args[2])
+
+        full = calibration.plan(
+            root="/source",
+            board="core8",
+            coverage="full",
+        )["include"][1]
+        self.assertTrue(full["sd_card"])
+
+    def test_atlas_required_sd_card_is_in_mandatory_baseline(self) -> None:
+        matrix = calibration.plan(
+            root="/source",
+            board="atlas",
+            coverage="singles",
+        )
+        baseline = matrix["include"][0]
+        self.assertEqual("atlas-baseline", baseline["profile_id"])
+        self.assertEqual("", baseline["features"])
+        self.assertTrue(baseline["sd_card"])
+        self.assertNotIn(
+            "atlas-single-sd-card",
+            [record["profile_id"] for record in matrix["include"]],
+        )
+        atlas_calls = [
+            call
+            for call in self.resolve.call_args_list
+            if call.args[1] == "atlas"
+        ]
+        self.assertTrue(all(call.kwargs["sd_card"] for call in atlas_calls))
 
 
 class CalibrationCollectTests(unittest.TestCase):
@@ -554,6 +655,23 @@ class CalibrationCollectTests(unittest.TestCase):
                 calibration.collect(
                     root=self.root,
                     board="core8",
+                    output=self.output,
+                )
+
+        extract.assert_not_called()
+
+    def test_collect_rejects_missing_board_required_modules(self) -> None:
+        self._write_profile(board_dir="firmware/config/boards/atlas")
+
+        with mock.patch.object(
+            calibration.resources, "extract_report"
+        ) as extract:
+            with self.assertRaisesRegex(
+                calibration.CalibrationError, "missing required modules.*sd_card"
+            ):
+                calibration.collect(
+                    root=self.root,
+                    board="atlas",
                     output=self.output,
                 )
 

@@ -22,7 +22,7 @@ except ImportError:  # Allow direct execution from this directory.
 SOURCE_COMMIT = "3060ccd5873a89e6499c9ade5756338ab7c529fd"
 PERSISTENT_SIZE = 4096
 PROFILE = {
-    "modules": ["boost", "fan", "map_averaging"],
+    "modules": ["boost", "fan", "map_averaging", "sd_card"],
     "cylinder_trim_count": 0,
     "ve_rpm_count": 16,
     "airmass_blend_size": 8,
@@ -45,7 +45,7 @@ RESOLVED = {
         "trip_odometer",
         "map_averaging",
     ],
-    "optional_modules": ["boost"],
+    "optional_modules": ["boost", "sd_card"],
     "profile": {**PROFILE, "engine_preset_mode": "default_all"},
 }
 
@@ -214,7 +214,7 @@ class PackageTests(unittest.TestCase):
                     }
                 ],
                 "base_modules": RESOLVED["base_modules"],
-                "optional_modules": ["boost"],
+                "optional_modules": ["boost", "sd_card"],
             },
         )
         self.catalog_patch = catalog_patch.start()
@@ -617,6 +617,9 @@ class WorkflowTests(unittest.TestCase):
         cls.workflow = (
             cls.repo / ".github/workflows/custom-firmware-build.yaml"
         ).read_text(encoding="utf-8")
+        cls.resource_workflow = (
+            cls.repo / ".github/workflows/firmware-resource-matrix.yaml"
+        ).read_text(encoding="utf-8")
         cls.boards = json.loads(
             (cls.repo / "misc/firmware_builder/boards.json").read_text(
                 encoding="utf-8"
@@ -648,17 +651,28 @@ class WorkflowTests(unittest.TestCase):
         presets = _input_section(self.workflow, "engine_presets")
         self.assertIn("type: string", presets)
         self.assertIn("default: ''", presets)
+        sd_card = _input_section(self.workflow, "sd_card")
+        self.assertIn("type: boolean", sd_card)
+        self.assertIn("default: true", sd_card)
 
     def test_workflow_uses_catalog_and_gated_package_helper(self) -> None:
         self.assertIn("misc/firmware_builder/catalog.py", self.workflow)
         self.assertIn('resolve_args=(', self.workflow)
         self.assertIn('--board "$INPUT_BOARD"', self.workflow)
         self.assertIn('--features "$INPUT_FEATURES"', self.workflow)
+        self.assertIn(
+            "INPUT_SD_CARD: ${{ inputs.sd_card }}", self.workflow
+        )
+        self.assertIn('--sd-card "$INPUT_SD_CARD"', self.workflow)
         self.assertIn('--github-env "$GITHUB_ENV"', self.workflow)
         self.assertIn("misc/firmware_builder/resources.py", self.workflow)
         self.assertIn("misc/firmware_builder/pipeline.py", self.workflow)
         self.assertNotIn("base_modules=(", self.workflow)
         self.assertNotIn("declare -A selected", self.workflow)
+
+    def test_resource_workflow_forwards_sd_card_boolean(self) -> None:
+        self.assertIn("SD_CARD: ${{ matrix.sd_card }}", self.resource_workflow)
+        self.assertIn('--sd-card "$SD_CARD"', self.resource_workflow)
 
     def test_gate_precedes_firmware_publication(self) -> None:
         extract = self.workflow.index("Extract and gate resources")

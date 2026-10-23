@@ -40,6 +40,7 @@ or
 
 ### Added
  - Add build-profile options for `FOME_VE_RPM_COUNT` (`16` or `32`) and `FOME_AIRMASS_BLEND_SIZE` (`8` or `16`). The defaults remain the legacy 16 RPM-point VE tables and 8x8 SD + Alpha-N authority table; expanded resolutions are intended for builds that can accommodate their larger configuration layout.
+ - Make SD-card file logging a first-class `sd_card` build module: it is default-on in web builds, optional on boards other than Atlas, and required on Atlas while remaining independent of USB mass-storage and embedded-INI support.
  - Add an optional Caponord electronic shock preload controller on CAN2, including preset, position, target, alarm and current telemetry, command service controls, and a default-off `enableShockPreload` runtime setting. The build module is opt-in.
  - Add an optional EMP coolant pump module with its Caponord J1939 state machine, configuration and fallback tables, telemetry, service controls, after-run power hold, and CAN TX-thread queue. The build module is opt-in and remains disabled at runtime by `enableEmpPump`; selecting it requires the fan module.
  - Add an optional Engine Sniffer event recorder while preserving the shared RPM guard for the binary tooth logger and verbose trigger logging.
