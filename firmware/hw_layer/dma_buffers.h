@@ -17,8 +17,8 @@ struct SdLogBufferWriter;
 
 namespace dma_buffers {
 
-// USB mass-storage sectors are 512 bytes even when the SD driver is disabled.
-inline constexpr uint32_t MsdBlockSize = 512;
+// The embedded INI drive uses 512-byte blocks independently of SD support.
+inline constexpr uint32_t IniBlockSize = 512;
 
 void initMpu();
 uint8_t* bigBuffer();

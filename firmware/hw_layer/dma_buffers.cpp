@@ -44,7 +44,7 @@ struct DmaBufferContents {
 #endif
 
 #if HAL_USE_USB_MSD && EFI_FILE_LOGGING
-	uint8_t sdBlockBuffer[dma_buffers::MsdBlockSize];
+	uint8_t sdBlockBuffer[MMCSD_BLOCK_SIZE];
 #endif
 };
 
