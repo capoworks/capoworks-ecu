@@ -664,7 +664,7 @@ switch_input_pin_e clutchDownPin;Some cars have a switch to indicate that clutch
 	uint16_t autoscale fordInjectorSmallPulseSlope;;"", 0.001, 0, 0, 65, 3
 
 	uint8_t autoscale lambdaProtectionMinRpm;;"RPM", 100, 0, 0, 25000, 0
-	uint8_t autoscale lambdaProtectionMinLoad;;"%", 10, 0, 0, 1000, 0
+	uint8_t autoscale lambdaProtectionMinLoad;Thresholds use the selected lambda load source units (MAP/effective MAP in kPa, throttle/pedal/filling in %, Model default in fuel-model units).;"", 10, 0, 0, 1000, 0
 
 bit is_enabled_spi_1
 bit is_enabled_spi_2
@@ -1041,7 +1041,7 @@ int16_t tps2Max;;"ADC", 1, 0, 0, 1023, 0
 	uint8_t autoscale benchTestOffTime;Time between bench test pulses;"ms", 5, 0, 0, 2000, 0
 
 	uint8_t lambdaProtectionRestoreTps;;"%", 1, 0, 0, 100, 0
-	uint8_t autoscale lambdaProtectionRestoreLoad;;"%", 10, 0, 0, 1000, 0
+	uint8_t autoscale lambdaProtectionRestoreLoad;Thresholds use the selected lambda load source units (MAP/effective MAP in kPa, throttle/pedal/filling in %, Model default in fuel-model units).;"", 10, 0, 0, 1000, 0
 
 	pin_input_mode_e launchActivatePinMode;
 	Gpio can2TxPin;set_can2_tx_pin X
