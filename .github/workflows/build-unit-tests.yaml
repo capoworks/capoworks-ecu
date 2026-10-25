@@ -88,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        trim_count: [4, 6, 12]
+        trim_count: [2, 4, 6, 12]
 
     steps:
     - uses: actions/checkout@v7
@@ -116,7 +116,7 @@ jobs:
     - name: Run focused native suite
       if: ${{ matrix.trim_count != 12 }}
       working-directory: ./unit_tests/
-      run: build/fome_test --gtest_filter='CylinderFuelTrim.*:CylinderFuelTrimIntegration.*'
+      run: build/fome_test --gtest_filter='EnginePresetPolicy.*:CylinderFuelTrim.*:CylinderFuelTrimIntegration.*'
 
   cylinder-fuel-trim-arm:
     name: Cylinder Fuel Trim ARM (12 cylinders)

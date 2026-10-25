@@ -8,6 +8,8 @@
 
 #ifdef MODULE_CYLINDER_FUEL_TRIM
 
+#if CYLINDER_FUEL_TRIM_COUNT >= 4
+
 namespace {
 
 constexpr size_t TrimCylinders = 4;
@@ -335,5 +337,7 @@ TEST_F(CylinderFuelTrimIntegration, OversizedEngineIsConfigurationFaultBeforeLoa
 	GTEST_SKIP() << "A 12-cylinder trim capacity has no larger legal MAX_CYLINDER_COUNT victim";
 #endif
 }
+
+#endif // CYLINDER_FUEL_TRIM_COUNT >= 4
 
 #endif // MODULE_CYLINDER_FUEL_TRIM
