@@ -89,6 +89,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Fresh generic defaults now disable injection when the compiled cylinder fuel trim capacity is insufficient for the default firing order.
  - Correct the Model default table axis label for SD + Alpha-N so it shows Effective MAP instead of Cylinder filling.
  - Keep the embedded INI drive's USB block size independent of the SD driver, while sizing SD-card USB buffers from the driver's block size.
  - VE Analyze now applies strategy-specific crank, transient-fuel, cut-recovery, launch/anti-lag and lambda filters to Speed Density, Alpha-N and MAF maps, and publishes cranking and cut-recovery telemetry without moving existing output channels.
