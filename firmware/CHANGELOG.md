@@ -32,7 +32,8 @@ or
 ## Unreleased
 
 ### Breaking Changes
- - Advance the flash data version to `20032` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI.
+ - Maximum knock retard load bins are now 16-bit and accept values from 0 to 1000 without a fixed percent unit. This changes the tune layout, so older binary tunes reset; transfer the table and axes using the matching TunerStudio INI.
+ - Advance the flash data version to `20033` for the current tune layout, which adds a dedicated airmass table, independent consumer selectors, the SD + Alpha-N authority schema, and experimental ignition settings. Older binary tunes reset; transfer values manually using the firmware's matching generated TunerStudio INI.
  - Tune images now carry a static configuration-layout identity for module-aware snapshots. Binary tunes with an incompatible layout are intentionally rejected and defaults are restored; export and re-import values with matching definitions because binary migration is not provided.
  - Fuel table resolution is now fixed by the firmware build. Changing `FOME_VE_RPM_COUNT` or `FOME_AIRMASS_BLEND_SIZE` creates an incompatible configuration layout, so binary tunes from a differently sized build are rejected and reset; use the matching generated TunerStudio INI to transfer calibration values manually.
  - Removed the explicit threshold for the closed loop fuel idle region. Instead, the idle region is used whenever the idle controller decides the engine is idling, as this better matches behaviors like idle-up when cold, return to idle, etc.
@@ -89,6 +90,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Maximum knock retard load bins can now distinguish pressure-based loads above 250 kPa; loads above the final bin clamp to the final table row.
  - Keep the embedded INI drive's USB block size independent of the SD driver, while sizing SD-card USB buffers from the driver's block size.
  - VE Analyze now applies strategy-specific crank, transient-fuel, cut-recovery, launch/anti-lag and lambda filters to Speed Density, Alpha-N and MAF maps, and publishes cranking and cut-recovery telemetry without moving existing output channels.
  - Invalidate superseded planner firing callbacks independently of occurrence ownership. Pending charge estimates, active pulse minimum dwell, physical hard deadlines, multispark timing and trailing-charge lifecycle retain their existing guards.
