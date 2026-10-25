@@ -90,6 +90,8 @@ or
 
 ### Fixed
  - Fix the "Closed loop 1 adder" boost menu to open the first closed-loop blend table.
+ - Fresh generic defaults now disable injection when the compiled cylinder fuel trim capacity is insufficient for the default firing order.
+ - Correct the Model default table axis label for SD + Alpha-N so it shows Effective MAP instead of Cylinder filling.
  - Keep the embedded INI drive's USB block size independent of the SD driver, while sizing SD-card USB buffers from the driver's block size.
  - VE Analyze now applies strategy-specific crank, transient-fuel, cut-recovery, launch/anti-lag and lambda filters to Speed Density, Alpha-N and MAF maps, and publishes cranking and cut-recovery telemetry without moving existing output channels.
  - Invalidate superseded planner firing callbacks independently of occurrence ownership. Pending charge estimates, active pulse minimum dwell, physical hard deadlines, multispark timing and trailing-charge lifecycle retain their existing guards.

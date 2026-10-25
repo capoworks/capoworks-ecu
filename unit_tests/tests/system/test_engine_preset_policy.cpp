@@ -38,6 +38,31 @@ TEST(EnginePresetPolicy, defaultAndMinimalPresetsAreAvailable) {
 	EXPECT_EQ(engineConfiguration->engineType, expectedDefault);
 }
 
+#if defined(MODULE_CYLINDER_FUEL_TRIM) && CYLINDER_FUEL_TRIM_COUNT == 2
+TEST(EnginePresetPolicy, lowCapacityMinimalPinsUsesSafeGenericDefaults) {
+	EngineTestHelper eth(engine_type_e::MINIMAL_PINS);
+
+	EXPECT_EQ(engineConfiguration->engineType, engine_type_e::MINIMAL_PINS);
+	EXPECT_EQ(getFiringOrderLength(), 4u);
+	EXPECT_EQ(engineConfiguration->firingOrder, FO_1_3_4_2);
+	EXPECT_FALSE(engineConfiguration->isInjectionEnabled);
+	EXPECT_TRUE(validateConfig());
+}
+
+TEST(EnginePresetPolicy, lowCapacityExplicitFourCylinderPresetStillFailsValidation) {
+	EngineTestHelper eth(engine_type_e::MINIMAL_PINS);
+
+	ASSERT_TRUE(isEnginePresetAvailable(engine_type_e::DODGE_NEON_1995));
+	resetConfigurationExt(engine_type_e::DODGE_NEON_1995);
+
+	EXPECT_EQ(engineConfiguration->engineType, engine_type_e::DODGE_NEON_1995);
+	EXPECT_EQ(getFiringOrderLength(), 4u);
+	EXPECT_EQ(engineConfiguration->firingOrder, FO_1_3_4_2);
+	EXPECT_TRUE(engineConfiguration->isInjectionEnabled);
+	EXPECT_THROW(validateConfig(), std::logic_error);
+}
+#endif
+
 #if !HW_POLYGONUS_PRESETS
 TEST(EnginePresetPolicy, missingBoardPresetIsRejectedBeforeMutation) {
 	if (!FOME_ENGINE_PRESET_ENABLED(POLYGONUS_MIATA_NA6)) {
