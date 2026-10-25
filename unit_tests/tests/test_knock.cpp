@@ -84,3 +84,27 @@ TEST(Knock, Reapply) {
 	// Should have no knock retard
 	EXPECT_FLOAT_EQ(dut.getKnockRetard(), 0);
 }
+
+TEST(Knock, MaximumRetardSupportsHighPressureLoadBins) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+
+	copyArray(config->maxKnockRetardLoadBins, {0, 100, 200, 300, 400, 500});
+	copyArray(config->maxKnockRetardRpmBins, {0, 1000, 2000, 3000, 4000, 5000});
+	for (size_t row = 0; row < 6; row++) {
+		for (size_t column = 0; column < 6; column++) {
+			config->maxKnockRetardTable[row][column] = row * 2.0f;
+		}
+	}
+
+	engineConfiguration->fuelAlgorithm = LM_MOCK;
+	config->knockRetardLoadSource = AFR_MAP;
+	Sensor::setMockValue(SensorType::Rpm, 3000);
+
+	KnockController dut;
+
+	Sensor::setMockValue(SensorType::Map, 350);
+	EXPECT_FLOAT_EQ(dut.getMaximumRetard(), 7);
+
+	Sensor::setMockValue(SensorType::Map, 750);
+	EXPECT_FLOAT_EQ(dut.getMaximumRetard(), 10);
+}
