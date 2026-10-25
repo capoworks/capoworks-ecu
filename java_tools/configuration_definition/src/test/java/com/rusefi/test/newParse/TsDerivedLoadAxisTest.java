@@ -21,8 +21,9 @@ public class TsDerivedLoadAxisTest {
             "../../firmware/tunerstudio/tunerstudio.template.ini").toAbsolutePath().normalize();
     private static final String LOAD_AXIS = "modelDefaultLoadAxis";
     private static final String DEFINITION =
-            "modelDefaultLoadAxis = { fuelAlgorithm == " +
-                    "@@engine_load_mode_e_LM_SPEED_DENSITY@@ ? 5 : (fuelAlgorithm == " +
+            "modelDefaultLoadAxis = { (fuelAlgorithm == " +
+                    "@@engine_load_mode_e_LM_SPEED_DENSITY@@ || fuelAlgorithm == " +
+                    "@@engine_load_mode_e_LM_SD_ALPHA_N@@) ? 5 : (fuelAlgorithm == " +
                     "@@engine_load_mode_e_LM_ALPHA_N@@ ? 2 : 4) }";
 
     @Test
