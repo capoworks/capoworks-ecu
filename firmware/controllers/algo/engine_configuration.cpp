@@ -655,9 +655,8 @@ void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e
 
 	applyEnginePreset(engineType, true);
 #ifdef MODULE_CYLINDER_FUEL_TRIM
-	if (engineType == engine_type_e::MINIMAL_PINS &&
-			engineConfiguration->isInjectionEnabled &&
-			getFiringOrderLength() > CYLINDER_FUEL_TRIM_COUNT) {
+	if (engineType == engine_type_e::MINIMAL_PINS && engineConfiguration->isInjectionEnabled &&
+		getFiringOrderLength() > CYLINDER_FUEL_TRIM_COUNT) {
 		engineConfiguration->isInjectionEnabled = false;
 	}
 #endif // MODULE_CYLINDER_FUEL_TRIM
