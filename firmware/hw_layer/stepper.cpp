@@ -17,7 +17,7 @@
 namespace {
 bool isStepperPowered() {
 	return engine->isMainRelayEnabled() &&
-		Sensor::getOrZero(SensorType::BatteryVoltage) >= engineConfiguration->minStepperVoltage;
+		   Sensor::getOrZero(SensorType::BatteryVoltage) >= engineConfiguration->minStepperVoltage;
 }
 } // namespace
 
