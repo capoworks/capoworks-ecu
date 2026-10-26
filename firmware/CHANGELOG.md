@@ -90,6 +90,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Fix misleading lambda-protection min/restore load units; guidance now follows the selected load source instead of always showing percent.
  - Maximum knock retard load bins can now distinguish pressure-based loads above 250 kPa; loads above the final bin clamp to the final table row.
  - Fix the "Closed loop 1 adder" boost menu to open the first closed-loop blend table.
  - Fresh generic defaults now disable injection when the compiled cylinder fuel trim capacity is insufficient for the default firing order.
