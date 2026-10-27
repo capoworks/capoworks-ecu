@@ -47,4 +47,4 @@
 #define ts_readonly_spi3sckPin 1
 #define ts_readonly_stepperEnablePin 1
 #define ts_readonly_vbattAdcChannel 1
-#define ts_readonly_vbattDividerCoeff 1
+#define ts_readonly_vbattDividerCoeff "!enableBatteryDividerOverride"

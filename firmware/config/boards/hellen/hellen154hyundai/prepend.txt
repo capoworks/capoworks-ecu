@@ -53,4 +53,4 @@
 #define ts_readonly_triggerInputPins1 "hellenBoardId == -1 || hellenBoardId == 10"
 #define ts_readonly_triggerInputPins2 1
 #define ts_readonly_vbattAdcChannel 1
-#define ts_readonly_vbattDividerCoeff 1
+#define ts_readonly_vbattDividerCoeff "!enableBatteryDividerOverride"

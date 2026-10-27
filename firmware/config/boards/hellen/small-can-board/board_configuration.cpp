@@ -12,7 +12,7 @@ void setBoardConfigOverrides() {
 	engineConfiguration->analogInputDividerCoefficient = 2.0f;
 
 	// 33k / 6.8k = 5.835
-	engineConfiguration->vbattDividerCoeff = (33 + 6.8) / 6.8;
+	setBoardBatteryVoltageDivider((33 + 6.8) / 6.8);
 	engineConfiguration->vbattAdcChannel = EFI_ADC_11;
 
 	// Force I/O for Lua - so no TS is required

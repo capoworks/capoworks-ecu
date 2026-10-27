@@ -92,7 +92,7 @@
 ! Any time an incompatible change is made to the configuration format stored in flash,
 ! update this string to the current date! It is required to also update TS_SIGNATURE above
 ! when this happens.
-#define FLASH_DATA_VERSION 20033
+#define FLASH_DATA_VERSION 20034
 
 ! this offset is part of console compatibility mechanism, please DO NOT change this offset
 #define TS_FILE_VERSION_OFFSET 124
@@ -494,7 +494,7 @@ angle_t globalTriggerAngleOffset;Angle between Top Dead Center (TDC) and the fir
 
 
 float analogInputDividerCoefficient;Ratio/coefficient of input voltage dividers on your PCB. For example, use '2' if your board divides 5v into 2.5v. Use '1.66' if your board divides 5v into 3v.;"coef", 1, 0, 0.01, 10, 2
-float vbattDividerCoeff;This is the ratio of the resistors for the battery voltage, measure the voltage at the battery and then adjust this number until the gauge matches the reading.;"coef", 1, 0, 0.01, 99, 2
+float vbattDividerCoeff;Effective battery voltage divider coefficient. The board nominal is normally enforced. enable the advanced override only for rare manual calibration against a voltmeter.;"coef", 1, 0, 0.01, 99, 2
 
 uint8_t autotemp fanOnTemperature;Cooling fan turn-on temperature threshold, in Celsius;"C", 1, 0, 0, 150, 0
 uint8_t autotemp fanOffTemperature;Cooling fan turn-off temperature threshold, in Celsius;"C", 1, 0, 0, 150, 0
@@ -1038,6 +1038,7 @@ int16_t tps2Max;;"ADC", 1, 0, 0, 1023, 0
 	bit canOpenBLT; Allow OpenBLT on Primary CAN
 	bit can2OpenBLT; Allow OpenBLT on Secondary CAN
 	bit injectorFlowAsMassFlow,"mass flow","volumetric flow";Select whether to configure injector flow in volumetric flow (default, cc/min) or mass flow (g/s).
+	bit enableBatteryDividerOverride;Allow the advanced override of the battery divider coefficient. The board nominal is normally enforced. enable this only for rare manual calibration against a voltmeter.
 	uint8_t autoscale benchTestOffTime;Time between bench test pulses;"ms", 5, 0, 0, 2000, 0
 
 	uint8_t lambdaProtectionRestoreTps;;"%", 1, 0, 0, 100, 0

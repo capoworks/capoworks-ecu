@@ -30,7 +30,8 @@ public class TsConfigProtectionTest {
 
     private static final String CONFIG = "custom name_t 16 string, ASCII, @OFFSET@, 16\n" +
             "struct_no_prefix config\n" +
-            "int pin\nint freePin\nbit enabled\nname_t name\nend_struct\n";
+            "int pin\nint freePin\nbit enabled\nname_t name\n" +
+            "float vbattDividerCoeff\nbit enableBatteryDividerOverride\nend_struct\n";
 
     @Test
     public void fixedSettingIsProtectedInEveryDialogAndOnImport() throws Exception {
@@ -54,6 +55,21 @@ public class TsConfigProtectionTest {
         assertFalse(result.contains("\treadOnly = pin\n"));
         assertTrue(result.contains("{ (selectExpression(enabled, 0, 1)) && !(hellenBoardId != -1) }, { freePin != 0 }"));
         assertTrue(result.contains("{ (1) && !(hellenBoardId != -1) }, { enabled }"));
+    }
+
+    @Test
+    public void batteryDividerConditionKeepsCheckboxAndCombinesExistingEnable() throws Exception {
+        String result = generate(
+                "#define ts_readonly_vbattDividerCoeff \"!enableBatteryDividerOverride\"\n" + CONFIG,
+                "field = \"Manual battery divider\", enableBatteryDividerOverride\n" +
+                "field = \"Battery divider\", vbattDividerCoeff, { enabled }, { freePin != 0 }\n");
+        assertTrue(result.contains("\tcontrollerPriority = vbattDividerCoeff\n"));
+        assertFalse(result.contains("\treadOnly = vbattDividerCoeff\n"));
+        assertTrue(result.contains(
+                "field = \"Manual battery divider\", enableBatteryDividerOverride\n"));
+        assertTrue(result.contains(
+                "field = \"Battery divider\", vbattDividerCoeff, " +
+                "{ (enabled) && !(!enableBatteryDividerOverride) }, { freePin != 0 }"));
     }
 
     @Test

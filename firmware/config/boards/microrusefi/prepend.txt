@@ -54,4 +54,4 @@
 #define ts_readonly_tle8888_cs 1
 #define ts_readonly_tle8888spiDevice 1
 #define ts_readonly_vbattAdcChannel 1
-#define ts_readonly_vbattDividerCoeff 1
+#define ts_readonly_vbattDividerCoeff "!enableBatteryDividerOverride"

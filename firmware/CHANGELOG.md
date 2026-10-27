@@ -90,6 +90,7 @@ or
  - Instant RPM is now used automatically on triggers with 24 or more teeth per engine cycle (a 12 tooth crank wheel or better), instead of only when "Always use instant RPM" was enabled. RPM, and everything derived from it, now responds within a fraction of an engine cycle instead of once per cycle. The setting remains, and now forces instant RPM on triggers with fewer teeth than that.
 
 ### Fixed
+ - Battery-voltage divider calibration is now optional on all fixed-divider boards. The "Override battery divider coefficient (advanced)" checkbox defaults off, in which case each board applies its nominal divider; enabling it permits rare manual calibration against a voltmeter, and clearing it restores the board nominal. Divider changes apply after a stopped-engine Burn or after saving and rebooting. This advances the stored tune version to `20034`, requiring a tune backup and transfer using matching TunerStudio definitions from the older schema even though existing field offsets are unchanged.
  - STEP/DIR idle stepper drivers now stay enabled between steps, wait a fixed 2 ms after enabling before the first step, and release after five seconds without movement, or when main-relay power or battery voltage is unavailable (including during the enable delay).
  - Fix misleading lambda-protection min/restore load units; guidance now follows the selected load source instead of always showing percent.
  - Maximum knock retard load bins can now distinguish pressure-based loads above 250 kPa; loads above the final bin clamp to the final table row.
