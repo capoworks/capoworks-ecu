@@ -67,6 +67,7 @@ void rememberCurrentConfiguration();
 void setBoardDefaultConfiguration();
 // Keep fixed TS fields in the board's prepend.txt in sync; see config/boards/tunerstudio-protection.md.
 void setBoardConfigOverrides();
+void setBoardBatteryVoltageDivider(float nominalCoefficient);
 // Init any sensors built in to the board that don't need config
 void initBoardSensors();
 void checkBoardPowerSupply();

@@ -65,6 +65,9 @@ static void setupVbatt() {
 	// 5.6k high side/10k low side = 1.56 ratio divider
 	engineConfiguration->analogInputDividerCoefficient = 1.56f;
 
+	// 6.34k high side/ 1k low side
+	setBoardBatteryVoltageDivider((6.34 + 1) / 1);
+
 	// Battery sense on PA7
 	engineConfiguration->vbattAdcChannel = EFI_ADC_0;
 
@@ -121,10 +124,6 @@ static void setupDefaultSensorInputs() {
 void setBoardDefaultConfiguration() {
 	setInjectorPins();
 	setIgnitionPins();
-
-	// 6.34k high side / 1k low side. Keep the nominal coefficient in this
-	// defaults-only path so saved and imported calibration is not overwritten.
-	engineConfiguration->vbattDividerCoeff = (6.34 + 1) / 1;
 
 	engineConfiguration->isSdCardEnabled = true;
 

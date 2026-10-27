@@ -34,4 +34,13 @@ where a pin is free, configure it via its dialog after import. Offline controls
 cannot identify the board revision, so connect to the ECU before configuring
 these settings.
 
+## Battery-divider calibration
+
+Boards with a fixed battery-voltage divider expose an opt-in
+`enableBatteryDividerOverride` checkbox. With it off, the board applies its fixed
+divider. Enable it only for the rare case that requires manual calibration while
+connected; clearing it restores the board's nominal coefficient. The coefficient
+uses `controllerPriority`, so tune import keeps the ECU value even when the
+checkbox is enabled. Edit the coefficient after connecting to change it.
+
 See the [EFI Analytics definition-file specification, section 6](https://www.efianalytics.com/TunerStudio/docs/EFI%20Analytics%20ECU%20Definition%20files.pdf).

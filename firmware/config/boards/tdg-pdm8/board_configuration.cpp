@@ -7,7 +7,7 @@ void setBoardConfigOverrides() {
 	engineConfiguration->analogInputDividerCoefficient = 1;
 
 	// 10k/100k divider
-	engineConfiguration->vbattDividerCoeff = 11;
+	setBoardBatteryVoltageDivider(11);
 	engineConfiguration->vbattAdcChannel = EFI_ADC_4;
 
 	engineConfiguration->canTxPin = Gpio::A12;

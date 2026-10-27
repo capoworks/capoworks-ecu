@@ -59,7 +59,7 @@ static void setupVbatt() {
 
 	// set vbatt_divider 5.835
 	// 33k / 6.8k
-	engineConfiguration->vbattDividerCoeff = (33 + 6.8) / 6.8; // 5.835
+	setBoardBatteryVoltageDivider((33 + 6.8) / 6.8); // 5.835
 
 	engineConfiguration->vbattAdcChannel = H144_IN_VBATT;
 

@@ -38,4 +38,4 @@
 #define ts_readonly_spi1mosiPin "hellenBoardId != 107"
 #define ts_readonly_spi1sckPin "hellenBoardId != 107"
 #define ts_readonly_vbattAdcChannel 1
-#define ts_readonly_vbattDividerCoeff 1
+#define ts_readonly_vbattDividerCoeff "!enableBatteryDividerOverride"

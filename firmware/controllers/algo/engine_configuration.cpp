@@ -102,6 +102,9 @@
  */
 engine_configuration_s activeConfiguration;
 
+// Zero means the current reset did not supply a fixed board battery-divider nominal.
+static float boardBatteryVoltageDividerNominal = 0;
+
 void rememberCurrentConfiguration() {
 	activeConfiguration = *engineConfiguration;
 }
@@ -311,6 +314,8 @@ static void setDefaultEngineConfiguration() {
 	efi::clear(persistentState.persistentConfiguration);
 #endif
 	prepareVoidConfiguration(engineConfiguration);
+	engineConfiguration->enableBatteryDividerOverride = false;
+	boardBatteryVoltageDividerNominal = 0;
 
 	setDefaultBaseEngine();
 	setDefaultFuel();
@@ -654,6 +659,9 @@ void resetConfigurationExt(configuration_callback_t boardCallback, engine_type_e
 	engineConfiguration->engineType = engineType;
 
 	applyEnginePreset(engineType, true);
+	if (boardBatteryVoltageDividerNominal > 0) {
+		setBoardBatteryVoltageDivider(boardBatteryVoltageDividerNominal);
+	}
 #ifdef MODULE_CYLINDER_FUEL_TRIM
 	if (engineType == engine_type_e::MINIMAL_PINS && engineConfiguration->isInjectionEnabled &&
 		getFiringOrderLength() > CYLINDER_FUEL_TRIM_COUNT) {
@@ -1197,6 +1205,21 @@ void commonFrankensoAnalogInputs() {
 	 * VBatt
 	 */
 	engineConfiguration->vbattAdcChannel = EFI_ADC_14;
+}
+
+void setBoardBatteryVoltageDivider(float nominalCoefficient) {
+	boardBatteryVoltageDividerNominal = nominalCoefficient;
+
+	if (!engineConfiguration->enableBatteryDividerOverride) {
+		engineConfiguration->vbattDividerCoeff = nominalCoefficient;
+		return;
+	}
+
+	// Keep these limits in sync with the vbattDividerCoeff TunerStudio range.
+	const float calibratedCoefficient = engineConfiguration->vbattDividerCoeff;
+	if (!std::isfinite(calibratedCoefficient) || calibratedCoefficient < 0.01f || calibratedCoefficient > 99.0f) {
+		engineConfiguration->vbattDividerCoeff = nominalCoefficient;
+	}
 }
 
 bool isSdCardEnabled() {
