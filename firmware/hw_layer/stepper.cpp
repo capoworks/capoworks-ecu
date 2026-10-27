@@ -5,11 +5,21 @@
  *
  * @date Dec 24, 2014
  * @author Andrey Belomutskiy, (c) 2012-2020
+ *
+ * Capoworks adaptation: idle-stepper enable timeout and power-loss handling.
+ * @author Giacomo di Ciocco, (C) 2026
  */
 
 #include "pch.h"
 
 #include "stepper.h"
+
+namespace {
+bool isStepperPowered() {
+	return engine->isMainRelayEnabled() &&
+		   Sensor::getOrZero(SensorType::BatteryVoltage) >= engineConfiguration->minStepperVoltage;
+}
+} // namespace
 
 float StepperMotorBase::getTargetPosition() const {
 	return m_targetPosition;
@@ -30,8 +40,6 @@ void StepperMotorBase::initialize(StepperHw* hardware, int totalSteps) {
 }
 
 // todo: EFI_STEPPER macro
-#if EFI_PROD_CODE || EFI_SIMULATOR
-
 void StepperMotorBase::saveStepperPos(int pos) {
 	// use backup-power RTC registers to store the data
 #if EFI_PROD_CODE
@@ -121,9 +129,9 @@ void StepperMotorBase::doIteration() {
 	int targetPosition = efiRound(getTargetPosition(), 1);
 	int currentPosition = m_currentPosition;
 
-	// the stepper does not work if the main relay is turned off (it requires +12V)
-	if (!engine->isMainRelayEnabled() ||
-		Sensor::getOrZero(SensorType::BatteryVoltage) < engineConfiguration->minStepperVoltage) {
+	// the stepper does not work without main-relay power at adequate battery voltage
+	if (!isStepperPowered()) {
+		m_hw->disable();
 		m_hw->pause();
 		return;
 	}
@@ -168,12 +176,22 @@ void StepDirectionStepper::setDirection(bool isIncrementing) {
 }
 
 bool StepDirectionStepper::pulse() {
-	// we move the motor only of it is powered from the main relay
-	if (!engine->isMainRelayEnabled()) {
+	// we move the motor only if it is powered
+	if (!isStepperPowered()) {
+		disable();
 		return false;
 	}
 
-	m_enablePin.setValue(false); // enable stepper
+	if (m_enablePin.getLogicValue()) {
+		m_enablePin.setValue(false); // enable stepper
+		// Let the driver and winding current settle before the first STEP edge.
+		waitMicroseconds(MS2US(2));
+		// Power can be lost while waiting for the driver to settle.
+		if (!isStepperPowered()) {
+			disable();
+			return false;
+		}
+	}
 
 	m_stepPin.setValue(true);
 	pause();
@@ -181,9 +199,23 @@ bool StepDirectionStepper::pulse() {
 	m_stepPin.setValue(false);
 	pause();
 
-	m_enablePin.setValue(true); // disable stepper
+	// Keep the driver enabled between steps. Release it after inactivity in sleep().
+	m_lastStep.reset();
 
 	return true;
+}
+
+void StepDirectionStepper::disable() {
+	m_enablePin.setValue(true);
+}
+
+void StepDirectionStepper::sleep() {
+	constexpr float idleTimeoutSeconds = 5.0f;
+	if (!m_enablePin.getLogicValue() && m_lastStep.hasElapsedSec(idleTimeoutSeconds)) {
+		disable();
+	}
+
+	pause();
 }
 
 void StepperHw::sleep() {
@@ -192,8 +224,14 @@ void StepperHw::sleep() {
 
 void StepperHw::pause(int divisor) const {
 	// currently we can't sleep less than 1ms (see #3214)
-	chThdSleepMicroseconds(std::max(MS2US(1), (int)(MS2US(m_reactionTime)) / divisor));
+	waitMicroseconds(std::max(MS2US(1), (int)(MS2US(m_reactionTime)) / divisor));
 }
+
+#if EFI_PROD_CODE || EFI_SIMULATOR
+void StepperHw::waitMicroseconds(int us) const {
+	chThdSleepMicroseconds(us);
+}
+#endif
 
 void StepperHw::setReactionTime(float ms) {
 	m_reactionTime = std::max(1.0f, ms);
@@ -204,11 +242,13 @@ bool StepDirectionStepper::step(bool positive) {
 	return pulse();
 }
 
+#if !EFI_UNIT_TEST
 void StepperMotor::initialize(StepperHw* hardware, int totalSteps) {
 	StepperMotorBase::initialize(hardware, totalSteps);
 
 	startThread();
 }
+#endif
 
 void StepDirectionStepper::initialize(
 		brain_pin_e stepPin,
@@ -233,14 +273,8 @@ void StepDirectionStepper::initialize(
 	m_enablePin.initPin("Stepper EN", enablePin, enablePinMode);
 
 	// All pins must be 0 for correct hardware startup (e.g. stepper auto-disabling circuit etc.).
-	m_enablePin.setValue(true); // disable stepper
+	disable();
 	m_stepPin.setValue(false);
 	m_directionPin.setValue(false);
 	m_currentDirection = false;
 }
-
-#endif
-
-#if EFI_UNIT_TEST
-void StepperHw::sleep() {}
-#endif // EFI_UNIT_TEST
