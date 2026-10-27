@@ -1,8 +1,118 @@
 name: Unit Tests
 
-on: [push,pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 jobs:
+  # The general build always runs. Extra trim sweeps run on master/manual builds,
+  # and on PRs only when changed files can affect trim or its build inputs.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run_trim: ${{ steps.changed-files.outputs.run_trim }}
+    steps:
+    - name: Determine whether extra trim jobs are needed
+      id: changed-files
+      uses: actions/github-script@v8
+      with:
+        script: |
+          function setRunTrim(value, reason) {
+            core.info(`${reason}; run_trim=${value}`);
+            core.setOutput('run_trim', String(value));
+          }
+
+          try {
+            const { owner, repo } = context.repo;
+
+            if (context.eventName === 'workflow_dispatch' ||
+                (context.eventName === 'push' && context.ref === 'refs/heads/master')) {
+              setRunTrim(true, 'Full sweep requested for master or manual dispatch');
+              return;
+            }
+
+            if (context.eventName === 'push') {
+              setRunTrim(false, 'Feature push only needs the general build');
+              return;
+            }
+
+            if (context.eventName !== 'pull_request') {
+              setRunTrim(true, 'Unknown event; retaining the full sweep');
+              return;
+            }
+
+            const pullNumber = context.payload.pull_request?.number;
+            const changedFilesValue = context.payload.pull_request?.changed_files;
+            const changedFiles = Number(changedFilesValue);
+            if (!Number.isInteger(pullNumber) || changedFilesValue == null ||
+                !Number.isSafeInteger(changedFiles) || changedFiles < 0) {
+              setRunTrim(true, 'Missing or invalid pull request metadata');
+              return;
+            }
+
+            if (changedFiles >= 3000) {
+              setRunTrim(true, 'Pull request reaches the GitHub changed-files cap');
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pullNumber,
+              per_page: 100
+            });
+
+            if (files.length < changedFiles) {
+              setRunTrim(true, `Incomplete file list (${files.length} of ${changedFiles})`);
+              return;
+            }
+
+            const sourceExtension = /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|mk|sh)$/;
+            const relevantPatterns = [
+              /^\.github\/workflows\/build-unit-tests\.yaml$/,
+              /^\.github\/workflows\/add-ubuntu-latest-apt-mirrors\.sh$/,
+              /^\.gitmodules$/,
+              /^misc\/ci\//,
+              /^firmware\/(?:controllers|config|generated|tunerstudio|init|util|console|ext|bootloader|integration|pch)\//,
+              /^firmware\/hw_layer\//,
+              /^firmware\/[^/]+$/,
+              /^firmware\/.+\.mk$/,
+              /^firmware\/.+\.ld$/,
+              /^java_tools\//,
+              /^unit_tests\/tests\/(?:ignition_injection|system|util|sensor|trigger)\//,
+              /^unit_tests\/tests\/tests\.mk$/,
+              /^unit_tests\/(?!tests\/)(?!.*\.(?:md|rst)$).+/
+            ];
+
+            const isRelevant = path => {
+              // These standalone stepper files remain covered by the general suite.
+              if (path === 'firmware/hw_layer/stepper.cpp' || path === 'firmware/hw_layer/stepper.h') {
+                return false;
+              }
+              if (/^firmware\/[^/]+$/.test(path)) {
+                return path === 'firmware/Makefile' || sourceExtension.test(path);
+              }
+              return relevantPatterns.some(pattern => pattern.test(path));
+            };
+
+            // Rename detection exposes both sides, so moving into or out of a
+            // relevant path conservatively retains the trim sweep.
+            const changedPaths = files.flatMap(file =>
+              [file.filename, file.previous_filename].filter(Boolean)
+            );
+            const relevant = changedPaths.find(isRelevant);
+            setRunTrim(Boolean(relevant), relevant
+              ? `Relevant change: ${relevant}`
+              : 'No trim-related files changed');
+          } catch (error) {
+            core.warning(`Unable to determine changed files: ${error.message}`);
+            setRunTrim(true, 'Changed-file lookup failed; retaining the full sweep');
+          }
+
   build:
     runs-on: ${{ matrix.os }}
 
@@ -84,6 +194,8 @@ jobs:
 
   cylinder-fuel-trim:
     name: Cylinder Fuel Trim (${{ matrix.trim_count }} cylinders)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_trim == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -120,6 +232,8 @@ jobs:
 
   cylinder-fuel-trim-arm:
     name: Cylinder Fuel Trim ARM (12 cylinders)
+    needs: changes
+    if: ${{ needs.changes.outputs.run_trim == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
