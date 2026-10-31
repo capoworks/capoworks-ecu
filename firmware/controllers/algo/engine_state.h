@@ -13,6 +13,7 @@
 #include "engine_state_generated.h"
 #include "airmass_loads.h"
 #include "ve_analyze_gate.h"
+#include "ve_analyze_fuel_events.h"
 
 struct output_channels_s;
 
@@ -78,6 +79,13 @@ public:
 	void resetVeAnalyzeDiscardedCalculationDiagnostics();
 	void exportVeAnalyzeDiagnostics(output_channels_s& output) const;
 
+	// The event collector has no internal lock. Schedule observation and the
+	// slow telemetry snapshot with the caller-owned critical section held.
+	void resetVeAnalyzeFuelEventsLocked(efitick_t nowNt);
+	bool observeVeAnalyzeFuelEventLocked(VeAnalyzeFuelEventInput input);
+	VeAnalyzeFuelEventSnapshot snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const;
+	void exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const;
+
 	/**
 	 * always 360 or 720, never zero
 	 */
@@ -119,6 +127,7 @@ public:
 	uint8_t veAnalyzeEndpoint = 0;
 	VeAnalyzeLatchDiagnostics veAnalyzeDiagnostics;
 	VeAnalyzeDiscardedCalculationDiagnostics veAnalyzeDiscardedCalculationDiagnostics;
+	VeAnalyzeFuelEvents veAnalyzeFuelEvents;
 
 	/**
 	 * Raw fuel injection duration produced by current fuel algorithm, without any correction
@@ -166,6 +175,18 @@ private:
 	// ECU fast-callback observations, not accepted TunerStudio table cells.
 	uint32_t veAnalyzeAcceptedObservations = 0;
 	uint32_t veAnalyzeRejectedObservations = 0;
+	uint64_t veAnalyzeFuelEventSerial = 0;
+	bool hasVeAnalyzeFuelAttempt = false;
+	uint64_t veAnalyzeFuelLastAttemptSerial = 0;
+	uint8_t veAnalyzeFuelLastAttemptOwner = 0;
+	efitick_t veAnalyzeFuelLastAttemptTimestamp;
+	uint16_t veAnalyzeFuelLastAttemptCylinderMask = 0;
+	uint8_t veAnalyzeFuelLastAttemptBankMask = 0;
+	bool veAnalyzeFuelLastAttemptWallClamp = false;
+	float veAnalyzeFuelLastAttemptBaseGrams = 0;
+	float veAnalyzeFuelLastAttemptAeGrams = 0;
+	float veAnalyzeFuelLastAttemptFilmGrams = 0;
+	float veAnalyzeFuelLastAttemptFinalGrams = 0;
 };
 
 EngineState* getEngineState();

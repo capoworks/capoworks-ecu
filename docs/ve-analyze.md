@@ -160,6 +160,122 @@ The operating exclusions above those bits are:
 | 1048576 | `SparkCut` |
 | 2097152 | `Dfco` |
 
+## Fuel event integration
+
+`EngineState` owns the fixed-size fuel-event collector. The same owner reset used
+for the TPS sample gate also runs from Engine construction, Engine reset, and
+trigger-synchronization loss, so stopped or unsynchronized engines require fresh
+fuel-event coverage. Collector observation and snapshots require the caller to
+hold the ECU critical section. The trigger path only records one bounded attempt;
+the full collector snapshot is taken in the slow TunerStudio export path.
+
+For an actual `InjectionEvent` that has passed admission, the owner cylinder's
+cycle mass and `CylinderFuelProvenance` are captured as one pair under the
+publication critical section. The base pre-AE and applied-AE provenance masses
+are each multiplied by the active injection-mode multiplier exactly once.
+Wall-film evidence is derived as the wall-adjusted event mass minus the
+mode-scaled input event mass, rather than from stale `wallFuel` state.
+`wallFuelCorrection` itself is not reused as event evidence.
+
+Every phase-relevant attempt after admission is recorded, including non-finite
+or negative pulse validation, a first-stage pulse shorter than 50 us, duration
+or delay bounds, timestamp overflow, and scheduler failure. `SchedulerAccepted`
+is set only from the actual `scheduleFuelCallbacks()` result. It means that the
+scheduler reserved callbacks; it does not claim that a pin opened or that fuel
+was physically delivered. `veAnalyzeFuelEventAttemptedCount` and the per-bank
+attempt counters include rejected attempts. `veAnalyzeFuelEventAcceptedCount`
+counts coherent, completely represented events whose scheduler call succeeded.
+`veAnalyzeFuelEventRejectedCount` retains its narrower meaning: coherent attempts
+rejected by the scheduler. `veAnalyzeFuelEventInvalidCount` counts attempts
+whose evidence was structurally invalid or could not represent the complete
+command.
+
+The event timestamp and age describe the trigger phase that calculated and
+attempted the schedule. They are not the scheduled opening time, an observed
+pin edge, or a physical-delivery timestamp.
+
+The affected cylinder mask comes from `calculateInjectorOutputMask()`. For
+sequential injection this is the owner cylinder; batch adds the firing-order
+twin; simultaneous selects all configured cylinders; single-point selects
+injector 1. The affected bank mask is the union of `cylinderBankSelect` for every
+selected physical cylinder. Event readiness requires fresh evidence for every
+configured cylinder and every selected bank, not merely one fresh event or one
+quiet bank. The expected, observed, and fresh masks are exported separately.
+
+The following command shapes are represented as fully scheduled evidence:
+
+- Sequential injection with a coherent owner provenance and no split.
+- Batch injection with the actual paired output mask.
+- Simultaneous injection with the actual all-cylinder output mask.
+- Staged injection when stage 2 is either absent or actually scheduled.
+
+The following cases deliberately fail closed with `IntegrationUnsupported`:
+
+- Single-point injection, because one inferred event cannot establish
+  per-cylinder provenance.
+- Split injection, because the continuation is scheduled later from the first
+  pulse callback and the initial call does not represent the complete command.
+- A positive stage-2 command whose duration is suppressed at or below 50 us,
+  because the first-stage success does not make the omitted stage-2 pulse part
+  of the scheduled command.
+
+These cases keep the existing fuel calculation, wall model, stage split, and
+scheduler decisions unchanged. They do not create a complete scheduled mass or
+accepted count. Unsupported and rejected attempts apply a recovery hold to every
+affected bank, so polling or a later quiet cylinder cannot make them eligible.
+Missing, invalid, or stale provenance publishes generation zero and also fails
+closed without changing the real injection command.
+
+Fuel-event reason bits are:
+
+| Value | Reason |
+| ---: | --- |
+| 1 | `InvalidConfiguration` |
+| 2 | `InvalidOwnerCylinder` |
+| 4 | `InvalidCylinderMask` |
+| 8 | `InvalidBankMask` |
+| 16 | `InvalidGeneration` |
+| 32 | `RegressedGeneration` |
+| 64 | `DuplicateTimestamp` |
+| 128 | `RegressedTimestamp` |
+| 256 | `NonFiniteMass` |
+| 512 | `NegativeMass` |
+| 1024 | `MassIdentityMismatch` |
+| 2048 | `StageMassMismatch` |
+| 4096 | `InvalidDenominator` |
+| 8192 | `ExcessAeRatio` |
+| 16384 | `ExcessFilmRatio` |
+| 32768 | `ExcessCombinedRatio` |
+| 65536 | `NormalRecovery` |
+| 131072 | `WallModelClampRecovery` |
+| 262144 | `ZeroCommandedRecovery` |
+| 524288 | `SchedulingRejectedRecovery` |
+| 1048576 | `ResetRecovery` |
+| 2097152 | `NoFreshEvent` |
+| 4194304 | `StaleEvent` |
+| 8388608 | `FutureTimestamp` |
+| 16777216 | `IntegrationUnsupported` |
+
+`veAnalyzeFuelEventReady` describes event evidence only. It is separate from
+`veAnalyzeSampleReady`, which retains its TPS, history, recovery, and operating-
+condition semantics. Both must still be combined with model qualification and
+lambda validity outside this diagnostic contract.
+
+All exported fuel masses are explicitly in milligrams. Global last-event,
+per-bank latest, and per-cylinder latest evidence include base, applied AE, film,
+attempted final, and accepted scheduled command where applicable. A scheduled
+mass is zero unless the underlying record is fresh, scheduler-accepted, and not
+superseded by a later rejected attempt affecting the same owner or bank.
+Per-bank peaks are absolute AE and film percentages of base plus their sum.
+Per-cylinder reason and age arrays expose each owner cylinder independently.
+The last owner, age, serial, clamp, mask, base, AE, film, and attempted-final
+fields describe the latest phase-relevant attempt even when it was rejected.
+Only its scheduled mass requires the same attempt to have left a fresh,
+accepted coherent event. The serial is split into low and high 32-bit channels.
+It is producer-local, assigned under the observation lock, and not reset with
+the event collector. The 25 per-reason rejection counters correspond to the
+reason table above and saturate at `UINT32_MAX`.
+
 Model-qualification and lambda validity are separate concerns. A ready sample gate does
 not qualify a mixed SD + Alpha-N authority map, validate lambda, or guarantee that
 TunerStudio will accept a cell. TunerStudio 3.3.01 automatic ECU writes are a user-target

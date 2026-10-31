@@ -346,4 +346,47 @@ struct_no_prefix output_channels_s
 	uint16_t autoscale veAnalyzeRecoveryRemaining;VE Analyze: sample recovery remaining;"s", 0.01, 0, 0, 655.35, 2
 	uint32_t veAnalyzeAcceptedObservations;VE Analyze: accepted ECU fast observations;"count", 1, 0, 0, 0, 0
 	uint32_t veAnalyzeRejectedObservations;VE Analyze: rejected ECU fast observations;"count", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventReady;VE Analyze: complete fuel event evidence ready;"", 1, 0, 0, 1, 0
+	uint32_t veAnalyzeFuelEventRejectReasons;VE Analyze: fuel event reject reasons;"bits", 1, 0, 0, 0, 0
+	uint32_t veAnalyzeFuelEventAttemptedCount;VE Analyze: phase-relevant fuel attempts;"count", 1, 0, 0, 0, 0
+	uint32_t veAnalyzeFuelEventAcceptedCount;VE Analyze: fully scheduled fuel attempts;"count", 1, 0, 0, 0, 0
+	uint32_t veAnalyzeFuelEventRejectedCount;VE Analyze: scheduler-rejected fuel attempts;"count", 1, 0, 0, 0, 0
+	uint32_t veAnalyzeFuelEventInvalidCount;VE Analyze: incoherent or unsupported fuel evidence;"count", 1, 0, 0, 0, 0
+	uint16_t veAnalyzeFuelEventObservedCylinderMask;VE Analyze: observed fuel cylinder mask;"bits", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventObservedBankMask;VE Analyze: observed fuel bank mask;"bits", 1, 0, 0, 0, 0
+	uint16_t veAnalyzeFuelEventExpectedCylinderMask;VE Analyze: required fresh cylinder mask;"bits", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventExpectedBankMask;VE Analyze: required fresh bank mask;"bits", 1, 0, 0, 0, 0
+	uint16_t veAnalyzeFuelEventFreshCylinderMask;VE Analyze: fresh cylinder evidence mask;"bits", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventFreshBankMask;VE Analyze: fresh bank evidence mask;"bits", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventCoverageComplete;VE Analyze: all configured cylinders and banks fresh;"", 1, 0, 0, 1, 0
+	uint32_t veAnalyzeFuelEventPublicationGeneration;VE Analyze: fuel provenance calibration generation;"", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventLastOwner;VE Analyze: last fuel attempt owner cylinder;"", 1, 0, 0, 0, 0
+	uint16_t veAnalyzeFuelEventLastAge;VE Analyze: last fuel attempt age;"ms", 1, 0, 0, 65535, 0
+	uint32_t veAnalyzeFuelEventLastSerialLow;VE Analyze: last fuel attempt serial low;"", 1, 0, 0, 0, 0
+	uint32_t veAnalyzeFuelEventLastSerialHigh;VE Analyze: last fuel attempt serial high;"", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventLastWallClamp;VE Analyze: last event wall-model zero clamp;"", 1, 0, 0, 1, 0
+	uint16_t veAnalyzeFuelEventLastCylinderMask;VE Analyze: last event affected cylinders;"bits", 1, 0, 0, 0, 0
+	uint8_t veAnalyzeFuelEventLastBankMask;VE Analyze: last event affected banks;"bits", 1, 0, 0, 0, 0
+	float veAnalyzeFuelEventLastBaseMg;VE Analyze: last base mass;"mg", 1, 0, 0, 0, 3
+	float veAnalyzeFuelEventLastAeMg;VE Analyze: last applied AE mass;"mg", 1, 0, 0, 0, 3
+	float veAnalyzeFuelEventLastFilmMg;VE Analyze: last wall film correction mass;"mg", 1, 0, 0, 0, 3
+	float veAnalyzeFuelEventLastFinalMg;VE Analyze: last attempted commanded mass;"mg", 1, 0, 0, 0, 3
+	float veAnalyzeFuelEventLastScheduledMg;VE Analyze: last accepted scheduled command mass;"mg", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankBaseMg;VE Analyze: bank latest base mass;"mg", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankAeMg;VE Analyze: bank latest applied AE mass;"mg", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankFilmMg;VE Analyze: bank latest film correction mass;"mg", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankFinalMg;VE Analyze: bank latest attempted commanded mass;"mg", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankScheduledMg;VE Analyze: bank latest accepted scheduled command mass;"mg", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankPeakAePercent;VE Analyze: bank peak absolute AE ratio;"%", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankPeakFilmPercent;VE Analyze: bank peak absolute film ratio;"%", 1, 0, 0, 0, 3
+	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankPeakSumAbsPercent;VE Analyze: bank peak sum of absolute ratios;"%", 1, 0, 0, 0, 3
+	uint32_t[STFT_BANK_COUNT iterate] veAnalyzeFuelBankReasonMask;VE Analyze: bank fuel evidence reasons;"bits", 1, 0, 0, 0, 0
+	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderBaseMg;VE Analyze: cylinder latest base mass;"mg", 1, 0, 0, 0, 3
+	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderAeMg;VE Analyze: cylinder latest applied AE mass;"mg", 1, 0, 0, 0, 3
+	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderFilmMg;VE Analyze: cylinder latest film correction mass;"mg", 1, 0, 0, 0, 3
+	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderFinalMg;VE Analyze: cylinder latest attempted commanded mass;"mg", 1, 0, 0, 0, 3
+	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderScheduledMg;VE Analyze: cylinder latest accepted scheduled command mass;"mg", 1, 0, 0, 0, 3
+	uint32_t[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderReasonMask;VE Analyze: cylinder fuel evidence reasons;"bits", 1, 0, 0, 0, 0
+	uint16_t[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderAge;VE Analyze: cylinder latest fuel evidence age;"ms", 1, 0, 0, 65535, 0
+	uint32_t[25 iterate] veAnalyzeFuelEventRejectCountByReason;VE Analyze: fuel rejection count by reason bit;"count", 1, 0, 0, 0, 0
 end_struct

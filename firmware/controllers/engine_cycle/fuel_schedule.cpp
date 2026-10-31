@@ -98,6 +98,29 @@ uint16_t InjectionEvent::calculateInjectorOutputMask() const {
 	return mask;
 }
 
+static uint16_t getConfiguredCylinderMask() {
+	const uint8_t cylinderCount = engine->engineState.cylinderCount;
+	if (cylinderCount == 0 || cylinderCount > MAX_CYLINDER_COUNT) {
+		return 0;
+	}
+	return static_cast<uint16_t>((1u << cylinderCount) - 1u);
+}
+
+static uint8_t getAffectedBankMask(uint16_t cylinderMask) {
+	uint8_t bankMask = 0;
+	for (size_t cylinderIndex = 0; cylinderIndex < MAX_CYLINDER_COUNT; cylinderIndex++) {
+		if ((cylinderMask & (1u << cylinderIndex)) == 0) {
+			continue;
+		}
+
+		const uint8_t bank = engineConfiguration->cylinderBankSelect[cylinderIndex];
+		if (bank < STFT_BANK_COUNT) {
+			bankMask |= static_cast<uint8_t>(1u << bank);
+		}
+	}
+	return bankMask;
+}
+
 void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 	auto eventAngle = injectionStartAngle;
 
@@ -106,18 +129,31 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 		return;
 	}
 
+	mass_t cycleMassGrams;
+	CylinderFuelProvenance provenance;
+	uint32_t currentCalibrationGeneration;
+	{
+		// The publication owner replaces these two values together. Capture that
+		// exact pair so this event cannot combine a new mass with old provenance.
+		chibios_rt::CriticalSectionLocker csl;
+		cycleMassGrams = engine->cylinders[this->cylinderNumber].getInjectionMass();
+		provenance = engine->cylinders[this->cylinderNumber].getFuelProvenance();
+		currentCalibrationGeneration = engine->airmassCalibration.Generation;
+	}
+
 	// don't allow split inj in simultaneous mode
 	bool doSplitInjection = engine->engineState.doSplitInjection && !isSimultaneous;
 
 	// Select fuel mass from the correct cylinder
-	auto cycleMassGrams = engine->cylinders[this->cylinderNumber].getInjectionMass();
-
-	float injectionMassGrams = cycleMassGrams * getInjectionModeDurationMultiplier(m_injectionMode);
+	const float modeMultiplier = getInjectionModeDurationMultiplier(m_injectionMode);
+	const float inputEventMassGrams = cycleMassGrams * modeMultiplier;
+	float injectionMassGrams = inputEventMassGrams;
 
 	// Perform wall wetting adjustment on fuel mass, not duration, so that
 	// it's correct during fuel pressure (injector flow) or battery voltage (deadtime) transients
 	// TODO: is it correct to wall wet on both pulses?
 	injectionMassGrams = wallFuel.adjust(injectionMassGrams);
+	const bool wallModelZeroClamp = wallFuel.wasZeroClamped();
 
 	// Disable staging in simultaneous mode or split injection mode
 	float stage2Fraction = (isSimultaneous || doSplitInjection) ? 0 : getEngineState()->injectionStage2Fraction;
@@ -143,6 +179,41 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 		injectionMassStage1 = injectionMassStage1 / 2;
 	}
 
+	const uint16_t affectedCylinderMask = calculateInjectorOutputMask();
+	const uint16_t expectedCylinderMask = getConfiguredCylinderMask();
+	const uint8_t affectedBankMask = getAffectedBankMask(affectedCylinderMask);
+	const uint8_t expectedBankMask = getAffectedBankMask(expectedCylinderMask);
+	const bool provenanceCurrent = provenance.Valid && provenance.CalibrationGeneration != 0 &&
+								   provenance.CalibrationGeneration == currentCalibrationGeneration;
+
+	VeAnalyzeFuelEventInput fuelEventEvidence;
+	fuelEventEvidence.OwnerCylinder = this->cylinderNumber;
+	fuelEventEvidence.AffectedCylinderMask = affectedCylinderMask;
+	fuelEventEvidence.AffectedBankMask = affectedBankMask;
+	fuelEventEvidence.ExpectedCylinderMask = expectedCylinderMask;
+	fuelEventEvidence.ExpectedBankMask = expectedBankMask;
+	// Unknown or stale provenance deliberately publishes the reserved zero
+	// generation. That closes the evidence gate without touching injection.
+	fuelEventEvidence.PublicationGeneration = provenanceCurrent ? provenance.CalibrationGeneration : 0;
+	fuelEventEvidence.Timestamp = phase.timestamp;
+	fuelEventEvidence.BasePreAeMassGrams = provenanceCurrent ? provenance.PreAeBaseFuelMass * modeMultiplier : 0;
+	fuelEventEvidence.AppliedAeMassGrams = provenanceCurrent ? provenance.AppliedAeFuelMass * modeMultiplier : 0;
+	fuelEventEvidence.FilmCorrectionMassGrams = injectionMassGrams - inputEventMassGrams;
+	fuelEventEvidence.FinalCommandedMassGrams = injectionMassGrams;
+	fuelEventEvidence.HasStage1Mass = true;
+	fuelEventEvidence.Stage1MassGrams = injectionMassStage1;
+	fuelEventEvidence.HasStage2Mass = injectionMassStage2 > 0;
+	fuelEventEvidence.Stage2MassGrams = injectionMassStage2;
+	fuelEventEvidence.WallModelZeroClamp = wallModelZeroClamp;
+	fuelEventEvidence.SchedulerAccepted = false;
+	fuelEventEvidence.IntegrationUnsupported = doSplitInjection || m_injectionMode == IM_SINGLE_POINT;
+
+	auto observeFuelAttempt = [&fuelEventEvidence](bool schedulerAccepted) {
+		fuelEventEvidence.SchedulerAccepted = schedulerAccepted;
+		chibios_rt::CriticalSectionLocker csl;
+		engine->engineState.observeVeAnalyzeFuelEventLocked(fuelEventEvidence);
+	};
+
 	const floatms_t injectionDurationStage1 =
 			engine->module<InjectorModelPrimary>()->getInjectionDuration(injectionMassStage1);
 	const floatms_t injectionDurationStage2 =
@@ -166,11 +237,13 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 	if (!std::isfinite(injectionDurationStage1) || !std::isfinite(injectionDurationStage2)) {
 		engine->airmassInjectionState.rejectCalculation(AirmassInjectionFault::Scheduling);
 		warning(ObdCode::CUSTOM_OBD_NAN_INJECTION, "Nonfinite injection pulse");
+		observeFuelAttempt(false);
 		return;
 	}
 	if (injectionDurationStage1 < 0 || injectionDurationStage2 < 0) {
 		engine->airmassInjectionState.rejectCalculation(AirmassInjectionFault::Scheduling);
 		warning(ObdCode::CUSTOM_OBD_NEG_INJECTION, "Negative injection pulse %.2f", injectionDurationStage1);
+		observeFuelAttempt(false);
 		return;
 	}
 
@@ -179,6 +252,7 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 	// as their order may be swapped, resulting in a stuck open injector
 	// see https://github.com/rusefi/rusefi/pull/596 for more details
 	if (injectionDurationStage1 < 0.050f) {
+		observeFuelAttempt(false);
 		return;
 	}
 
@@ -190,6 +264,7 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 		durationUsStage1 >= MaximumScheduleDelayUs || durationUsStage2 >= MaximumScheduleDelayUs ||
 		(doSplitInjection && durationUsStage1 > 32767)) {
 		engine->airmassInjectionState.rejectCalculation(AirmassInjectionFault::Scheduling);
+		observeFuelAttempt(false);
 		return;
 	}
 
@@ -198,11 +273,15 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 
 	// Only bother with the second stage if it's long enough to be relevant
 	bool hasStage2Injection = durationUsStage2 > 50;
+	// A real first-stage pulse cannot make a suppressed second-stage pulse
+	// disappear from the command identity.
+	const bool stage2Suppressed = injectionMassStage2 > 0 && !hasStage2Injection;
+	fuelEventEvidence.IntegrationUnsupported |= stage2Suppressed;
 
 	InjectorContext ctx;
 	ctx.eventIndex = ownIndex;
 	ctx.stage2Active = hasStage2Injection;
-	ctx.outputsMask = calculateInjectorOutputMask();
+	ctx.outputsMask = affectedCylinderMask;
 
 	if (doSplitInjection) {
 		ctx.splitDurationUs = durationUsStage1;
@@ -226,6 +305,7 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 	float delayUs = engine->rpmCalculator.oneDegreeUs * angleFromNow;
 	if (!std::isfinite(delayUs) || delayUs < 0 || delayUs >= MaximumScheduleDelayUs) {
 		engine->airmassInjectionState.rejectCalculation(AirmassInjectionFault::Scheduling);
+		observeFuelAttempt(false);
 		return;
 	}
 
@@ -234,6 +314,7 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 	float delayNtFloat = USF2NT(delayUs);
 	if (!std::isfinite(delayNtFloat) || delayNtFloat < 0 || delayNtFloat > INT32_MAX) {
 		engine->airmassInjectionState.rejectCalculation(AirmassInjectionFault::Scheduling);
+		observeFuelAttempt(false);
 		return;
 	}
 	int32_t delayNt = static_cast<int32_t>(delayNtFloat);
@@ -244,6 +325,7 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 	int64_t longestDurationNt = US2NT(longestDurationUs);
 	if (phase.timestamp.count > INT64_MAX - delayNt - longestDurationNt) {
 		engine->airmassInjectionState.rejectCalculation(AirmassInjectionFault::Scheduling);
+		observeFuelAttempt(false);
 		return;
 	}
 
@@ -263,7 +345,8 @@ void InjectionEvent::onTriggerTooth(const EnginePhaseInfo& phase) {
 			std::swap(events[1], events[2]);
 		}
 	}
-	scheduleFuelCallbacks(events, count);
+	const bool schedulerAccepted = scheduleFuelCallbacks(events, count);
+	observeFuelAttempt(schedulerAccepted);
 
 #if EFI_UNIT_TEST
 	printf("scheduling injection angle=%.2f/delay=%d injectionDuration=%d %d\r\n",

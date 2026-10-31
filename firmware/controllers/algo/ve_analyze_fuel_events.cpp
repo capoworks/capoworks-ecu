@@ -123,6 +123,10 @@ void VeAnalyzeFuelEvents::clearHistory() {
 	m_banks.fill(BankState{});
 	m_hasGeneration = false;
 	m_generation = 0;
+	m_expectedCylinderMask = 0;
+	m_expectedBankMask = 0;
+	m_rejectionSinceLatestEvent = false;
+	m_cylinderRejectionAfterEvent.fill(false);
 	m_resetUntilNt = std::numeric_limits<int64_t>::min();
 	m_resetReasons = 0;
 	m_globalFaultUntilNt = std::numeric_limits<int64_t>::min();
@@ -185,9 +189,11 @@ void VeAnalyzeFuelEvents::rejectEvent(
 		const VeAnalyzeFuelEventInput& input, uint32_t reasons, uint16_t validCylinderMask, uint8_t validBankMask) {
 	m_invalidEvidenceEvents = saturatingIncrement(m_invalidEvidenceEvents);
 	recordRejectedReasons(reasons);
+	m_rejectionSinceLatestEvent = true;
 
 	const bool zeroCommanded = std::isfinite(input.FinalCommandedMassGrams) && input.FinalCommandedMassGrams == 0;
-	const bool cutLike = input.WallModelZeroClamp || zeroCommanded || !input.SchedulerAccepted;
+	const bool cutLike =
+			input.WallModelZeroClamp || zeroCommanded || !input.SchedulerAccepted || input.IntegrationUnsupported;
 	const int64_t duration = cutLike ? m_cutRecoveryNt : m_normalRecoveryNt;
 
 	uint32_t faultReasons = reasons;
@@ -201,13 +207,22 @@ void VeAnalyzeFuelEvents::rejectEvent(
 		if (!input.SchedulerAccepted) {
 			faultReasons |= static_cast<uint32_t>(FuelEventReason::SchedulingRejectedRecovery);
 		}
+		if (input.IntegrationUnsupported) {
+			faultReasons |= static_cast<uint32_t>(FuelEventReason::IntegrationUnsupported);
+		}
 	} else {
 		faultReasons |= static_cast<uint32_t>(FuelEventReason::NormalRecovery);
 	}
 
 	for (size_t bankIndex = 0; bankIndex < MaximumBanks; bankIndex++) {
-		if (isBitSet(validBankMask, bankIndex)) {
+		if (validBankMask == 0 || isBitSet(validBankMask, bankIndex)) {
 			m_banks[bankIndex].ObservedCylinderMask |= validCylinderMask;
+			m_banks[bankIndex].LatestRejectedAfterEvent = true;
+		}
+	}
+	for (size_t cylinderIndex = 0; cylinderIndex < MaximumCylinders; cylinderIndex++) {
+		if (validCylinderMask == 0 || isBitSet(validCylinderMask, cylinderIndex)) {
+			m_cylinderRejectionAfterEvent[cylinderIndex] = true;
 		}
 	}
 
@@ -368,6 +383,25 @@ bool VeAnalyzeFuelEvents::observeEvent(const VeAnalyzeFuelEventInput& input) {
 	if (input.PublicationGeneration == 0) {
 		structuralReasons |= static_cast<uint32_t>(FuelEventReason::InvalidGeneration);
 	}
+	if (input.IntegrationUnsupported) {
+		structuralReasons |= static_cast<uint32_t>(FuelEventReason::IntegrationUnsupported);
+	}
+
+	if (input.ExpectedCylinderMask != 0) {
+		if ((input.ExpectedCylinderMask & ~CylinderMaskAll) != 0 ||
+			(input.AffectedCylinderMask & ~input.ExpectedCylinderMask) != 0) {
+			structuralReasons |= static_cast<uint32_t>(FuelEventReason::InvalidCylinderMask);
+		} else {
+			m_expectedCylinderMask = input.ExpectedCylinderMask;
+		}
+	}
+	if (input.ExpectedBankMask != 0) {
+		if ((input.ExpectedBankMask & ~BankMaskAll) != 0 || (input.AffectedBankMask & ~input.ExpectedBankMask) != 0) {
+			structuralReasons |= static_cast<uint32_t>(FuelEventReason::InvalidBankMask);
+		} else {
+			m_expectedBankMask = input.ExpectedBankMask;
+		}
+	}
 
 	const uint16_t acceptedCylinderMask = validCylinderMask ? input.AffectedCylinderMask : 0;
 	const uint8_t acceptedBankMask = validBankMask ? input.AffectedBankMask : 0;
@@ -407,6 +441,8 @@ bool VeAnalyzeFuelEvents::observeEvent(const VeAnalyzeFuelEventInput& input) {
 		clearHistory();
 		m_hasGeneration = true;
 		m_generation = input.PublicationGeneration;
+		m_expectedCylinderMask = input.ExpectedCylinderMask;
+		m_expectedBankMask = input.ExpectedBankMask;
 		m_attemptedEvents = 1;
 		for (size_t bankIndex = 0; bankIndex < MaximumBanks; bankIndex++) {
 			if (isBitSet(acceptedBankMask, bankIndex)) {
@@ -557,6 +593,7 @@ bool VeAnalyzeFuelEvents::observeEvent(const VeAnalyzeFuelEventInput& input) {
 	event.Stage2MassGrams = stage2;
 
 	bool historyGap = false;
+	m_rejectionSinceLatestEvent = false;
 	for (size_t cylinderIndex = 0; cylinderIndex < MaximumCylinders; cylinderIndex++) {
 		if (!isBitSet(acceptedCylinderMask, cylinderIndex)) {
 			continue;
@@ -566,6 +603,7 @@ bool VeAnalyzeFuelEvents::observeEvent(const VeAnalyzeFuelEventInput& input) {
 			historyGap = true;
 		}
 		m_cylinders[cylinderIndex] = event;
+		m_cylinderRejectionAfterEvent[cylinderIndex] = false;
 	}
 
 	const float zeroCommanded = std::isfinite(finalMass) && finalMass == 0;
@@ -589,6 +627,7 @@ bool VeAnalyzeFuelEvents::observeEvent(const VeAnalyzeFuelEventInput& input) {
 
 		BankState& bank = m_banks[bankIndex];
 		bank.Latest = event;
+		bank.LatestRejectedAfterEvent = false;
 		bank.ObservedCylinderMask |= input.AffectedCylinderMask;
 		if (input.SchedulerAccepted) {
 			bank.ScheduledEvents = saturatingIncrement(bank.ScheduledEvents);
@@ -628,6 +667,7 @@ VeAnalyzeFuelEventBankSnapshot VeAnalyzeFuelEvents::makeBankSnapshot(size_t bank
 	result.ScheduledEventCount = bank.ScheduledEvents;
 	result.SchedulerRejectedEventCount = bank.SchedulerRejectedEvents;
 	result.LatestEvent = makeRecord(bank.Latest, nowNt);
+	result.LatestEvent.SupersededByRejection = bank.Latest.HasEvent && bank.LatestRejectedAfterEvent;
 	if (bank.PeakUntilNt > nowNt.count) {
 		result.PeakAePercentOfBase = bank.PeakAePercent;
 		result.PeakFilmPercentOfBase = bank.PeakFilmPercent;
@@ -680,6 +720,46 @@ VeAnalyzeFuelEventBankSnapshot VeAnalyzeFuelEvents::makeBankSnapshot(size_t bank
 	if (m_resetUntilNt > nowNt.count) {
 		result.Reasons |= m_resetReasons;
 	}
+	if (m_globalFaultUntilNt > nowNt.count) {
+		result.Reasons |= m_globalFaultReasons;
+	}
+	return result;
+}
+
+VeAnalyzeFuelEventCylinderSnapshot VeAnalyzeFuelEvents::makeCylinderSnapshot(
+		size_t cylinderIndex,
+		efitick_t nowNt,
+		const std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks>& banks) const {
+	VeAnalyzeFuelEventCylinderSnapshot result;
+	const StoredEvent& event = m_cylinders[cylinderIndex];
+	const VeAnalyzeFuelEventRecord record = makeRecord(event, nowNt);
+	result.HasEvent = record.HasEvent;
+	result.Fresh = record.Fresh;
+	result.SupersededByRejection = event.HasEvent && m_cylinderRejectionAfterEvent[cylinderIndex];
+	result.Serial = record.Serial;
+	result.AgeMilliseconds = record.AgeMilliseconds;
+	result.CalculatedBaseMassMilligrams = record.CalculatedBaseMassMilligrams;
+	result.CalculatedAppliedAeMassMilligrams = record.CalculatedAppliedAeMassMilligrams;
+	result.CalculatedFilmCorrectionMassMilligrams = record.CalculatedFilmCorrectionMassMilligrams;
+	result.AttemptedFinalCommandedMassMilligrams = record.AttemptedFinalCommandedMassMilligrams;
+	result.ScheduledCommandMassMilligrams = record.ScheduledCommandMassMilligrams;
+
+	if (!event.HasEvent) {
+		result.Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
+	} else if (nowNt.count < event.Timestamp.count) {
+		result.Reasons |= static_cast<uint32_t>(FuelEventReason::FutureTimestamp);
+	} else if (!timestampIsFresh(nowNt, event.Timestamp)) {
+		result.Reasons |= static_cast<uint32_t>(FuelEventReason::StaleEvent);
+	}
+
+	for (size_t bankIndex = 0; bankIndex < MaximumBanks; bankIndex++) {
+		if (isBitSet(event.AffectedBankMask, bankIndex)) {
+			result.Reasons |= banks[bankIndex].Reasons;
+		}
+	}
+	if (m_resetUntilNt > nowNt.count) {
+		result.Reasons |= m_resetReasons;
+	}
 	return result;
 }
 
@@ -697,6 +777,8 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 	result.InvalidEvidenceEventCount = m_invalidEvidenceEvents;
 	result.RejectedEventCountsByReason = m_rejectedByReason;
 	result.PublicationGeneration = m_generation;
+	result.ExpectedCylinderMask = m_expectedCylinderMask;
+	result.ExpectedBankMask = m_expectedBankMask;
 
 	efitick_t latestTimestamp;
 	bool hasLatestTimestamp = false;
@@ -708,9 +790,13 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 
 		result.ObservedCylinderMask |= static_cast<uint16_t>(1u << cylinderIndex);
 		result.ObservedBankMask |= cylinder.AffectedBankMask;
+		if (timestampIsFresh(nowNt, cylinder.Timestamp)) {
+			result.FreshCylinderMask |= static_cast<uint16_t>(1u << cylinderIndex);
+		}
 		if (!hasLatestTimestamp || cylinder.Timestamp.count > latestTimestamp.count) {
 			latestTimestamp = cylinder.Timestamp;
 			result.LastEvent = makeRecord(cylinder, nowNt);
+			result.LastEvent.SupersededByRejection = m_rejectionSinceLatestEvent;
 			hasLatestTimestamp = true;
 		}
 	}
@@ -718,11 +804,29 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 	result.HasFreshEvent = false;
 	for (size_t bankIndex = 0; bankIndex < MaximumBanks; bankIndex++) {
 		result.Banks[bankIndex] = makeBankSnapshot(bankIndex, nowNt);
+		if (result.Banks[bankIndex].EvidenceFresh) {
+			result.FreshBankMask |= static_cast<uint8_t>(1u << bankIndex);
+		}
+		if (isBitSet(m_expectedBankMask, bankIndex) && !result.Banks[bankIndex].EvidenceFresh) {
+			result.Banks[bankIndex].Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
+		}
 		result.Reasons |= result.Banks[bankIndex].Reasons;
 		result.HasFreshEvent |= result.Banks[bankIndex].EvidenceFresh;
 	}
 
-	if (result.ObservedBankMask == 0 || !result.HasFreshEvent) {
+	for (size_t cylinderIndex = 0; cylinderIndex < MaximumCylinders; cylinderIndex++) {
+		result.Cylinders[cylinderIndex] = makeCylinderSnapshot(cylinderIndex, nowNt, result.Banks);
+		if (isBitSet(m_expectedCylinderMask, cylinderIndex) && !isBitSet(result.FreshCylinderMask, cylinderIndex)) {
+			result.Cylinders[cylinderIndex].Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
+		}
+	}
+
+	result.CoverageComplete =
+			(m_expectedCylinderMask == 0 ||
+			 (result.FreshCylinderMask & m_expectedCylinderMask) == m_expectedCylinderMask) &&
+			(m_expectedBankMask == 0 || (result.FreshBankMask & m_expectedBankMask) == m_expectedBankMask);
+
+	if (result.ObservedBankMask == 0 || !result.HasFreshEvent || !result.CoverageComplete) {
 		result.Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
 	}
 
@@ -740,6 +844,6 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 		result.Reasons |= m_globalFaultReasons;
 	}
 
-	result.Ready = result.HasFreshEvent && result.Reasons == 0;
+	result.Ready = result.HasFreshEvent && result.CoverageComplete && result.Reasons == 0;
 	return result;
 }

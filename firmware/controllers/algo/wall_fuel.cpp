@@ -8,10 +8,12 @@
 #include "wall_fuel.h"
 
 void WallFuel::resetWF() {
+	m_zeroClamped = false;
 	wallFuel = 0;
 }
 
 float WallFuel::adjust(float desiredMassGrams) {
+	m_zeroClamped = false;
 	invocationCounter++;
 	if (std::isnan(desiredMassGrams)) {
 		return desiredMassGrams;
@@ -59,6 +61,7 @@ float WallFuel::adjust(float desiredMassGrams) {
 	// but that's ok.
 	if (M_cmd <= 0) {
 		M_cmd = 0;
+		m_zeroClamped = true;
 	}
 
 	// remainder on walls from last time + new from this time

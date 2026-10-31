@@ -409,6 +409,126 @@ void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
 	output.veAnalyzeRejectedObservations = veAnalyzeRejectedObservations;
 }
 
+void EngineState::resetVeAnalyzeFuelEventsLocked(efitick_t nowNt) {
+	veAnalyzeFuelEvents.reset(nowNt);
+	hasVeAnalyzeFuelAttempt = false;
+}
+
+bool EngineState::observeVeAnalyzeFuelEventLocked(VeAnalyzeFuelEventInput input) {
+	// Keep a producer-local serial ahead of collector filtering so every actual
+	// phase-relevant attempt remains distinguishable in exported evidence.
+	input.Serial = ++veAnalyzeFuelEventSerial;
+	hasVeAnalyzeFuelAttempt = true;
+	veAnalyzeFuelLastAttemptSerial = input.Serial;
+	veAnalyzeFuelLastAttemptOwner = input.OwnerCylinder;
+	veAnalyzeFuelLastAttemptTimestamp = input.Timestamp;
+	veAnalyzeFuelLastAttemptCylinderMask = input.AffectedCylinderMask;
+	veAnalyzeFuelLastAttemptBankMask = input.AffectedBankMask;
+	veAnalyzeFuelLastAttemptWallClamp = input.WallModelZeroClamp;
+	veAnalyzeFuelLastAttemptBaseGrams = input.BasePreAeMassGrams;
+	veAnalyzeFuelLastAttemptAeGrams = input.AppliedAeMassGrams;
+	veAnalyzeFuelLastAttemptFilmGrams = input.FilmCorrectionMassGrams;
+	veAnalyzeFuelLastAttemptFinalGrams = input.FinalCommandedMassGrams;
+	return veAnalyzeFuelEvents.observeEvent(input);
+}
+
+VeAnalyzeFuelEventSnapshot EngineState::snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const {
+	return veAnalyzeFuelEvents.snapshot(nowNt);
+}
+
+void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const {
+	const efitick_t nowNt = getTimeNowNt();
+	const VeAnalyzeFuelEventSnapshot snapshot = snapshotVeAnalyzeFuelEventsLocked(nowNt);
+	output.veAnalyzeFuelEventReady = snapshot.Ready;
+	output.veAnalyzeFuelEventRejectReasons = snapshot.Reasons;
+	output.veAnalyzeFuelEventAttemptedCount = snapshot.AttemptedEventCount;
+	output.veAnalyzeFuelEventAcceptedCount = snapshot.AcceptedEventCount;
+	output.veAnalyzeFuelEventRejectedCount = snapshot.RejectedEventCount;
+	output.veAnalyzeFuelEventInvalidCount = snapshot.InvalidEvidenceEventCount;
+	output.veAnalyzeFuelEventObservedCylinderMask = snapshot.ObservedCylinderMask;
+	output.veAnalyzeFuelEventObservedBankMask = snapshot.ObservedBankMask;
+	output.veAnalyzeFuelEventExpectedCylinderMask = snapshot.ExpectedCylinderMask;
+	output.veAnalyzeFuelEventExpectedBankMask = snapshot.ExpectedBankMask;
+	output.veAnalyzeFuelEventFreshCylinderMask = snapshot.FreshCylinderMask;
+	output.veAnalyzeFuelEventFreshBankMask = snapshot.FreshBankMask;
+	output.veAnalyzeFuelEventCoverageComplete = snapshot.CoverageComplete;
+	output.veAnalyzeFuelEventPublicationGeneration = snapshot.PublicationGeneration;
+
+	const auto& last = snapshot.LastEvent;
+	const bool lastAttemptMatchesRetainedEvent =
+			hasVeAnalyzeFuelAttempt && last.HasEvent && last.Serial == veAnalyzeFuelLastAttemptSerial;
+	const uint64_t lastAttemptSerial = hasVeAnalyzeFuelAttempt ? veAnalyzeFuelLastAttemptSerial : 0;
+	output.veAnalyzeFuelEventLastOwner = hasVeAnalyzeFuelAttempt ? veAnalyzeFuelLastAttemptOwner : 0;
+	output.veAnalyzeFuelEventLastAge = UINT16_MAX;
+	if (hasVeAnalyzeFuelAttempt && nowNt.count > veAnalyzeFuelLastAttemptTimestamp.count) {
+		const uint64_t elapsedNt =
+				static_cast<uint64_t>(nowNt.count) - static_cast<uint64_t>(veAnalyzeFuelLastAttemptTimestamp.count);
+		const uint64_t elapsedMilliseconds = NT2US(elapsedNt) / 1000;
+		output.veAnalyzeFuelEventLastAge =
+				elapsedMilliseconds > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(elapsedMilliseconds);
+	} else if (hasVeAnalyzeFuelAttempt) {
+		output.veAnalyzeFuelEventLastAge = 0;
+	}
+	output.veAnalyzeFuelEventLastSerialLow = static_cast<uint32_t>(lastAttemptSerial);
+	output.veAnalyzeFuelEventLastSerialHigh = static_cast<uint32_t>(lastAttemptSerial >> 32);
+	output.veAnalyzeFuelEventLastWallClamp = hasVeAnalyzeFuelAttempt ? veAnalyzeFuelLastAttemptWallClamp : 0;
+	output.veAnalyzeFuelEventLastCylinderMask = hasVeAnalyzeFuelAttempt ? veAnalyzeFuelLastAttemptCylinderMask : 0;
+	output.veAnalyzeFuelEventLastBankMask = hasVeAnalyzeFuelAttempt ? veAnalyzeFuelLastAttemptBankMask : 0;
+	output.veAnalyzeFuelEventLastBaseMg =
+			hasVeAnalyzeFuelAttempt && std::isfinite(veAnalyzeFuelLastAttemptBaseGrams)
+					? ve_analyze_fuel_events::gramsToMilligrams(veAnalyzeFuelLastAttemptBaseGrams)
+					: 0;
+	output.veAnalyzeFuelEventLastAeMg =
+			hasVeAnalyzeFuelAttempt && std::isfinite(veAnalyzeFuelLastAttemptAeGrams)
+					? ve_analyze_fuel_events::gramsToMilligrams(veAnalyzeFuelLastAttemptAeGrams)
+					: 0;
+	output.veAnalyzeFuelEventLastFilmMg =
+			hasVeAnalyzeFuelAttempt && std::isfinite(veAnalyzeFuelLastAttemptFilmGrams)
+					? ve_analyze_fuel_events::gramsToMilligrams(veAnalyzeFuelLastAttemptFilmGrams)
+					: 0;
+	output.veAnalyzeFuelEventLastFinalMg =
+			hasVeAnalyzeFuelAttempt && std::isfinite(veAnalyzeFuelLastAttemptFinalGrams)
+					? ve_analyze_fuel_events::gramsToMilligrams(veAnalyzeFuelLastAttemptFinalGrams)
+					: 0;
+	output.veAnalyzeFuelEventLastScheduledMg =
+			lastAttemptMatchesRetainedEvent && last.Fresh && !last.SupersededByRejection
+					? last.ScheduledCommandMassMilligrams
+					: 0;
+
+	for (size_t bankIndex = 0; bankIndex < STFT_BANK_COUNT; bankIndex++) {
+		const auto& bank = snapshot.Banks[bankIndex];
+		const auto& record = bank.LatestEvent;
+		output.veAnalyzeFuelBankBaseMg[bankIndex] = record.CalculatedBaseMassMilligrams;
+		output.veAnalyzeFuelBankAeMg[bankIndex] = record.CalculatedAppliedAeMassMilligrams;
+		output.veAnalyzeFuelBankFilmMg[bankIndex] = record.CalculatedFilmCorrectionMassMilligrams;
+		output.veAnalyzeFuelBankFinalMg[bankIndex] = record.AttemptedFinalCommandedMassMilligrams;
+		output.veAnalyzeFuelBankScheduledMg[bankIndex] =
+				record.Fresh && !record.SupersededByRejection ? record.ScheduledCommandMassMilligrams : 0;
+		output.veAnalyzeFuelBankPeakAePercent[bankIndex] = bank.PeakAePercentOfBase;
+		output.veAnalyzeFuelBankPeakFilmPercent[bankIndex] = bank.PeakFilmPercentOfBase;
+		output.veAnalyzeFuelBankPeakSumAbsPercent[bankIndex] = bank.PeakCombinedPercentOfBase;
+		output.veAnalyzeFuelBankReasonMask[bankIndex] = bank.Reasons;
+	}
+
+	for (size_t cylinderIndex = 0; cylinderIndex < MAX_CYLINDER_COUNT; cylinderIndex++) {
+		const auto& cylinder = snapshot.Cylinders[cylinderIndex];
+		output.veAnalyzeFuelCylinderBaseMg[cylinderIndex] = cylinder.CalculatedBaseMassMilligrams;
+		output.veAnalyzeFuelCylinderAeMg[cylinderIndex] = cylinder.CalculatedAppliedAeMassMilligrams;
+		output.veAnalyzeFuelCylinderFilmMg[cylinderIndex] = cylinder.CalculatedFilmCorrectionMassMilligrams;
+		output.veAnalyzeFuelCylinderFinalMg[cylinderIndex] = cylinder.AttemptedFinalCommandedMassMilligrams;
+		output.veAnalyzeFuelCylinderScheduledMg[cylinderIndex] =
+				cylinder.Fresh && !cylinder.SupersededByRejection ? cylinder.ScheduledCommandMassMilligrams : 0;
+		output.veAnalyzeFuelCylinderReasonMask[cylinderIndex] = cylinder.Reasons;
+		output.veAnalyzeFuelCylinderAge[cylinderIndex] =
+				cylinder.HasEvent && cylinder.AgeMilliseconds <= UINT16_MAX ? cylinder.AgeMilliseconds : UINT16_MAX;
+	}
+
+	for (size_t reasonIndex = 0; reasonIndex < ve_analyze_fuel_events::FuelEventReasonCount && reasonIndex < 25;
+		 reasonIndex++) {
+		output.veAnalyzeFuelEventRejectCountByReason[reasonIndex] = snapshot.RejectedEventCountsByReason[reasonIndex];
+	}
+}
+
 static void resetOwnedAirmassRuntimeState(Engine& owner) {
 	owner.airmassInjectionState.onEngineStop();
 
@@ -422,7 +542,12 @@ static void resetOwnedAirmassRuntimeState(Engine& owner) {
 #endif // EFI_ENGINE_CONTROL
 
 	auto& state = owner.engineState;
+	const efitick_t nowNt = getTimeNowNt();
 	state.resetVeAnalyzeSampleGate(getTimeNowNt());
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		state.resetVeAnalyzeFuelEventsLocked(nowNt);
+	}
 	state.resetVeAnalyzeDiagnostics(
 			owner.airmassCalibration.Generation, owner.airmassInjectionState.publicationEpoch());
 	state.resetVeAnalyzeDiscardedCalculationDiagnostics();

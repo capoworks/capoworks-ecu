@@ -67,10 +67,11 @@ enum class FuelEventReason : uint32_t {
 	ResetRecovery = 1u << 20,
 	NoFreshEvent = 1u << 21,
 	StaleEvent = 1u << 22,
-	FutureTimestamp = 1u << 23
+	FutureTimestamp = 1u << 23,
+	IntegrationUnsupported = 1u << 24
 };
 
-inline constexpr size_t FuelEventReasonCount = 24;
+inline constexpr size_t FuelEventReasonCount = 25;
 
 constexpr uint32_t operator|(FuelEventReason lhs, FuelEventReason rhs) {
 	return static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs);
@@ -116,6 +117,10 @@ struct VeAnalyzeFuelEventInput {
 	uint8_t OwnerCylinder = 0;
 	uint16_t AffectedCylinderMask = 0;
 	uint8_t AffectedBankMask = 0;
+	// Zero preserves the standalone collector behavior. Firmware integration
+	// supplies all configured physical cylinders and selected banks here.
+	uint16_t ExpectedCylinderMask = 0;
+	uint8_t ExpectedBankMask = 0;
 	// Zero is the reserved "unknown generation" value.
 	uint32_t PublicationGeneration = 0;
 	uint64_t Serial = 0;
@@ -133,6 +138,9 @@ struct VeAnalyzeFuelEventInput {
 
 	bool WallModelZeroClamp = false;
 	bool SchedulerAccepted = false;
+	// The real fueling path is unchanged, but this attempt cannot yet be
+	// represented as one complete scheduled command.
+	bool IntegrationUnsupported = false;
 };
 
 /**
@@ -148,6 +156,9 @@ struct VeAnalyzeFuelEventRecord {
 	bool Stage1Supplied = false;
 	bool Stage2Supplied = false;
 	bool WallModelZeroClamp = false;
+	// A later rejected attempt affected this owner/bank. Preserve the coherent
+	// record for diagnosis, but do not present its command as current.
+	bool SupersededByRejection = false;
 
 	uint8_t OwnerCylinder = 0;
 	uint16_t AffectedCylinderMask = 0;
@@ -193,6 +204,25 @@ struct VeAnalyzeFuelEventBankSnapshot {
 	}
 };
 
+struct VeAnalyzeFuelEventCylinderSnapshot {
+	bool HasEvent = false;
+	bool Fresh = false;
+	bool SupersededByRejection = false;
+	uint64_t Serial = 0;
+	uint32_t AgeMilliseconds = std::numeric_limits<uint32_t>::max();
+
+	float CalculatedBaseMassMilligrams = 0;
+	float CalculatedAppliedAeMassMilligrams = 0;
+	float CalculatedFilmCorrectionMassMilligrams = 0;
+	float AttemptedFinalCommandedMassMilligrams = 0;
+	float ScheduledCommandMassMilligrams = 0;
+	uint32_t Reasons = 0;
+
+	bool hasReason(ve_analyze_fuel_events::FuelEventReason reason) const {
+		return (Reasons & static_cast<uint32_t>(reason)) != 0;
+	}
+};
+
 struct VeAnalyzeFuelEventSnapshot {
 	// Ready describes collector evidence only. It deliberately excludes model
 	// qualification and lambda validity.
@@ -210,11 +240,17 @@ struct VeAnalyzeFuelEventSnapshot {
 
 	uint16_t ObservedCylinderMask = 0;
 	uint8_t ObservedBankMask = 0;
+	bool CoverageComplete = false;
+	uint16_t ExpectedCylinderMask = 0;
+	uint8_t ExpectedBankMask = 0;
+	uint16_t FreshCylinderMask = 0;
+	uint8_t FreshBankMask = 0;
 	uint32_t PublicationGeneration = 0;
 	uint32_t LastEventAgeMilliseconds = std::numeric_limits<uint32_t>::max();
 
 	VeAnalyzeFuelEventRecord LastEvent;
 	std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks> Banks;
+	std::array<VeAnalyzeFuelEventCylinderSnapshot, ve_analyze_fuel_events::MaximumCylinders> Cylinders;
 	std::array<uint32_t, ve_analyze_fuel_events::FuelEventReasonCount> RejectedEventCountsByReason = {};
 
 	bool hasReason(ve_analyze_fuel_events::FuelEventReason reason) const {
@@ -321,6 +357,7 @@ private:
 		uint32_t AttemptedEvents = 0;
 		uint32_t ScheduledEvents = 0;
 		uint32_t SchedulerRejectedEvents = 0;
+		bool LatestRejectedAfterEvent = false;
 	};
 
 	void setPolicy(const VeAnalyzeFuelEventPolicy& policy);
@@ -342,6 +379,10 @@ private:
 	bool timestampIsFresh(efitick_t nowNt, efitick_t timestamp) const;
 	VeAnalyzeFuelEventRecord makeRecord(const StoredEvent& event, efitick_t nowNt) const;
 	VeAnalyzeFuelEventBankSnapshot makeBankSnapshot(size_t bankIndex, efitick_t nowNt) const;
+	VeAnalyzeFuelEventCylinderSnapshot makeCylinderSnapshot(
+			size_t cylinderIndex,
+			efitick_t nowNt,
+			const std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks>& banks) const;
 
 	VeAnalyzeFuelEventPolicy m_policy;
 	bool m_configValid = false;
@@ -351,6 +392,10 @@ private:
 
 	bool m_hasGeneration = false;
 	uint32_t m_generation = 0;
+	uint16_t m_expectedCylinderMask = 0;
+	uint8_t m_expectedBankMask = 0;
+	bool m_rejectionSinceLatestEvent = false;
+	std::array<bool, ve_analyze_fuel_events::MaximumCylinders> m_cylinderRejectionAfterEvent = {};
 
 	std::array<StoredEvent, ve_analyze_fuel_events::MaximumCylinders> m_cylinders;
 	std::array<BankState, ve_analyze_fuel_events::MaximumBanks> m_banks;

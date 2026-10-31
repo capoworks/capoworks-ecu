@@ -531,6 +531,7 @@ void updateTunerStudioState() {
 		// independently aged sample-gate snapshot, even when fuel publication stops.
 		chibios_rt::CriticalSectionLocker csl;
 		engine->engineState.exportVeAnalyzeDiagnostics(*tsOutputChannels);
+		engine->engineState.exportVeAnalyzeFuelEventsLocked(*tsOutputChannels);
 	}
 
 #if EFI_SHAFT_POSITION_INPUT

@@ -21,7 +21,15 @@ public:
 	float adjust(float desiredMassGrams);
 	float getWallFuel() const;
 	void resetWF();
+	bool wasZeroClamped() const {
+		return m_zeroClamped;
+	}
 	int invocationCounter = 0;
+
+private:
+	// Describes only the latest adjust() call. It is evidence for this event,
+	// not a persistent wall-model state.
+	bool m_zeroClamped = false;
 };
 
 struct IWallFuelController {
