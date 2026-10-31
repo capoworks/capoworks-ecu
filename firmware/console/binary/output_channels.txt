@@ -381,12 +381,12 @@ struct_no_prefix output_channels_s
 	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankPeakFilmPercent;VE Analyze: bank peak absolute film ratio;"%", 1, 0, 0, 0, 3
 	float[STFT_BANK_COUNT iterate] veAnalyzeFuelBankPeakSumAbsPercent;VE Analyze: bank peak sum of absolute ratios;"%", 1, 0, 0, 0, 3
 	uint32_t[STFT_BANK_COUNT iterate] veAnalyzeFuelBankReasonMask;VE Analyze: bank fuel evidence reasons;"bits", 1, 0, 0, 0, 0
-	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderBaseMg;VE Analyze: cylinder latest base mass;"mg", 1, 0, 0, 0, 3
-	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderAeMg;VE Analyze: cylinder latest applied AE mass;"mg", 1, 0, 0, 0, 3
-	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderFilmMg;VE Analyze: cylinder latest film correction mass;"mg", 1, 0, 0, 0, 3
-	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderFinalMg;VE Analyze: cylinder latest attempted commanded mass;"mg", 1, 0, 0, 0, 3
-	float[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderScheduledMg;VE Analyze: cylinder latest accepted scheduled command mass;"mg", 1, 0, 0, 0, 3
-	uint32_t[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderReasonMask;VE Analyze: cylinder fuel evidence reasons;"bits", 1, 0, 0, 0, 0
-	uint16_t[MAX_CYLINDER_COUNT iterate] veAnalyzeFuelCylinderAge;VE Analyze: cylinder latest fuel evidence age;"ms", 1, 0, 0, 65535, 0
+	float[12 iterate] veAnalyzeFuelCylinderBaseMg;VE Analyze: cylinder latest base mass;"mg", 1, 0, 0, 0, 3
+	float[12 iterate] veAnalyzeFuelCylinderAeMg;VE Analyze: cylinder latest applied AE mass;"mg", 1, 0, 0, 0, 3
+	float[12 iterate] veAnalyzeFuelCylinderFilmMg;VE Analyze: cylinder latest film correction mass;"mg", 1, 0, 0, 0, 3
+	float[12 iterate] veAnalyzeFuelCylinderFinalMg;VE Analyze: cylinder latest attempted commanded mass;"mg", 1, 0, 0, 0, 3
+	float[12 iterate] veAnalyzeFuelCylinderScheduledMg;VE Analyze: cylinder latest accepted scheduled command mass;"mg", 1, 0, 0, 0, 3
+	uint32_t[12 iterate] veAnalyzeFuelCylinderReasonMask;VE Analyze: cylinder fuel evidence reasons;"bits", 1, 0, 0, 0, 0
+	uint16_t[12 iterate] veAnalyzeFuelCylinderAge;VE Analyze: cylinder latest fuel evidence age;"ms", 1, 0, 0, 65535, 0
 	uint32_t[25 iterate] veAnalyzeFuelEventRejectCountByReason;VE Analyze: fuel rejection count by reason bit;"count", 1, 0, 0, 0, 0
 end_struct

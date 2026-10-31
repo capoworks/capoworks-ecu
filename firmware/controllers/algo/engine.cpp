@@ -437,6 +437,28 @@ VeAnalyzeFuelEventSnapshot EngineState::snapshotVeAnalyzeFuelEventsLocked(efitic
 }
 
 void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const {
+	// The live-data schema fixes per-cylinder capacity with [12 iterate]; keep the export loop in bounds.
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderBaseMg) / sizeof(output.veAnalyzeFuelCylinderBaseMg[0]) ==
+			MAX_CYLINDER_COUNT);
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderAeMg) / sizeof(output.veAnalyzeFuelCylinderAeMg[0]) ==
+			MAX_CYLINDER_COUNT);
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderFilmMg) / sizeof(output.veAnalyzeFuelCylinderFilmMg[0]) ==
+			MAX_CYLINDER_COUNT);
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderFinalMg) / sizeof(output.veAnalyzeFuelCylinderFinalMg[0]) ==
+			MAX_CYLINDER_COUNT);
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderScheduledMg) / sizeof(output.veAnalyzeFuelCylinderScheduledMg[0]) ==
+			MAX_CYLINDER_COUNT);
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderReasonMask) / sizeof(output.veAnalyzeFuelCylinderReasonMask[0]) ==
+			MAX_CYLINDER_COUNT);
+	static_assert(
+			sizeof(output.veAnalyzeFuelCylinderAge) / sizeof(output.veAnalyzeFuelCylinderAge[0]) == MAX_CYLINDER_COUNT);
+
 	const efitick_t nowNt = getTimeNowNt();
 	const VeAnalyzeFuelEventSnapshot snapshot = snapshotVeAnalyzeFuelEventsLocked(nowNt);
 	output.veAnalyzeFuelEventReady = snapshot.Ready;
