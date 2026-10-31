@@ -809,6 +809,12 @@ TEST_F(BlendedAirmassModelTest, FirstVeAnalyzeReasonSurvivesLaterWritesAndValidR
 
 TEST_F(BlendedAirmassModelTest, RunningVeCalibrationWriteLatchesReasonAndPreservesFuelNumbers) {
 	setTimeNowUs(1'000'000);
+	// This test holds fuel inputs constant across five simulated seconds. Seed both
+	// thermal representations at the fixture's 27 C IAT so the production charge
+	// temperature rate limiter is already at equilibrium instead of drifting from K-only state.
+	constexpr float ThermalInputC = 27.0f;
+	engine->engineState.sd.tCharge = ThermalInputC;
+	engine->engineState.sd.tChargeK = ThermalInputC + 273.15f;
 	config->useMapEstimateTable = false;
 	Sensor::setMockValue(SensorType::Rpm, 2500);
 	setTable(config->airmassBlendTable, 100);
