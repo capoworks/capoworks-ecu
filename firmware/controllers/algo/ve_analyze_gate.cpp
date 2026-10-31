@@ -50,6 +50,14 @@ uint32_t reasonBit(VeAnalyzeGateReason reason) {
 	return static_cast<uint32_t>(reason);
 }
 
+VeAnalyzeGateReason transientReason(VeAnalyzeTransient transient) {
+	if (transient == VeAnalyzeTransient::FuelCut) {
+		return VeAnalyzeGateReason::FuelCutRecovery;
+	}
+	return transient == VeAnalyzeTransient::FuelCorrection ? VeAnalyzeGateReason::FuelCorrectionRecovery
+														   : VeAnalyzeGateReason::CalibrationRecovery;
+}
+
 uint32_t saturatedMilliseconds(uint64_t microseconds) {
 	const uint64_t milliseconds = microseconds / 1000;
 	const uint64_t maximum = std::numeric_limits<uint32_t>::max();
@@ -104,12 +112,7 @@ bool VeAnalyzeGate::configure(const VeAnalyzeGateConfig& config) {
 		m_sampleToleranceNt = 0;
 		clearSamples();
 		m_hasTpsUpdate = false;
-		m_holdUntilNt = std::numeric_limits<int64_t>::min();
-		m_holdReasons = reasonBit(VeAnalyzeGateReason::InvalidConfiguration);
 		m_hasMovement = false;
-		m_hasCorrection = false;
-		m_hasExternalUpdate = false;
-		m_transientStates = InactiveTransientStates;
 		m_needStartupHold = true;
 		return false;
 	}
@@ -128,12 +131,7 @@ bool VeAnalyzeGate::configure(const VeAnalyzeGateConfig& config) {
 	m_sampleToleranceNt = secondsToNt(config.SampleToleranceSeconds);
 	clearSamples();
 	m_hasTpsUpdate = false;
-	m_holdUntilNt = std::numeric_limits<int64_t>::min();
-	m_holdReasons = 0;
 	m_hasMovement = false;
-	m_hasCorrection = false;
-	m_hasExternalUpdate = false;
-	m_transientStates = InactiveTransientStates;
 	m_needStartupHold = true;
 	return true;
 }
@@ -143,6 +141,7 @@ void VeAnalyzeGate::clearSamples() {
 	m_count = 0;
 	m_tpsValid = false;
 	m_rateValid = false;
+	m_tpsMovementActive = false;
 	m_absRatePercentPerSecond = 0;
 	m_windowSeconds = 0;
 	m_timestampFault = TimestampFaultNone;
@@ -274,13 +273,17 @@ void VeAnalyzeGate::appendSample(efitick_t nowNt, float tpsPercent) {
 
 	const bool quickMovement =
 			hasPrevious && std::fabs(tpsPercent - previous.TpsPercent) > m_config.QuickMovementThresholdPercent;
-	const bool windowMovement =
-			m_rateValid && m_absRatePercentPerSecond > m_config.RateThresholdPercentPerSecond;
-	if (quickMovement || windowMovement) {
+	const bool windowMovement = m_rateValid && m_absRatePercentPerSecond > m_config.RateThresholdPercentPerSecond;
+	const bool tpsMovementActive = quickMovement || windowMovement;
+	if (tpsMovementActive) {
 		m_hasMovement = true;
 		m_lastMovement = nowNt;
 		startHold(nowNt, normalHoldNt(), VeAnalyzeGateReason::TpsMovementRecovery);
+	} else if (m_tpsMovementActive) {
+		// Start the complete recovery hold when the movement window closes.
+		startHold(nowNt, normalHoldNt(), VeAnalyzeGateReason::TpsMovementRecovery);
 	}
+	m_tpsMovementActive = tpsMovementActive;
 }
 
 bool VeAnalyzeGate::updateTps(efitick_t nowNt, float tpsPercent, bool sensorValid, bool fresh) {
@@ -357,8 +360,6 @@ void VeAnalyzeGate::observeTransient(efitick_t nowNt, VeAnalyzeTransient transie
 
 	if (m_hasExternalUpdate && nowNt.count < m_lastExternalUpdate.count) {
 		m_hasExternalUpdate = false;
-		m_hasCorrection = false;
-		m_transientStates = InactiveTransientStates;
 		reseedForFault(nowNt, VeAnalyzeGateReason::RegressedTimestamp);
 		m_timestampFault = TimestampFaultRegressed;
 	}
@@ -368,22 +369,18 @@ void VeAnalyzeGate::observeTransient(efitick_t nowNt, VeAnalyzeTransient transie
 		setTransientState(transient, TransientActive);
 		m_hasCorrection = true;
 		m_lastCorrection = nowNt;
-		const bool isCut = transient == VeAnalyzeTransient::FuelCut;
-		const VeAnalyzeGateReason reason = transient == VeAnalyzeTransient::FuelCut
-				? VeAnalyzeGateReason::FuelCutRecovery
-				: transient == VeAnalyzeTransient::FuelCorrection ? VeAnalyzeGateReason::FuelCorrectionRecovery
-																  : VeAnalyzeGateReason::CalibrationRecovery;
-		startHold(nowNt, isCut ? cutHoldNt() : normalHoldNt(), reason);
+		startHold(
+				nowNt,
+				transient == VeAnalyzeTransient::FuelCut ? cutHoldNt() : normalHoldNt(),
+				transientReason(transient));
 	} else if (previousState == TransientActive) {
 		setTransientState(transient, TransientInactive);
 		m_hasCorrection = true;
 		m_lastCorrection = nowNt;
-		const bool isCut = transient == VeAnalyzeTransient::FuelCut;
-		const VeAnalyzeGateReason reason = transient == VeAnalyzeTransient::FuelCut
-				? VeAnalyzeGateReason::FuelCutRecovery
-				: transient == VeAnalyzeTransient::FuelCorrection ? VeAnalyzeGateReason::FuelCorrectionRecovery
-																  : VeAnalyzeGateReason::CalibrationRecovery;
-		startHold(nowNt, isCut ? cutHoldNt() : normalHoldNt(), reason);
+		startHold(
+				nowNt,
+				transient == VeAnalyzeTransient::FuelCut ? cutHoldNt() : normalHoldNt(),
+				transientReason(transient));
 	} else if (previousState == TransientUnknown) {
 		setTransientState(transient, TransientInactive);
 	}
@@ -444,11 +441,21 @@ VeAnalyzeGateSnapshot VeAnalyzeGate::snapshot(efitick_t nowNt) const {
 
 	result.RateValid = result.TpsValid && m_rateValid && timestampValid;
 
+	bool hasActiveExternalCondition = false;
+	for (size_t index = 0; index < static_cast<size_t>(VeAnalyzeTransient::Count); index++) {
+		const auto transient = static_cast<VeAnalyzeTransient>(index);
+		if (transientState(transient) == TransientActive) {
+			result.Reasons |= reasonBit(transientReason(transient));
+			hasActiveExternalCondition = true;
+		}
+	}
+
 	if (m_holdUntilNt > nowNt.count) {
 		result.HoldRemainingMilliseconds = remainingMilliseconds(nowNt, m_holdUntilNt);
 		result.Reasons |= m_holdReasons;
 	}
 
-	result.Ready = result.TpsValid && result.RateValid && result.HoldRemainingMilliseconds == 0 && timestampValid;
+	result.Ready = result.TpsValid && result.RateValid && result.HoldRemainingMilliseconds == 0 && timestampValid &&
+				   !hasActiveExternalCondition;
 	return result;
 }

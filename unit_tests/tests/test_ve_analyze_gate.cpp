@@ -57,6 +57,14 @@ void expectMovementRecovery(const VeAnalyzeGateSnapshot& snapshot) {
 	EXPECT_FALSE(snapshot.Ready);
 	EXPECT_TRUE(snapshot.hasReason(VeAnalyzeGateReason::TpsMovementRecovery));
 }
+
+VeAnalyzeGateReason transientRecoveryReason(VeAnalyzeTransient transient) {
+	if (transient == VeAnalyzeTransient::FuelCut) {
+		return VeAnalyzeGateReason::FuelCutRecovery;
+	}
+	return transient == VeAnalyzeTransient::FuelCorrection ? VeAnalyzeGateReason::FuelCorrectionRecovery
+														   : VeAnalyzeGateReason::CalibrationRecovery;
+}
 } // namespace
 
 TEST(VeAnalyzeGate, StationaryJitteredSamplesBecomeReadyWithoutClampingTps) {
@@ -92,8 +100,13 @@ TEST(VeAnalyzeGate, DetectsBothOpeningAndClosingWithoutKnowingAccelEnrichment) {
 		expectMovementRecovery(snapshot);
 		EXPECT_GT(snapshot.AbsTpsRatePercentPerSecond, 5.0f);
 
-		const int64_t recoveredUs = movementUs + 250 * Millisecond;
+		const int64_t movementEndUs = movementUs + 200 * Millisecond;
+		fixture.feedUntil(nowUs, movementEndUs, endTps);
+		ASSERT_TRUE(fixture.feed(movementEndUs, endTps));
+
+		const int64_t recoveredUs = movementEndUs + 250 * Millisecond;
 		fixture.feedUntil(nowUs, recoveredUs, endTps);
+		expectMovementRecovery(fixture.Gate.snapshot(timeUs(recoveredUs - 1)));
 		snapshot = fixture.Gate.snapshot(timeUs(recoveredUs));
 		EXPECT_TRUE(snapshot.Ready);
 	}
@@ -193,7 +206,10 @@ TEST(VeAnalyzeGate, RateEqualToThresholdDoesNotTriggerStrictGreaterThanGate) {
 	}
 	EXPECT_TRUE(fixture.feed(200 * Millisecond, 1.0f));
 
-	auto snapshot = fixture.Gate.snapshot(timeUs(220 * Millisecond));
+	auto snapshot = fixture.Gate.snapshot(timeUs(250 * Millisecond - 1));
+	EXPECT_FALSE(snapshot.Ready);
+
+	snapshot = fixture.Gate.snapshot(timeUs(250 * Millisecond));
 	EXPECT_FLOAT_EQ(5.0f, snapshot.AbsTpsRatePercentPerSecond);
 	EXPECT_TRUE(snapshot.RateValid);
 	EXPECT_TRUE(snapshot.Ready);
@@ -271,6 +287,101 @@ TEST(VeAnalyzeGate, SustainedTransientRenewsHoldAndCountsDownAfterItEnds) {
 	fixture.feedUntil(nowUs, recoveredUs, 20.0f);
 	EXPECT_FALSE(fixture.Gate.snapshot(timeUs(recoveredUs - 1)).Ready);
 	EXPECT_TRUE(fixture.Gate.snapshot(timeUs(recoveredUs)).Ready);
+}
+
+TEST(VeAnalyzeGate, ActiveExternalConditionsBlockReadyUntilExplicitInactiveEdge) {
+	for (const auto transient :
+		 {VeAnalyzeTransient::FuelCorrection, VeAnalyzeTransient::FuelCut, VeAnalyzeTransient::Calibration}) {
+		GateFixture fixture;
+		fixture.Gate.reset(timeUs(0));
+		int64_t nowUs = 0;
+		fixture.warm(nowUs);
+		ASSERT_TRUE(fixture.Gate.snapshot(timeUs(nowUs)).Ready);
+
+		const int64_t activeUs = nowUs;
+		fixture.Gate.observeTransient(timeUs(activeUs), transient, true);
+		const int64_t afterHoldUs = activeUs + 500 * Millisecond;
+		fixture.feedUntil(nowUs, afterHoldUs, 20.0f);
+
+		auto active = fixture.Gate.snapshot(timeUs(afterHoldUs));
+		EXPECT_FALSE(active.Ready);
+		EXPECT_TRUE(active.TpsValid);
+		EXPECT_TRUE(active.RateValid);
+		EXPECT_EQ(0u, active.HoldRemainingMilliseconds);
+		EXPECT_TRUE(active.hasReason(transientRecoveryReason(transient)));
+
+		const int64_t recoveryUs = transient == VeAnalyzeTransient::FuelCut ? 400 * Millisecond : 250 * Millisecond;
+		fixture.Gate.observeTransient(timeUs(afterHoldUs), transient, false);
+		const int64_t recoveredUs = afterHoldUs + recoveryUs;
+		fixture.feedUntil(nowUs, recoveredUs, 20.0f);
+
+		auto recovering = fixture.Gate.snapshot(timeUs(recoveredUs - 1));
+		EXPECT_FALSE(recovering.Ready);
+		EXPECT_TRUE(recovering.hasReason(transientRecoveryReason(transient)));
+		EXPECT_TRUE(fixture.Gate.snapshot(timeUs(recoveredUs)).Ready);
+	}
+}
+
+TEST(VeAnalyzeGate, TimestampFaultPreservesActiveExternalCondition) {
+	GateFixture fixture;
+	fixture.Gate.reset(timeUs(0));
+	int64_t nowUs = 0;
+	fixture.warm(nowUs);
+
+	const int64_t activeUs = nowUs;
+	fixture.Gate.observeTransient(timeUs(activeUs), VeAnalyzeTransient::FuelCut, true);
+	fixture.Gate.observeTransient(timeUs(activeUs - FastPeriod), VeAnalyzeTransient::FuelCorrection, false);
+
+	const int64_t checkUs = activeUs + 3000 * Millisecond;
+	fixture.feedUntil(nowUs, checkUs, 20.0f);
+	auto snapshot = fixture.Gate.snapshot(timeUs(checkUs));
+	EXPECT_FALSE(snapshot.Ready);
+	EXPECT_TRUE(snapshot.RateValid);
+	EXPECT_TRUE(snapshot.hasReason(VeAnalyzeGateReason::FuelCutRecovery));
+}
+
+TEST(VeAnalyzeGate, ConfigurePreservesActiveConditionAndExistingCutRecovery) {
+	VeAnalyzeGateConfig shortCutPolicy = testPolicy();
+	shortCutPolicy.QuietHoldSeconds = 0.10f;
+	shortCutPolicy.CutRecoverySeconds = 0.10f;
+
+	GateFixture activeFixture;
+	activeFixture.Gate.reset(timeUs(0));
+	int64_t activeNowUs = 0;
+	activeFixture.warm(activeNowUs);
+	const int64_t activeUs = activeNowUs;
+	activeFixture.Gate.observeTransient(timeUs(activeUs), VeAnalyzeTransient::FuelCut, true);
+	EXPECT_TRUE(activeFixture.Gate.configure(shortCutPolicy));
+
+	const int64_t inactiveUs = activeUs + 1000 * Millisecond;
+	activeFixture.feedUntil(activeNowUs, inactiveUs, 20.0f);
+	auto active = activeFixture.Gate.snapshot(timeUs(inactiveUs));
+	EXPECT_FALSE(active.Ready);
+	EXPECT_TRUE(active.hasReason(VeAnalyzeGateReason::FuelCutRecovery));
+
+	activeFixture.Gate.observeTransient(timeUs(inactiveUs), VeAnalyzeTransient::FuelCut, false);
+	activeFixture.feedUntil(activeNowUs, inactiveUs + 100 * Millisecond, 20.0f);
+	EXPECT_TRUE(activeFixture.Gate.snapshot(timeUs(inactiveUs + 100 * Millisecond)).Ready);
+
+	GateFixture recoveringFixture;
+	recoveringFixture.Gate.reset(timeUs(0));
+	int64_t recoveringNowUs = 0;
+	recoveringFixture.warm(recoveringNowUs);
+	const int64_t cutUs = recoveringNowUs;
+	recoveringFixture.Gate.observeTransient(timeUs(cutUs), VeAnalyzeTransient::FuelCut, true);
+	recoveringFixture.Gate.observeTransient(timeUs(cutUs), VeAnalyzeTransient::FuelCut, false);
+
+	VeAnalyzeGateConfig shorterPolicy = testPolicy();
+	shorterPolicy.QuietHoldSeconds = 0.10f;
+	shorterPolicy.CutRecoverySeconds = 0.10f;
+	EXPECT_TRUE(recoveringFixture.Gate.configure(shorterPolicy));
+
+	const int64_t cutRecoveredUs = cutUs + 400 * Millisecond;
+	recoveringFixture.feedUntil(recoveringNowUs, cutRecoveredUs, 20.0f);
+	auto stillRecovering = recoveringFixture.Gate.snapshot(timeUs(cutRecoveredUs - 1));
+	EXPECT_FALSE(stillRecovering.Ready);
+	EXPECT_TRUE(stillRecovering.hasReason(VeAnalyzeGateReason::FuelCutRecovery));
+	EXPECT_TRUE(recoveringFixture.Gate.snapshot(timeUs(cutRecoveredUs)).Ready);
 }
 
 TEST(VeAnalyzeGate, LaterNormalTransientCannotShortenCutRecovery) {

@@ -107,7 +107,9 @@ struct VeAnalyzeGateSnapshot {
  * External transients are edge-observed booleans. Call with active=true for
  * every update while a condition persists and active=false when it ends.
  * Recurring active observations renew the hold. An inactive observation is
- * only significant after an active one.
+ * only significant after an active one. An active condition blocks Ready
+ * indefinitely, even after its latest hold expires, until an explicit
+ * inactive observation starts the full recovery hold.
  *
  * This class owns no global state and performs no allocation. Concurrent
  * callers must provide synchronization for the owning instance.
@@ -117,6 +119,9 @@ public:
 	VeAnalyzeGate();
 	explicit VeAnalyzeGate(const VeAnalyzeGateConfig& config);
 
+	// Changes policy and invalidates TPS history. Existing external-condition
+	// state and recovery deadlines are preserved so reconfiguration cannot
+	// admit samples during a still-active condition or shorten cut recovery.
 	bool configure(const VeAnalyzeGateConfig& config);
 	bool isValidConfiguration() const {
 		return m_configValid;
@@ -126,6 +131,8 @@ public:
 		return m_config;
 	}
 
+	// Explicitly clears all observed state, including external conditions and
+	// their recovery deadlines, then starts a full normal recovery hold.
 	void reset(efitick_t nowNt);
 
 	// Returns true only when a new, finite, non-duplicate sample was accepted.
@@ -168,6 +175,7 @@ private:
 	efitick_t m_lastTpsUpdate;
 	bool m_tpsValid = false;
 	bool m_rateValid = false;
+	bool m_tpsMovementActive = false;
 	float m_absRatePercentPerSecond = 0;
 	float m_windowSeconds = 0;
 	bool m_needStartupHold = true;
