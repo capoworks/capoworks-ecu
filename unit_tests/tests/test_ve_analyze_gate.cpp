@@ -25,6 +25,10 @@ VeAnalyzeGateConfig testPolicy() {
 	return config;
 }
 
+int64_t roundedUpPolicyMicroseconds(float seconds) {
+	return static_cast<int64_t>(std::ceil(static_cast<double>(seconds) * US_PER_SECOND));
+}
+
 class GateFixture {
 public:
 	explicit GateFixture(VeAnalyzeGateConfig config = testPolicy())
@@ -343,7 +347,10 @@ TEST(VeAnalyzeGate, ActiveExternalConditionsBlockReadyUntilExplicitInactiveEdge)
 		EXPECT_EQ(0u, active.HoldRemainingMilliseconds);
 		EXPECT_TRUE(active.hasReason(transientRecoveryReason(transient)));
 
-		const int64_t recoveryUs = transient == VeAnalyzeTransient::FuelCut ? 400 * Millisecond : 250 * Millisecond;
+		const float recoverySeconds = transient == VeAnalyzeTransient::FuelCut
+											? fixture.Gate.config().CutRecoverySeconds
+											: fixture.Gate.config().QuietHoldSeconds;
+		const int64_t recoveryUs = roundedUpPolicyMicroseconds(recoverySeconds);
 		fixture.Gate.observeTransient(timeUs(afterHoldUs), transient, false);
 		const int64_t recoveredUs = afterHoldUs + recoveryUs;
 		fixture.feedUntil(nowUs, recoveredUs, 20.0f);
@@ -393,8 +400,10 @@ TEST(VeAnalyzeGate, ConfigurePreservesActiveConditionAndExistingCutRecovery) {
 	EXPECT_TRUE(active.hasReason(VeAnalyzeGateReason::FuelCutRecovery));
 
 	activeFixture.Gate.observeTransient(timeUs(inactiveUs), VeAnalyzeTransient::FuelCut, false);
-	activeFixture.feedUntil(activeNowUs, inactiveUs + 100 * Millisecond, 20.0f);
-	EXPECT_TRUE(activeFixture.Gate.snapshot(timeUs(inactiveUs + 100 * Millisecond)).Ready);
+	const int64_t shortCutRecoveredUs = inactiveUs + roundedUpPolicyMicroseconds(shortCutPolicy.CutRecoverySeconds);
+	activeFixture.feedUntil(activeNowUs, shortCutRecoveredUs, 20.0f);
+	EXPECT_FALSE(activeFixture.Gate.snapshot(timeUs(shortCutRecoveredUs - 1)).Ready);
+	EXPECT_TRUE(activeFixture.Gate.snapshot(timeUs(shortCutRecoveredUs)).Ready);
 
 	GateFixture recoveringFixture;
 	recoveringFixture.Gate.reset(timeUs(0));
@@ -409,7 +418,7 @@ TEST(VeAnalyzeGate, ConfigurePreservesActiveConditionAndExistingCutRecovery) {
 	shorterPolicy.CutRecoverySeconds = 0.10f;
 	EXPECT_TRUE(recoveringFixture.Gate.configure(shorterPolicy));
 
-	const int64_t cutRecoveredUs = cutUs + 400 * Millisecond;
+	const int64_t cutRecoveredUs = cutUs + roundedUpPolicyMicroseconds(testPolicy().CutRecoverySeconds);
 	recoveringFixture.feedUntil(recoveringNowUs, cutRecoveredUs, 20.0f);
 	auto stillRecovering = recoveringFixture.Gate.snapshot(timeUs(cutRecoveredUs - 1));
 	EXPECT_FALSE(stillRecovering.Ready);
