@@ -2,6 +2,7 @@
 
 #include "accel_enrichment.h"
 #include "airmass_calibration.h"
+#include "closed_loop_fuel.h"
 #include "cylinder_fuel_trim.h"
 #include "fuel_math.h"
 #include "tunerstudio.h"
@@ -54,6 +55,16 @@ void setTrim(size_t cylinder, float percent) {
 	ASSERT_LT(cylinder, CYLINDER_FUEL_TRIM_COUNT);
 	setTable(config->cylinderFuelTrims[cylinder].table, percent);
 }
+
+struct StftCellAdjustmentReset {
+	~StftCellAdjustmentReset() {
+		auto& cellConfig = engineConfiguration->stft.cellCfgs[3];
+		cellConfig.timeConstant = 0.1f;
+		cellConfig.maxAdd = 0;
+		cellConfig.maxRemove = 0;
+		fuelClosedLoopCorrection(50, 1);
+	}
+};
 
 void expectNeutralTrimTelemetry() {
 	for (size_t cylinder = 0; cylinder < CYLINDER_FUEL_TRIM_COUNT; cylinder++) {
@@ -194,6 +205,91 @@ TEST_F(CylinderFuelTrimIntegration, AdditiveAndLuaFuelStayOutsideModelTrim) {
 		EXPECT_NEAR(engine->cylinders[cylinder].getInjectionMass(), (modeled + additive) * 2 + 0.003f, EPS4D)
 				<< cylinder;
 	}
+
+	const auto trimmedProvenance = engine->cylinders[0].getFuelProvenance();
+	const auto neutralTrimProvenance = engine->cylinders[1].getFuelProvenance();
+	ASSERT_TRUE(trimmedProvenance.Valid);
+	ASSERT_TRUE(neutralTrimProvenance.Valid);
+	EXPECT_EQ(engine->airmassCalibration.Generation, trimmedProvenance.CalibrationGeneration);
+	EXPECT_NEAR(trimmedProvenance.PreAeBaseFuelMass, modeled * 1.10f * 2 + 0.003f, EPS4D);
+	EXPECT_NEAR(trimmedProvenance.AppliedAeFuelMass, additive * 2, EPS4D);
+	EXPECT_NEAR(neutralTrimProvenance.PreAeBaseFuelMass, modeled * 2 + 0.003f, EPS4D);
+	EXPECT_NEAR(neutralTrimProvenance.AppliedAeFuelMass, additive * 2, EPS4D);
+	EXPECT_NEAR(
+			engine->cylinders[0].getInjectionMass(),
+			trimmedProvenance.PreAeBaseFuelMass + trimmedProvenance.AppliedAeFuelMass,
+			EPS4D);
+}
+
+TEST_F(CylinderFuelTrimIntegration, FuelProvenanceAppliesBankTrimToBaseAndAe) {
+	struct : public MockIdleController {
+		bool isIdlingOrTaper() const override {
+			return false;
+		}
+	} idleController;
+	engine->engineModules.get<IdleController>().set(&idleController);
+
+	engineConfiguration->tpsAccelEnrichmentThreshold = 5;
+	engineConfiguration->tpsAccelLookback = 2;
+	engineConfiguration->tpsAccelFractionPeriod = 1;
+	engineConfiguration->tpsAccelFractionDivisor = 1;
+	setTable(config->tpsTpsAccelTable, 5);
+	initAccelEnrichment();
+
+	engine->module<TpsAccelEnrichment>()->setLength(2);
+	engine->module<TpsAccelEnrichment>()->onNewValue(0);
+	engine->module<TpsAccelEnrichment>()->onNewValue(10);
+	setAllTrims(0);
+	invalidateAirmassCalibration();
+	runFuelCalculation();
+
+	FuelAirmassCapture capture;
+	ASSERT_TRUE(captureFuelAirmassInputs(2500, engine->airmassInjectionState.publicationEpoch(), capture, false));
+	const auto candidate = calculateFuelPublication(2500, false, capture, false);
+	ASSERT_TRUE(candidate.Valid);
+	const float modeled = candidate.ModeledCycleFuelMass;
+	const float additive = candidate.AdditiveCycleFuelMass;
+	ASSERT_GT(modeled, 0);
+	ASSERT_GT(additive, 0);
+
+	setTrim(0, 10);
+	engine->engineState.lua.fuelMult = 2;
+	engine->engineState.lua.fuelAdd = 0.003f;
+	engineConfiguration->fuelClosedLoopCorrectionEnabled = true;
+	engineConfiguration->stft.startupDelay = 0;
+	engineConfiguration->stft.minClt = 0;
+	engineConfiguration->stft.maxOverrunLoad = 30;
+	engineConfiguration->stft.minPowerLoad = 70;
+	for (auto& cellConfig : engineConfiguration->stft.cellCfgs) {
+		cellConfig.timeConstant = 0.1f;
+		cellConfig.maxAdd = 0;
+		cellConfig.maxRemove = 0;
+	}
+	engineConfiguration->stft.cellCfgs[3].timeConstant = 0.1f;
+	engineConfiguration->stft.cellCfgs[3].maxAdd = 20;
+	engineConfiguration->stft.cellCfgs[3].maxRemove = -20;
+	engineConfiguration->noFuelTrimAfterDfcoTime = 0;
+	engineConfiguration->cylinderBankSelect[0] = 0;
+	engine->fuelComputer.running.timeSinceCrankingInSecs = 10;
+	Sensor::setMockValue(SensorType::Lambda1, 0.8f);
+	setTimeNowUs(3e6);
+	StftCellAdjustmentReset stftCellAdjustmentReset;
+
+	// Saturate bank 0 at its configured 20% removal before publishing fuel.
+	for (size_t i = 0; i < 100; i++) {
+		fuelClosedLoopCorrection(50, 1);
+	}
+
+	invalidateAirmassCalibration();
+	runFuelCalculation();
+
+	const float bankTrim = engine->stftCorrection[0];
+	const auto provenance = engine->cylinders[0].getFuelProvenance();
+	ASSERT_TRUE(provenance.Valid);
+	EXPECT_NEAR(0.8f, bankTrim, EPS4D);
+	EXPECT_NEAR(provenance.PreAeBaseFuelMass, (modeled * 1.10f * 2 + 0.003f) * bankTrim, EPS4D);
+	EXPECT_NEAR(provenance.AppliedAeFuelMass, additive * 2 * bankTrim, EPS4D);
+	EXPECT_NEAR(engine->cylinders[0].getInjectionMass(), ((modeled * 1.10f + additive) * 2 + 0.003f) * bankTrim, EPS4D);
 }
 
 TEST_F(CylinderFuelTrimIntegration, DisabledInjectionBypassesInvalidTrimCalibration) {

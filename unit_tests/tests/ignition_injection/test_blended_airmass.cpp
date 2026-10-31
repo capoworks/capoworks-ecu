@@ -1071,6 +1071,7 @@ TEST_F(BlendedAirmassModelTest, OwnerEngineStopClearsRuntimeStateAndPreservesPen
 			airmassVeAnalyzeReason(VeReject::NonUniformAuthority),
 			engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
 	const auto sessionGeneration = engine->engineState.veAnalyzeDiagnostics.SessionGeneration;
+	ASSERT_TRUE(engine->cylinders[0].getFuelProvenance().Valid);
 
 	{
 		chibios_rt::CriticalSectionLocker csl;
@@ -1090,6 +1091,7 @@ TEST_F(BlendedAirmassModelTest, OwnerEngineStopClearsRuntimeStateAndPreservesPen
 	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeLatchedTime);
 	EXPECT_EQ(sessionGeneration + 1, engine->engineState.veAnalyzeDiagnostics.SessionGeneration);
 	EXPECT_EQ(static_cast<uint8_t>(AirmassInjectionStatus::NotReady), engine->outputChannels.blendedStatus);
+	EXPECT_FALSE(engine->cylinders[0].getFuelProvenance().Valid);
 	EXPECT_EQ(static_cast<uint8_t>(AirmassInjectionFault::None), engine->outputChannels.blendedFault);
 	EXPECT_EQ(2, engine->airmassInjectionState.pendingCallbacks());
 

@@ -412,6 +412,15 @@ void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
 static void resetOwnedAirmassRuntimeState(Engine& owner) {
 	owner.airmassInjectionState.onEngineStop();
 
+#if EFI_ENGINE_CONTROL
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		for (auto& cylinder : owner.cylinders) {
+			cylinder.invalidateFuelProvenance();
+		}
+	}
+#endif // EFI_ENGINE_CONTROL
+
 	auto& state = owner.engineState;
 	state.resetVeAnalyzeSampleGate(getTimeNowNt());
 	state.resetVeAnalyzeDiagnostics(

@@ -38,6 +38,16 @@ void expectAllActiveCylinderMasses(float expected) {
 	}
 }
 
+void expectAllActiveCylinderProvenanceInvalid() {
+	for (size_t i = 0; i < engine->engineState.cylinderCount; i++) {
+		const auto provenance = engine->cylinders[i].getFuelProvenance();
+		EXPECT_FALSE(provenance.Valid) << i;
+		EXPECT_FLOAT_EQ(0, provenance.PreAeBaseFuelMass) << i;
+		EXPECT_FLOAT_EQ(0, provenance.AppliedAeFuelMass) << i;
+		EXPECT_EQ(0, provenance.CalibrationGeneration) << i;
+	}
+}
+
 void expectFuelOutputsZero() {
 	EXPECT_FALSE(engine->engineState.airmassCalculationValid);
 	EXPECT_FLOAT_EQ(0, engine->engineState.baseFuel);
@@ -49,6 +59,7 @@ void expectFuelOutputsZero() {
 	EXPECT_FLOAT_EQ(0, static_cast<float>(engine->fuelComputer.running.baseFuel));
 	EXPECT_FLOAT_EQ(0, static_cast<float>(engine->fuelComputer.running.fuel));
 	expectAllActiveCylinderMasses(0);
+	expectAllActiveCylinderProvenanceInvalid();
 }
 
 void configureLegacyConsumerTables() {
@@ -151,7 +162,10 @@ TEST(AirmassFuelPublication, CompletedPublicationSurvivesPositiveRpmReplacementS
 	ASSERT_TRUE(engine->engineState.airmassCalculationValid);
 	ASSERT_TRUE(engine->airmassInjectionState.allowInjection());
 	const float publishedMass = engine->cylinders[0].getInjectionMass();
+	const auto publishedProvenance = engine->cylinders[0].getFuelProvenance();
 	ASSERT_GT(publishedMass, 0);
+	ASSERT_TRUE(publishedProvenance.Valid);
+	ASSERT_EQ(engine->airmassCalibration.Generation, publishedProvenance.CalibrationGeneration);
 
 	invalidateAirmassCalibration();
 	bool admittedDuringEvaluation = false;
@@ -175,6 +189,11 @@ TEST(AirmassFuelPublication, CompletedPublicationSurvivesPositiveRpmReplacementS
 	EXPECT_FALSE(engine->engineState.airmassCalculationValid) << "in-progress work is not a completed publication";
 	EXPECT_FLOAT_EQ(publishedMass, engine->cylinders[0].getInjectionMass())
 			<< "the stale evaluation must not alter the newer publication";
+	const auto staleProvenance = engine->cylinders[0].getFuelProvenance();
+	EXPECT_TRUE(staleProvenance.Valid);
+	EXPECT_EQ(publishedProvenance.CalibrationGeneration, staleProvenance.CalibrationGeneration);
+	EXPECT_FLOAT_EQ(publishedProvenance.PreAeBaseFuelMass, staleProvenance.PreAeBaseFuelMass);
+	EXPECT_FLOAT_EQ(publishedProvenance.AppliedAeFuelMass, staleProvenance.AppliedAeFuelMass);
 
 	engine->onAirmassCalibrationScanned = nullptr;
 	setTable(config->veTable, 70);
@@ -192,6 +211,8 @@ TEST(AirmassFuelPublication, TuneGenerationChangeCannotReopenStaleResult) {
 	runFuelCalculation(eth);
 	ASSERT_TRUE(engine->airmassInjectionState.allowInjection());
 	const float publishedMass = engine->cylinders[0].getInjectionMass();
+	const auto publishedProvenance = engine->cylinders[0].getFuelProvenance();
+	ASSERT_TRUE(publishedProvenance.Valid);
 
 	invalidateAirmassCalibration();
 	bool tuneInvalidated = false;
@@ -209,6 +230,11 @@ TEST(AirmassFuelPublication, TuneGenerationChangeCannotReopenStaleResult) {
 	EXPECT_FALSE(engine->airmassInjectionState.allowInjection());
 	EXPECT_FLOAT_EQ(publishedMass, engine->cylinders[0].getInjectionMass())
 			<< "a stale result must not replace the last completed publication";
+	const auto staleProvenance = engine->cylinders[0].getFuelProvenance();
+	EXPECT_TRUE(staleProvenance.Valid);
+	EXPECT_EQ(publishedProvenance.CalibrationGeneration, staleProvenance.CalibrationGeneration);
+	EXPECT_FLOAT_EQ(publishedProvenance.PreAeBaseFuelMass, staleProvenance.PreAeBaseFuelMass);
+	EXPECT_FLOAT_EQ(publishedProvenance.AppliedAeFuelMass, staleProvenance.AppliedAeFuelMass);
 
 	engine->onAirmassCalibrationScanned = nullptr;
 	runFuelCalculation(eth);
@@ -610,6 +636,26 @@ TEST(AirmassFuelPublication, DisabledLatchedMonitorKeepsRestoreCoordinateWithout
 	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
 	EXPECT_FALSE(engine->lambdaMonitor.isCut());
 	EXPECT_FLOAT_EQ(0, engine->cylinders[0].getInjectionMass());
+	const auto disabledProvenance = engine->cylinders[0].getFuelProvenance();
+	EXPECT_FALSE(disabledProvenance.Valid);
+	EXPECT_FLOAT_EQ(0, disabledProvenance.PreAeBaseFuelMass);
+	EXPECT_FLOAT_EQ(0, disabledProvenance.AppliedAeFuelMass);
 	EXPECT_FLOAT_EQ(0, engine->fuelComputer.targetLambda);
 	EXPECT_FLOAT_EQ(40, engine->outputChannels.lambdaMonitorLoad);
+}
+
+TEST(AirmassFuelPublication, DirectInjectionMassUpdateInvalidatesProvenance) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	configureSpeedDensityFuel(eth);
+
+	runFuelCalculation(eth);
+	ASSERT_TRUE(engine->cylinders[0].getFuelProvenance().Valid);
+
+	engine->cylinders[0].setInjectionMass(1);
+
+	EXPECT_FLOAT_EQ(1, engine->cylinders[0].getInjectionMass());
+	EXPECT_FALSE(engine->cylinders[0].getFuelProvenance().Valid);
+	EXPECT_FLOAT_EQ(0, engine->cylinders[0].getFuelProvenance().PreAeBaseFuelMass);
+	EXPECT_FLOAT_EQ(0, engine->cylinders[0].getFuelProvenance().AppliedAeFuelMass);
+	EXPECT_EQ(0, engine->cylinders[0].getFuelProvenance().CalibrationGeneration);
 }

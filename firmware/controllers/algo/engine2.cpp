@@ -242,6 +242,7 @@ void EngineState::periodicFastCallback() {
 	}
 
 	float cylinderFuelMasses[MAX_CYLINDER_COUNT] = {};
+	CylinderFuelProvenance cylinderFuelProvenance[MAX_CYLINDER_COUNT] = {};
 	float cylinderTiming[MAX_CYLINDER_COUNT] = {};
 	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
 		const uint8_t bankIndex = engineConfiguration->cylinderBankSelect[i];
@@ -257,12 +258,24 @@ void EngineState::periodicFastCallback() {
 						? (modeledCycleFuelMass * cylinderTrim + additiveCycleFuelMass) * luaFuelMult + luaFuelAdd
 						: 0;
 		const float cylinderMass = unbankedFuel * bankTrim;
+		// Provenance only: keep the total calculation above unchanged. Cylinder
+		// trim applies to modeled fuel, never to the additive AE portion.
+		const float preAeBaseFuelMass =
+				injectionActive ? (modeledCycleFuelMass * cylinderTrim * luaFuelMult + luaFuelAdd) * bankTrim : 0;
+		const float appliedAeFuelMass = injectionActive ? additiveCycleFuelMass * luaFuelMult * bankTrim : 0;
 		if (bankIndex >= STFT_BANK_COUNT || !std::isfinite(bankTrim) || bankTrim < 0 || !std::isfinite(cylinderTrim) ||
 			cylinderTrim < 0 || !std::isfinite(cylinderMass) || cylinderMass < 0) {
 			fuelPublicationValid = false;
 		} else {
 			cylinderFuelMasses[i] = cylinderMass;
 		}
+		cylinderFuelProvenance[i] = {
+				preAeBaseFuelMass,
+				appliedAeFuelMass,
+				fuelCapture.CalibrationGeneration,
+				injectionActive && std::isfinite(preAeBaseFuelMass) && preAeBaseFuelMass >= 0 &&
+						std::isfinite(appliedAeFuelMass) && appliedAeFuelMass >= 0,
+		};
 
 		angle_t ignitionTrim = 0;
 		if (!fuelCapture.Standalone || engineConfiguration->isIgnitionEnabled) {
@@ -321,6 +334,7 @@ void EngineState::periodicFastCallback() {
 	fuelCandidate.ShouldUpdateInjectionTiming = nextShouldUpdateInjectionTiming;
 	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
 		fuelCandidate.CylinderFuelMasses[i] = cylinderFuelMasses[i];
+		fuelCandidate.CylinderFuelProvenanceValues[i] = cylinderFuelProvenance[i];
 	}
 
 	bool publicationCurrent = false;
@@ -417,7 +431,8 @@ void EngineState::periodicFastCallback() {
 					engine->stftCorrection[i] = clResult.banks[i];
 				}
 				for (size_t i = 0; i < calculationCylinderCount; i++) {
-					engine->cylinders[i].setInjectionMass(fuelCandidate.CylinderFuelMasses[i]);
+					engine->cylinders[i].setInjectionMassAndProvenance(
+							fuelCandidate.CylinderFuelMasses[i], fuelCandidate.CylinderFuelProvenanceValues[i]);
 				}
 			} else {
 				// A current failed calculation closes admission and clears every

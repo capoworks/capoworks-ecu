@@ -136,8 +136,23 @@ public:
 		return m_injectionMass;
 	}
 
+	// Provenance for the accepted mass above; invalid after a direct mass update.
+	CylinderFuelProvenance getFuelProvenance() const {
+		return m_fuelProvenance;
+	}
+
 	void setInjectionMass(mass_t m) {
 		m_injectionMass = m;
+		m_fuelProvenance = {};
+	}
+
+	void setInjectionMassAndProvenance(mass_t m, const CylinderFuelProvenance& provenance) {
+		m_injectionMass = m;
+		m_fuelProvenance = provenance;
+	}
+
+	void invalidateFuelProvenance() {
+		m_fuelProvenance = {};
 	}
 
 	// **************************
@@ -166,6 +181,7 @@ private:
 	angle_t m_baseAngleOffset;
 
 	mass_t m_injectionMass = 0;
+	CylinderFuelProvenance m_fuelProvenance;
 
 	// 10 means 10 degrees BTDC
 	angle_t m_timingAdvance = 0;

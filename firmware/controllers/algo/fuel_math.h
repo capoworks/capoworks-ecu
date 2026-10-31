@@ -33,6 +33,16 @@ struct FuelAirmassCapture {
 	bool Current = false;
 };
 
+// Fuel mass decomposed at the final per-cylinder publication point. The base
+// excludes acceleration enrichment while the AE value is the additive portion
+// that was applied.
+struct CylinderFuelProvenance {
+	mass_t PreAeBaseFuelMass = 0;
+	mass_t AppliedAeFuelMass = 0;
+	uint32_t CalibrationGeneration = 0;
+	bool Valid = false;
+};
+
 // Every field here is a candidate only. Live engine state is not changed until
 // calculateFuelPublication() completes and the caller commits the publication.
 struct FuelPublicationCandidate {
@@ -88,6 +98,7 @@ struct FuelPublicationCandidate {
 	float InjectionOffset = 0;
 	bool ShouldUpdateInjectionTiming = false;
 	float CylinderFuelMasses[MAX_CYLINDER_COUNT] = {};
+	CylinderFuelProvenance CylinderFuelProvenanceValues[MAX_CYLINDER_COUNT] = {};
 };
 
 void initFuelMap();
