@@ -193,10 +193,10 @@ TEST(VeAnalyzeGate, CachedValidSampleBecomesStaleAndGapReseedsHistory) {
 }
 
 TEST(VeAnalyzeGate, RateEqualToThresholdDoesNotTriggerStrictGreaterThanGate) {
-	VeAnalyzeGateConfig config = testPolicy();
-	config.QuietHoldSeconds = 0.22f;
-	config.QuickMovementThresholdPercent = 100.0f;
-	GateFixture fixture(config);
+	VeAnalyzeGateConfig gatePolicy = testPolicy();
+	gatePolicy.QuietHoldSeconds = 0.22f;
+	gatePolicy.QuickMovementThresholdPercent = 100.0f;
+	GateFixture fixture(gatePolicy);
 	fixture.Gate.reset(timeUs(0));
 
 	int64_t nowUs = 0;
@@ -435,10 +435,10 @@ TEST(VeAnalyzeGate, CalibrationRecoveryPersistsAcrossTelemetryPolls) {
 }
 
 TEST(VeAnalyzeGate, LambdaDelayExtendsHoldBeyondWindow) {
-	VeAnalyzeGateConfig config = testPolicy();
-	config.QuietHoldSeconds = 0.25f;
-	config.MaxLambdaDelaySeconds = 0.50f;
-	GateFixture fixture(config);
+	VeAnalyzeGateConfig gatePolicy = testPolicy();
+	gatePolicy.QuietHoldSeconds = 0.25f;
+	gatePolicy.MaxLambdaDelaySeconds = 0.50f;
+	GateFixture fixture(gatePolicy);
 	fixture.Gate.reset(timeUs(0));
 	int64_t nowUs = 0;
 	fixture.warm(nowUs);
@@ -452,9 +452,9 @@ TEST(VeAnalyzeGate, LambdaDelayExtendsHoldBeyondWindow) {
 }
 
 TEST(VeAnalyzeGate, InvalidPolicyFailsClosed) {
-	VeAnalyzeGateConfig config;
-	config.RateThresholdPercentPerSecond = 0;
-	VeAnalyzeGate gate(config);
+	VeAnalyzeGateConfig gatePolicy;
+	gatePolicy.RateThresholdPercentPerSecond = 0;
+	VeAnalyzeGate gate(gatePolicy);
 	EXPECT_FALSE(gate.isValidConfiguration());
 	EXPECT_FALSE(gate.updateTps(timeUs(0), 20, true, true));
 
@@ -462,9 +462,9 @@ TEST(VeAnalyzeGate, InvalidPolicyFailsClosed) {
 	EXPECT_FALSE(snapshot.Ready);
 	EXPECT_TRUE(snapshot.hasReason(VeAnalyzeGateReason::InvalidConfiguration));
 
-	config.RateThresholdPercentPerSecond = 5;
-	config.MaxLambdaDelaySeconds = NAN;
-	EXPECT_FALSE(gate.configure(config));
+	gatePolicy.RateThresholdPercentPerSecond = 5;
+	gatePolicy.MaxLambdaDelaySeconds = NAN;
+	EXPECT_FALSE(gate.configure(gatePolicy));
 	EXPECT_TRUE(gate.snapshot(timeUs(2000)).hasReason(VeAnalyzeGateReason::InvalidConfiguration));
 }
 

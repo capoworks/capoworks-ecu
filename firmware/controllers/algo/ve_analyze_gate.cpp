@@ -101,8 +101,8 @@ bool VeAnalyzeGate::configure(const VeAnalyzeGateConfig& config) {
 	const bool validQuietHold = validPositivePolicy(config.QuietHoldSeconds);
 	const bool validCutRecovery = validPositivePolicy(config.CutRecoverySeconds);
 	const bool validDelay = validLambdaDelay(config.MaxLambdaDelaySeconds);
-	const bool valid = validRate && validQuickMovement && validSampleTolerance && validQuietHold &&
-					   validCutRecovery && validDelay;
+	const bool valid =
+			validRate && validQuickMovement && validSampleTolerance && validQuietHold && validCutRecovery && validDelay;
 
 	if (!valid) {
 		m_config = config;
@@ -117,10 +117,9 @@ bool VeAnalyzeGate::configure(const VeAnalyzeGateConfig& config) {
 		return false;
 	}
 
-	const float lambdaWindowSeconds =
-			config.MaxLambdaDelaySeconds == ve_analyze_gate::NoLambdaDelay
-			? 0
-			: config.MaxLambdaDelaySeconds + ve_analyze_gate::WindowSeconds;
+	const float lambdaWindowSeconds = config.MaxLambdaDelaySeconds == ve_analyze_gate::NoLambdaDelay
+											? 0
+											: config.MaxLambdaDelaySeconds + ve_analyze_gate::WindowSeconds;
 	const float normalHoldSeconds = std::max(config.QuietHoldSeconds, lambdaWindowSeconds);
 	const float cutHoldSeconds = std::max(config.CutRecoverySeconds, normalHoldSeconds);
 
@@ -202,8 +201,7 @@ bool VeAnalyzeGate::updateRate() {
 	}
 
 	const Sample& latest = m_samples[(m_head + m_count - 1) % m_samples.size()];
-	const int64_t windowNt =
-			static_cast<int64_t>(USF2NT(ve_analyze_gate::WindowSeconds * US_PER_SECOND_F));
+	const int64_t windowNt = static_cast<int64_t>(USF2NT(ve_analyze_gate::WindowSeconds * US_PER_SECOND_F));
 	const int64_t targetNt = latest.Timestamp.count - windowNt;
 
 	size_t baseIndex = 0;
