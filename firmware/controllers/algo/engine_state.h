@@ -13,11 +13,34 @@
 #include "engine_state_generated.h"
 #include "airmass_loads.h"
 
+struct output_channels_s;
+
+// Diagnostic-only evidence for the existing VE Analyze qualification latch.
+// This does not add admission or recovery policy.
+struct VeAnalyzeLatchDiagnostics {
+	uint16_t FirstRejectReason = 0;
+	uint16_t CurrentRejectReasons = 0;
+	uint8_t CandidateEndpoint = 0;
+	uint32_t SessionGeneration = 0;
+	uint32_t CalibrationGeneration = 0;
+	uint32_t CalculationEpoch = 0;
+	int64_t FirstLatchTimeSeconds = 0;
+};
+
 class EngineState : public engine_state_s {
 public:
 	EngineState();
 	void periodicFastCallback();
 	void updateTChargeK(float rpm, float tps);
+	void resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration = 0, uint32_t calculationEpoch = 0);
+	void latchVeAnalyzeDiagnostics(
+			uint16_t reasonMask, uint32_t calibrationGeneration, uint32_t calculationEpoch);
+	void observeVeAnalyzeCandidate(
+			uint8_t candidateEndpoint,
+			uint16_t rejectReasonMask,
+			uint32_t calibrationGeneration,
+			uint32_t calculationEpoch);
+	void exportVeAnalyzeDiagnostics(output_channels_s& output) const;
 
 	/**
 	 * always 360 or 720, never zero
@@ -58,6 +81,7 @@ public:
 	bool veAnalyzeSessionStarted = false;
 	bool veAnalyzeSessionInvalid = false;
 	uint8_t veAnalyzeEndpoint = 0;
+	VeAnalyzeLatchDiagnostics veAnalyzeDiagnostics;
 
 	/**
 	 * Raw fuel injection duration produced by current fuel algorithm, without any correction

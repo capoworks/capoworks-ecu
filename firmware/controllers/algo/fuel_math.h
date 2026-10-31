@@ -51,7 +51,11 @@ struct FuelPublicationCandidate {
 	bool ApplyCylinderFuelTrim = false;
 #endif // MODULE_CYLINDER_FUEL_TRIM
 	bool FuelCut = false;
+	// Authority endpoint observed for this candidate. This can remain set when
+	// VeAnalyzeEndpoint is zero because the candidate failed qualification.
+	uint8_t VeAnalyzeCandidateEndpoint = 0;
 	uint8_t VeAnalyzeEndpoint = 0;
+	uint16_t VeAnalyzeRejectReasons = 0;
 
 	float BaseFuelMass = 0;
 	float CycleInjectionMass = 0;

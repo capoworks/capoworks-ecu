@@ -187,16 +187,103 @@ void Engine::updateSwitchInputs() {
 	engine->engineState.brakePedalState = getBrakePedalState();
 }
 
+static uint16_t selectFirstVeAnalyzeReason(uint16_t reasons) {
+	constexpr AirmassVeAnalyzeRejectReason priority[] = {
+		AirmassVeAnalyzeRejectReason::StrategyChange,
+		AirmassVeAnalyzeRejectReason::CalibrationWrite,
+		AirmassVeAnalyzeRejectReason::NonUniformAuthority,
+		AirmassVeAnalyzeRejectReason::Configuration,
+		AirmassVeAnalyzeRejectReason::Sensor,
+		AirmassVeAnalyzeRejectReason::IdleVe,
+		AirmassVeAnalyzeRejectReason::Fallback,
+		AirmassVeAnalyzeRejectReason::CalculationResult,
+		AirmassVeAnalyzeRejectReason::StaleCalculation,
+		AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid,
+		AirmassVeAnalyzeRejectReason::Stabilization,
+	};
+
+	for (const auto reason : priority) {
+		const auto bit = airmassVeAnalyzeReason(reason);
+		if (reasons & bit) {
+			return bit;
+		}
+	}
+	return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::None);
+}
+
+void EngineState::resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration, uint32_t calculationEpoch) {
+	const uint32_t nextSessionGeneration = veAnalyzeDiagnostics.SessionGeneration + 1;
+	veAnalyzeDiagnostics = {};
+	veAnalyzeDiagnostics.SessionGeneration = nextSessionGeneration;
+	veAnalyzeDiagnostics.CalibrationGeneration = calibrationGeneration;
+	veAnalyzeDiagnostics.CalculationEpoch = calculationEpoch;
+	veAnalyzeSessionStarted = false;
+	veAnalyzeSessionInvalid = false;
+	veAnalyzeEndpoint = 0;
+}
+
+void EngineState::latchVeAnalyzeDiagnostics(
+		uint16_t reasonMask, uint32_t calibrationGeneration, uint32_t calculationEpoch) {
+	const auto alreadyInvalid = airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid);
+	veAnalyzeDiagnostics.CurrentRejectReasons =
+			reasonMask | (veAnalyzeSessionInvalid ? alreadyInvalid : 0);
+	veAnalyzeDiagnostics.CalibrationGeneration = calibrationGeneration;
+	veAnalyzeDiagnostics.CalculationEpoch = calculationEpoch;
+	veAnalyzeSessionInvalid = true;
+	veAnalyzeEndpoint = 0;
+
+	if (veAnalyzeDiagnostics.FirstRejectReason == 0) {
+		veAnalyzeDiagnostics.FirstRejectReason = selectFirstVeAnalyzeReason(reasonMask);
+		veAnalyzeDiagnostics.FirstLatchTimeSeconds = getTimeNowS();
+	}
+}
+
+void EngineState::observeVeAnalyzeCandidate(
+		uint8_t candidateEndpoint,
+		uint16_t rejectReasonMask,
+		uint32_t calibrationGeneration,
+		uint32_t calculationEpoch) {
+	veAnalyzeDiagnostics.CandidateEndpoint = candidateEndpoint;
+	veAnalyzeDiagnostics.CalibrationGeneration = calibrationGeneration;
+	veAnalyzeDiagnostics.CalculationEpoch = calculationEpoch;
+
+	if (rejectReasonMask != 0) {
+		latchVeAnalyzeDiagnostics(rejectReasonMask, calibrationGeneration, calculationEpoch);
+	} else if (veAnalyzeSessionInvalid) {
+		veAnalyzeDiagnostics.CurrentRejectReasons =
+				airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid);
+	} else {
+		veAnalyzeDiagnostics.CurrentRejectReasons = 0;
+	}
+}
+
+void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
+	output.blendedVeAnalyzeCandidateEndpoint = veAnalyzeDiagnostics.CandidateEndpoint;
+	output.blendedVeAnalyzeFirstReason = veAnalyzeDiagnostics.FirstRejectReason;
+	output.blendedVeAnalyzeRejectReasons = veAnalyzeDiagnostics.CurrentRejectReasons;
+
+	uint16_t elapsedSeconds = 0;
+	if (veAnalyzeDiagnostics.FirstRejectReason != 0) {
+		const int64_t elapsed = getTimeNowS() - veAnalyzeDiagnostics.FirstLatchTimeSeconds;
+		elapsedSeconds =
+				elapsed <= 0 ? 0 : elapsed > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(elapsed);
+	}
+	output.blendedVeAnalyzeLatchedTime = elapsedSeconds;
+	output.blendedVeAnalyzeSessionGeneration = veAnalyzeDiagnostics.SessionGeneration;
+	output.blendedVeAnalyzeCalibrationGeneration = veAnalyzeDiagnostics.CalibrationGeneration;
+	output.blendedVeAnalyzeCalculationEpoch = veAnalyzeDiagnostics.CalculationEpoch;
+	output.blendedVeAnalyzeEndpoint = veAnalyzeSessionInvalid ? 0 : veAnalyzeEndpoint;
+}
+
 static void resetOwnedAirmassRuntimeState(Engine& owner) {
 	owner.airmassInjectionState.onEngineStop();
 
 	auto& state = owner.engineState;
-	state.veAnalyzeSessionStarted = false;
-	state.veAnalyzeSessionInvalid = false;
-	state.veAnalyzeEndpoint = 0;
+	state.resetVeAnalyzeDiagnostics(
+			owner.airmassCalibration.Generation, owner.airmassInjectionState.publicationEpoch());
 
 	auto& output = owner.outputChannels;
-	output.blendedVeAnalyzeEndpoint = 0;
+	state.exportVeAnalyzeDiagnostics(output);
 	output.blendedStatus = static_cast<uint8_t>(owner.airmassInjectionState.status());
 	output.blendedFault = static_cast<uint8_t>(owner.airmassInjectionState.fault());
 }

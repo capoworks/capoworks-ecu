@@ -15,6 +15,17 @@ static bool needsStandalonePublication(engine_load_mode_e mode) {
 	return mode == LM_SPEED_DENSITY || mode == LM_ALPHA_N || mode == LM_REAL_MAF || mode == LM_SD_ALPHA_N;
 }
 
+static uint16_t veAnalyzeReasonFromFault(AirmassInjectionFault fault) {
+	switch (fault) {
+		case AirmassInjectionFault::Configuration:
+			return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::Configuration);
+		case AirmassInjectionFault::Sensor:
+			return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::Sensor);
+		default:
+			return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::CalculationResult);
+	}
+}
+
 void AirmassInjectionState::setStatus(AirmassInjectionStatus status, AirmassInjectionFault fault) {
 	m_status = status;
 	m_fault = fault;
@@ -25,8 +36,18 @@ void AirmassInjectionState::setStatus(AirmassInjectionStatus status, AirmassInje
 void AirmassInjectionState::failCalculation(AirmassInjectionFault fault) {
 	invalidateAirmassConsumerLoadsLocked();
 	if (isComposite(m_mode)) {
-		engine->engineState.veAnalyzeSessionInvalid = true;
-		engine->engineState.veAnalyzeEndpoint = 0;
+		auto& engineState = engine->engineState;
+		const auto reasons = veAnalyzeReasonFromFault(fault);
+		if (engineState.veAnalyzeSessionInvalid) {
+			auto& diagnostics = engineState.veAnalyzeDiagnostics;
+			diagnostics.CurrentRejectReasons |=
+					reasons | airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid);
+			diagnostics.CalibrationGeneration = engine->airmassCalibration.Generation;
+			diagnostics.CalculationEpoch = m_epoch;
+		} else {
+			engineState.latchVeAnalyzeDiagnostics(reasons, engine->airmassCalibration.Generation, m_epoch);
+		}
+		engineState.exportVeAnalyzeDiagnostics(engine->outputChannels);
 	}
 	setStatus(AirmassInjectionStatus::Faulted, fault);
 	m_calculationAccepted = false;
@@ -44,10 +65,8 @@ void AirmassInjectionState::observeMode(engine_load_mode_e mode) {
 		m_calculationAccepted = false;
 		m_standaloneReady = false;
 		m_calculationFallback = AirmassInjectionFault::None;
-		engine->engineState.veAnalyzeSessionStarted = false;
-		engine->engineState.veAnalyzeSessionInvalid = false;
-		engine->engineState.veAnalyzeEndpoint = 0;
-		engine->outputChannels.blendedVeAnalyzeEndpoint = 0;
+		engine->engineState.resetVeAnalyzeDiagnostics(engine->airmassCalibration.Generation, m_epoch);
+		engine->engineState.exportVeAnalyzeDiagnostics(engine->outputChannels);
 		setStatus(
 				isComposite(mode) ? AirmassInjectionStatus::NotReady : AirmassInjectionStatus::Legacy,
 				AirmassInjectionFault::None);
@@ -176,10 +195,17 @@ void AirmassInjectionState::onConfigurationWrite(engine_load_mode_e proposedMode
 		observeMode(proposedMode);
 	}
 	const bool engineStopped = engine->rpmCalculator.getState() == STOPPED;
-	engine->engineState.veAnalyzeSessionStarted = false;
-	engine->engineState.veAnalyzeSessionInvalid = isComposite(m_mode) && (!engineStopped || m_positiveRpmCalculation);
-	engine->engineState.veAnalyzeEndpoint = 0;
-	engine->outputChannels.blendedVeAnalyzeEndpoint = 0;
+	auto& engineState = engine->engineState;
+	if (isComposite(m_mode) && (!engineStopped || m_positiveRpmCalculation)) {
+		const uint16_t reasons =
+				airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::CalibrationWrite) |
+				(strategyChanged ? airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StrategyChange) : 0);
+		engineState.observeVeAnalyzeCandidate(0, reasons, engine->airmassCalibration.Generation, m_epoch);
+		engineState.veAnalyzeSessionStarted = false;
+	} else {
+		engineState.resetVeAnalyzeDiagnostics(engine->airmassCalibration.Generation, m_epoch);
+	}
+	engineState.exportVeAnalyzeDiagnostics(engine->outputChannels);
 	setStatus(
 			isComposite(m_mode) ? AirmassInjectionStatus::NotReady : AirmassInjectionStatus::Legacy,
 			AirmassInjectionFault::None);

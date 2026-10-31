@@ -32,6 +32,28 @@ enum class AirmassVeAnalyzeEndpoint : uint8_t {
 	AlphaN,
 };
 
+// VE Analyze rejection evidence. Values are bits so the current rejection
+// mask can preserve independent causes; the first reason stores one bit only.
+enum class AirmassVeAnalyzeRejectReason : uint16_t {
+	None = 0,
+	NonUniformAuthority = 1 << 0,
+	Configuration = 1 << 1,
+	Sensor = 1 << 2,
+	Fallback = 1 << 3,
+	IdleVe = 1 << 4,
+	CalculationResult = 1 << 5,
+	StaleCalculation = 1 << 6,
+	CalibrationWrite = 1 << 7,
+	StrategyChange = 1 << 8,
+	SessionAlreadyInvalid = 1 << 9,
+	// Reserved for a future stabilization policy. Nothing sets this yet.
+	Stabilization = 1 << 10,
+};
+
+constexpr uint16_t airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason reason) {
+	return static_cast<uint16_t>(reason);
+}
+
 struct AirmassCalibrationCache {
 	uint32_t Generation = 1;
 	uint32_t Known = 0;

@@ -355,6 +355,84 @@ static bool isBlendedVeAnalyzeResult(
 		   diagnostics.AlphaN.Valid;
 }
 
+static uint16_t veAnalyzeReasonFromFault(AirmassInjectionFault fault) {
+	switch (fault) {
+		case AirmassInjectionFault::Configuration:
+			return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::Configuration);
+		case AirmassInjectionFault::Sensor:
+			return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::Sensor);
+		default:
+			return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::CalculationResult);
+	}
+}
+
+static AirmassVeAnalyzeEndpoint getBlendedVeAnalyzeCandidateEndpoint(
+		const BlendedAirmassDiagnostics& diagnostics, AirmassVeAnalyzeEndpoint qualifiedEndpoint) {
+	if (qualifiedEndpoint != AirmassVeAnalyzeEndpoint::None) {
+		return qualifiedEndpoint;
+	}
+	if ((diagnostics.Flags & BlendedAuthorityUnavailable) ||
+		!(diagnostics.Flags & BlendedAuthorityLoadValid)) {
+		return AirmassVeAnalyzeEndpoint::None;
+	}
+	if (diagnostics.RequestedAuthority <= 0) {
+		return AirmassVeAnalyzeEndpoint::SpeedDensity;
+	}
+	if (diagnostics.RequestedAuthority >= 100) {
+		return AirmassVeAnalyzeEndpoint::AlphaN;
+	}
+	return AirmassVeAnalyzeEndpoint::None;
+}
+
+static uint16_t getBlendedVeAnalyzeRejectReasons(
+		const BlendedAirmassEvaluation& evaluation,
+		const BlendedAirmassDiagnostics& diagnostics,
+		const AirmassInputs& inputs,
+		AirmassVeAnalyzeEndpoint endpoint) {
+	uint16_t reasons = 0;
+	const auto add = [&reasons](AirmassVeAnalyzeRejectReason reason) {
+		reasons |= airmassVeAnalyzeReason(reason);
+	};
+
+	if (diagnostics.Fault != AirmassInjectionFault::None) {
+		reasons |= veAnalyzeReasonFromFault(diagnostics.Fault);
+	}
+
+	constexpr uint16_t fallbackFlags = BlendedTemperatureFallback | BlendedBranchFallback |
+										BlendedAuthorityUnavailable | BlendedBaroFallback | BlendedIdleFallback |
+										BlendedCorrectionFallback | BlendedMapFallback;
+	if (diagnostics.Flags & fallbackFlags) {
+		add(AirmassVeAnalyzeRejectReason::Fallback);
+	}
+	if ((inputs.UseSeparateVeForIdle && inputs.IdleActive) || (diagnostics.Flags & BlendedIdleFallback)) {
+		add(AirmassVeAnalyzeRejectReason::IdleVe);
+	}
+
+	if (endpoint == AirmassVeAnalyzeEndpoint::None) {
+		// A valid, available authority load with no endpoint comes from a mixed
+		// authority table. Keep this distinct from unavailable input/calibration.
+		if (!(diagnostics.Flags & BlendedAuthorityUnavailable) &&
+			(diagnostics.Flags & BlendedAuthorityLoadValid)) {
+			add(AirmassVeAnalyzeRejectReason::NonUniformAuthority);
+		}
+	} else if (endpoint == AirmassVeAnalyzeEndpoint::SpeedDensity) {
+		if (!(diagnostics.Flags & BlendedSdValid) || (diagnostics.Flags & BlendedMapFallback)) {
+			if (diagnostics.Flags & BlendedMapFallback) {
+				add(AirmassVeAnalyzeRejectReason::Fallback);
+			} else {
+				add(AirmassVeAnalyzeRejectReason::Sensor);
+			}
+		}
+	} else if (!(diagnostics.Flags & BlendedAlphaNValid)) {
+		add(AirmassVeAnalyzeRejectReason::Sensor);
+	}
+
+	if (reasons == 0 && !isBlendedVeAnalyzeResult(evaluation, diagnostics, inputs, endpoint)) {
+		add(AirmassVeAnalyzeRejectReason::CalculationResult);
+	}
+	return reasons;
+}
+
 FuelPublicationCandidate
 calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& capture, bool requireCurrent) {
 	ScopePerf perf(PE::GetBaseFuel);
@@ -362,6 +440,8 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 	FuelPublicationCandidate candidate;
 	if (!capture.Current || (requireCurrent && !isFuelCaptureCurrent(capture))) {
 		candidate.Stale = true;
+		candidate.VeAnalyzeRejectReasons =
+				airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
 		return candidate;
 	}
 
@@ -387,8 +467,23 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			candidate.HasBlendedDiagnostics = true;
 			if (requireCurrent && !isFuelCaptureCurrent(capture)) {
 				candidate.Stale = true;
+				candidate.VeAnalyzeRejectReasons =
+						airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
 				return candidate;
 			}
+			const auto qualifiedEndpoint = getCapturedAirmassAuthorityEndpoint(capture.Inputs);
+			if (requireCurrent && !isFuelCaptureCurrent(capture)) {
+				candidate.Stale = true;
+				candidate.VeAnalyzeRejectReasons =
+						airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
+				return candidate;
+			}
+			const auto candidateEndpoint =
+					getBlendedVeAnalyzeCandidateEndpoint(candidate.BlendedDiagnostics, qualifiedEndpoint);
+			candidate.VeAnalyzeCandidateEndpoint = static_cast<uint8_t>(candidateEndpoint);
+			candidate.VeAnalyzeRejectReasons =
+					getBlendedVeAnalyzeRejectReasons(
+							evaluation, candidate.BlendedDiagnostics, capture.Inputs, qualifiedEndpoint);
 			if (!evaluation.Airmass.Valid) {
 				candidate.Fault = evaluation.Fault;
 				return candidate;
@@ -398,14 +493,16 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			candidate.Degraded = evaluation.Airmass.Degraded;
 			candidate.Fault = evaluation.Fault;
 			candidate.NormalizedCylinderFilling = evaluation.NormalizedFilling;
-			const auto endpoint = getCapturedAirmassAuthorityEndpoint(capture.Inputs);
-			if (isBlendedVeAnalyzeResult(evaluation, candidate.BlendedDiagnostics, capture.Inputs, endpoint)) {
-				candidate.VeAnalyzeEndpoint = static_cast<uint8_t>(endpoint);
+			if (isBlendedVeAnalyzeResult(
+						evaluation, candidate.BlendedDiagnostics, capture.Inputs, qualifiedEndpoint)) {
+				candidate.VeAnalyzeEndpoint = static_cast<uint8_t>(qualifiedEndpoint);
 			}
 		} else {
 			const auto evaluation = getCapturedAirmassForFuel(capture.Inputs, candidate.Diagnostics);
 			if (requireCurrent && !isFuelCaptureCurrent(capture)) {
 				candidate.Stale = true;
+				candidate.VeAnalyzeRejectReasons =
+						airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
 				return candidate;
 			}
 			if (!evaluation.Valid) {
@@ -633,13 +730,24 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 }
 
 void publishBlendedAirmassDiagnostics(const FuelPublicationCandidate& candidate) {
-	if (!candidate.HasBlendedDiagnostics || !candidate.Valid || candidate.Stale) {
+	if (!candidate.HasBlendedDiagnostics || candidate.Stale) {
 		return;
 	}
 
 	const auto& diagnostics = candidate.BlendedDiagnostics;
 	auto& output = engine->outputChannels;
 	auto& state = engine->engineState;
+	state.observeVeAnalyzeCandidate(
+			candidate.VeAnalyzeCandidateEndpoint,
+			candidate.VeAnalyzeRejectReasons,
+			candidate.BlendedDiagnostics.Inputs.CalibrationGeneration,
+			candidate.BlendedDiagnostics.Inputs.PublicationEpoch);
+	if (!candidate.Valid) {
+		// A current rejection remains visible even when the model produced no
+		// publishable mass. Do not touch any accepted model outputs.
+		state.exportVeAnalyzeDiagnostics(output);
+		return;
+	}
 
 	if (!state.veAnalyzeSessionStarted) {
 		state.veAnalyzeSessionStarted = true;
@@ -668,7 +776,7 @@ void publishBlendedAirmassDiagnostics(const FuelPublicationCandidate& candidate)
 	output.blendedFlags = diagnostics.Flags;
 	output.blendedLambdaLoad = finiteOrZero(candidate.ResolvedLambdaLoad);
 	output.blendedAuthorityLoad = diagnostics.AuthorityLoadValid ? diagnostics.AuthorityLoad : 0;
-	output.blendedVeAnalyzeEndpoint = state.veAnalyzeSessionInvalid ? 0 : state.veAnalyzeEndpoint;
+	state.exportVeAnalyzeDiagnostics(output);
 
 	output.airmassTemperature = diagnostics.TemperatureValid ? diagnostics.TemperatureK - KELV : 0;
 	output.airmassTemperatureSourceUsed = static_cast<uint8_t>(diagnostics.TemperatureSource);

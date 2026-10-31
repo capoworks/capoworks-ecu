@@ -327,4 +327,11 @@ struct_no_prefix output_channels_s
 	uint8_t blendedVeAnalyzeEndpoint;Air blend: qualified analyze endpoint;"code", 1, 0, 0, 2, 0
 
 ! MODULE_OUTPUTS
+	uint8_t blendedVeAnalyzeCandidateEndpoint;Air blend: candidate analyze endpoint;"code", 1, 0, 0, 2, 0
+	uint16_t blendedVeAnalyzeFirstReason;VE Analyze: first latch reason;"code", 1, 0, 0, 1024, 0
+	uint16_t blendedVeAnalyzeRejectReasons;VE Analyze: current rejection reasons;"bits", 1, 0, 0, 2047, 0
+	uint16_t blendedVeAnalyzeLatchedTime;VE Analyze: time since first latch;"s", 1, 0, 0, 65535, 0
+	uint32_t blendedVeAnalyzeSessionGeneration;VE Analyze: session generation;"", 1, 0, 0, 0, 0
+	uint32_t blendedVeAnalyzeCalibrationGeneration;VE Analyze: calibration generation;"", 1, 0, 0, 0, 0
+	uint32_t blendedVeAnalyzeCalculationEpoch;VE Analyze: calculation epoch;"", 1, 0, 0, 0, 0
 end_struct
