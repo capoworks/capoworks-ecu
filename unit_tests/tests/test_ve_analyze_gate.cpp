@@ -193,6 +193,9 @@ TEST(VeAnalyzeGate, CachedValidSampleBecomesStaleAndGapReseedsHistory) {
 }
 
 TEST(VeAnalyzeGate, RateEqualToThresholdDoesNotTriggerStrictGreaterThanGate) {
+	constexpr int64_t RateWindowUs = 200 * Millisecond;
+	constexpr int64_t QuietHoldBoundaryUs = 220 * Millisecond;
+
 	VeAnalyzeGateConfig gatePolicy = testPolicy();
 	gatePolicy.QuietHoldSeconds = 0.22f;
 	gatePolicy.QuickMovementThresholdPercent = 100.0f;
@@ -200,17 +203,21 @@ TEST(VeAnalyzeGate, RateEqualToThresholdDoesNotTriggerStrictGreaterThanGate) {
 	fixture.Gate.reset(timeUs(0));
 
 	int64_t nowUs = 0;
-	while (nowUs < 200 * Millisecond) {
+	while (nowUs < RateWindowUs) {
 		EXPECT_TRUE(fixture.feed(nowUs, 0));
 		nowUs += FastPeriod;
 	}
-	EXPECT_TRUE(fixture.feed(200 * Millisecond, 1.0f));
+	EXPECT_TRUE(fixture.feed(RateWindowUs, 1.0f));
 
-	auto snapshot = fixture.Gate.snapshot(timeUs(250 * Millisecond - 1));
+	auto snapshot = fixture.Gate.snapshot(timeUs(QuietHoldBoundaryUs - 1));
 	EXPECT_FALSE(snapshot.Ready);
+	EXPECT_TRUE(snapshot.TpsValid);
+	EXPECT_TRUE(snapshot.RateValid);
+	EXPECT_TRUE(snapshot.hasReason(VeAnalyzeGateReason::ResetRecovery));
 
-	snapshot = fixture.Gate.snapshot(timeUs(250 * Millisecond));
+	snapshot = fixture.Gate.snapshot(timeUs(QuietHoldBoundaryUs));
 	EXPECT_FLOAT_EQ(5.0f, snapshot.AbsTpsRatePercentPerSecond);
+	EXPECT_TRUE(snapshot.TpsValid);
 	EXPECT_TRUE(snapshot.RateValid);
 	EXPECT_TRUE(snapshot.Ready);
 	EXPECT_FALSE(snapshot.hasReason(VeAnalyzeGateReason::TpsMovementRecovery));
