@@ -41,6 +41,7 @@
 #include "harley_acr.h"
 #include "dfco.h"
 #include "fuel_computer.h"
+#include "fuel_math.h"
 #include "advance_map.h"
 #include "ignition_state.h"
 #include "sensor_checker.h"

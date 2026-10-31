@@ -50,8 +50,13 @@ public:
 	}
 
 	VeAnalyzeFuelEventInput
-	normal(int64_t nowUs, uint8_t owner = 0, uint16_t cylinderMask = 1, uint8_t bankMask = 1, float base = 1.0f) {
-		return make(nowUs, base, 0, 0, owner, cylinderMask, bankMask);
+	normal(int64_t nowUs,
+		   uint8_t owner = 0,
+		   uint16_t cylinderMask = 1,
+		   uint8_t bankMask = 1,
+		   float base = 1.0f,
+		   uint32_t generation = Generation) {
+		return make(nowUs, base, 0, 0, owner, cylinderMask, bankMask, true, false, generation);
 	}
 
 	VeAnalyzeFuelEvents Collector;
@@ -62,13 +67,13 @@ void feed(FuelEventsFixture& fixture, const VeAnalyzeFuelEventInput& event) {
 	EXPECT_TRUE(fixture.Collector.observeEvent(event));
 }
 
-void feedNormalUntil(FuelEventsFixture& fixture, int64_t& nowUs, int64_t endUs) {
+void feedNormalUntil(FuelEventsFixture& fixture, int64_t& nowUs, int64_t endUs, uint32_t generation = Generation) {
 	while (nowUs < endUs) {
 		nowUs += 200 * Millisecond;
 		if (nowUs > endUs) {
 			nowUs = endUs;
 		}
-		feed(fixture, fixture.normal(nowUs));
+		feed(fixture, fixture.normal(nowUs, 0, 1, 1, 1.0f, generation));
 	}
 }
 } // namespace
@@ -174,6 +179,19 @@ TEST(VeAnalyzeFuelEvents, ShortEventSurvivesSubTwentyHertzPolling) {
 	}
 }
 
+TEST(VeAnalyzeFuelEvents, ExpiredLargePeakIsNotRevivedBySmallTransient) {
+	FuelEventsFixture fixture;
+	feed(fixture, fixture.make(0, 1.0f, 0.02f));
+	auto large = fixture.Collector.snapshot(timeUs(0));
+	EXPECT_NEAR(2.0f, large.Banks[0].PeakAePercentOfBase, 0.00001f);
+
+	feed(fixture, fixture.make(1600 * Millisecond, 1.0f, 0.002f));
+	auto small = fixture.Collector.snapshot(timeUs(1600 * Millisecond));
+	EXPECT_NEAR(0.2f, small.Banks[0].PeakAePercentOfBase, 0.00001f);
+	EXPECT_NEAR(0.0f, small.Banks[0].PeakFilmPercentOfBase, 0.00001f);
+	EXPECT_NEAR(0.2f, small.Banks[0].PeakCombinedPercentOfBase, 0.00001f);
+}
+
 TEST(VeAnalyzeFuelEvents, ZeroCommandedWithoutClampFlagStillUsesCutRecovery) {
 	FuelEventsFixture fixture;
 	feed(fixture, fixture.make(0, 0, 0, 0, 0, 1, 1, true, false));
@@ -249,8 +267,8 @@ TEST(VeAnalyzeFuelEvents, SuppliesStagesWithoutCountingThemTwice) {
 	EXPECT_TRUE(snapshot.LastEvent.Stage2Supplied);
 	EXPECT_FLOAT_EQ(600.0f, snapshot.LastEvent.Stage1MassMilligrams);
 	EXPECT_FLOAT_EQ(400.0f, snapshot.LastEvent.Stage2MassMilligrams);
-	EXPECT_NEAR(10.0f, snapshot.LastEvent.AePercentOfBase, 0.00001f);
-	EXPECT_NEAR(10.0f, snapshot.LastEvent.FilmPercentOfBase, 0.00001f);
+	EXPECT_NEAR(12.5f, snapshot.LastEvent.AePercentOfBase, 0.00001f);
+	EXPECT_NEAR(12.5f, snapshot.LastEvent.FilmPercentOfBase, 0.00001f);
 	EXPECT_FLOAT_EQ(1000.0f, snapshot.LastEvent.AttemptedFinalCommandedMassMilligrams);
 
 	auto badStage = fixture.make(100 * Millisecond, 0.8f, 0.1f, 0.1f);
@@ -290,6 +308,28 @@ TEST(VeAnalyzeFuelEvents, ExactThresholdsPassAndRecoveryEndsAtExactDeadline) {
 	EXPECT_TRUE(before.hasReason(FuelEventReason::ExcessAeRatio));
 
 	auto recovered = fixture.Collector.snapshot(timeUs(1700 * Millisecond));
+	EXPECT_TRUE(recovered.LastEvent.Fresh);
+	EXPECT_TRUE(recovered.Ready);
+}
+
+TEST(VeAnalyzeFuelEvents, NonBinaryPolicyDurationRoundsUpToFullTick) {
+	VeAnalyzeFuelEventPolicy policy;
+	policy.NormalRecoverySeconds = 0.4f;
+	policy.EventFreshnessSeconds = 1.0f;
+	VeAnalyzeFuelEvents collector(policy);
+
+	FuelEventsFixture fixture;
+	auto event = fixture.make(0, 1.0f, 0.02f);
+	EXPECT_TRUE(collector.observeEvent(event));
+	auto normal = fixture.make(200 * Millisecond, 1.0f);
+	EXPECT_TRUE(collector.observeEvent(normal));
+
+	auto before = collector.snapshot(timeUs(600 * Millisecond));
+	EXPECT_TRUE(before.LastEvent.Fresh);
+	EXPECT_FALSE(before.Ready);
+	EXPECT_TRUE(before.hasReason(FuelEventReason::NormalRecovery));
+
+	auto recovered = collector.snapshot(timeUs(600 * Millisecond + 1));
 	EXPECT_TRUE(recovered.LastEvent.Fresh);
 	EXPECT_TRUE(recovered.Ready);
 }
@@ -347,7 +387,7 @@ TEST(VeAnalyzeFuelEvents, GenerationChangesInvalidateHistoryAndRegressionFailsCl
 
 	feed(fixture, fixture.make(100 * Millisecond, 1.0f, 0, 0, 0, 1, 1, true, false, 2));
 	int64_t nowUs = 100 * Millisecond;
-	feedNormalUntil(fixture, nowUs, 1500 * Millisecond);
+	feedNormalUntil(fixture, nowUs, 1500 * Millisecond, 2);
 
 	auto pending = fixture.Collector.snapshot(timeUs(1599 * Millisecond));
 	EXPECT_FALSE(pending.Ready);

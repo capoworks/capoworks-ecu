@@ -20,7 +20,7 @@ uint32_t saturatingIncrement(uint32_t value) {
 }
 
 int64_t secondsToNt(float seconds) {
-	return static_cast<int64_t>(USF2NT(seconds * US_PER_SECOND_F));
+	return static_cast<int64_t>(std::ceil(static_cast<double>(seconds) * US_PER_SECOND_F * US_TO_NT_MULTIPLIER));
 }
 
 int64_t saturatingAddNt(efitick_t nowNt, int64_t durationNt) {
@@ -307,6 +307,11 @@ void VeAnalyzeFuelEvents::updateBankConditions(
 }
 
 void VeAnalyzeFuelEvents::updatePeak(BankState& bank, efitick_t nowNt, const StoredEvent& event) {
+	if (bank.PeakUntilNt <= nowNt.count) {
+		bank.PeakAePercent = 0;
+		bank.PeakFilmPercent = 0;
+		bank.PeakCombinedPercent = 0;
+	}
 	bank.PeakUntilNt = std::max({bank.PeakUntilNt, bank.NormalUntilNt, bank.CutUntilNt});
 	if (!event.RatiosValid) {
 		return;
