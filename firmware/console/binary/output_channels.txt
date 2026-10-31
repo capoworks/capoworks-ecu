@@ -337,4 +337,13 @@ struct_no_prefix output_channels_s
 	uint16_t blendedVeAnalyzeDiscardedCount;VE Analyze: discarded calculation count;"", 1, 0, 0, 65535, 0
 	uint16_t blendedVeAnalyzeLastDiscardedReason;VE Analyze: last discarded calculation reason;"code", 1, 0, 0, 1024, 0
 	uint32_t blendedVeAnalyzeLastDiscardedGeneration;VE Analyze: last discarded calculation generation;"", 1, 0, 0, 0, 0
+	float veAnalyzeTpsRateAbs;VE Analyze: independent TPS rate;"%/s", 1, 0, 0, 0, 3
+	uint8_t veAnalyzeRateValid;VE Analyze: TPS rate window valid;"", 1, 0, 0, 1, 0
+	uint8_t veAnalyzeSampleReady;VE Analyze: ECU sample gate ready;"", 1, 0, 0, 1, 0
+	uint32_t veAnalyzeSampleRejectReasons;VE Analyze: ECU sample reject reasons;"bits", 1, 0, 0, 0, 0
+	uint16_t autoscale veAnalyzeTimeSinceMovement;VE Analyze: time since TPS movement;"s", 0.01, 0, 0, 655.35, 2
+	uint16_t autoscale veAnalyzeTimeSinceCorrection;VE Analyze: time since correction or cut;"s", 0.01, 0, 0, 655.35, 2
+	uint16_t autoscale veAnalyzeRecoveryRemaining;VE Analyze: sample recovery remaining;"s", 0.01, 0, 0, 655.35, 2
+	uint32_t veAnalyzeAcceptedObservations;VE Analyze: accepted ECU fast observations;"count", 1, 0, 0, 0, 0
+	uint32_t veAnalyzeRejectedObservations;VE Analyze: rejected ECU fast observations;"count", 1, 0, 0, 0, 0
 end_struct

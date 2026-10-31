@@ -12,6 +12,7 @@
 #include "engine_parts.h"
 #include "engine_state_generated.h"
 #include "airmass_loads.h"
+#include "ve_analyze_gate.h"
 
 struct output_channels_s;
 
@@ -35,10 +36,35 @@ struct VeAnalyzeDiscardedCalculationDiagnostics {
 	uint32_t LastCalibrationGeneration = 0;
 };
 
+// Operating exclusions are separate from the sampler's TPS/history reasons.
+// These values begin above the complete VeAnalyzeGateReason enum.
+enum class VeAnalyzeOperatingReason : uint32_t {
+	None = 0,
+	InvalidRpm = 1u << 13,
+	Cranking = 1u << 14,
+	Launch = 1u << 15,
+	Antilag = 1u << 16,
+	InvalidSensor = 1u << 17,
+	InvalidFuelCalculation = 1u << 18,
+	FuelCut = 1u << 19,
+	SparkCut = 1u << 20,
+	Dfco = 1u << 21,
+};
+
+static_assert(
+		static_cast<uint32_t>(VeAnalyzeOperatingReason::InvalidRpm) >
+		static_cast<uint32_t>(VeAnalyzeGateReason::ResetRecovery));
+
+constexpr uint32_t operator|(VeAnalyzeOperatingReason lhs, VeAnalyzeOperatingReason rhs) {
+	return static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs);
+}
+
 class EngineState : public engine_state_s {
 public:
 	EngineState();
 	void periodicFastCallback();
+	void updateVeAnalyzeSampleGate(efitick_t nowNt);
+	void resetVeAnalyzeSampleGate(efitick_t nowNt);
 	void updateTChargeK(float rpm, float tps);
 	void resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration = 0, uint32_t calculationEpoch = 0);
 	void latchVeAnalyzeDiagnostics(uint16_t reasonMask, uint32_t calibrationGeneration, uint32_t calculationEpoch);
@@ -132,6 +158,14 @@ public:
 	 */
 	float mapPerCylinderFloat[MAX_CYLINDER_COUNT] = {0};
 	float mapCylinderBalance[MAX_CYLINDER_COUNT] = {0};
+
+private:
+	VeAnalyzeGate veAnalyzeGate;
+	efitick_t lastTpsObservationTick;
+	uint32_t veAnalyzeOperatingReasons = 0;
+	// ECU fast-callback observations, not accepted TunerStudio table cells.
+	uint32_t veAnalyzeAcceptedObservations = 0;
+	uint32_t veAnalyzeRejectedObservations = 0;
 };
 
 EngineState* getEngineState();

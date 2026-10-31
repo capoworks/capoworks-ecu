@@ -9,6 +9,11 @@ Composite SD + Alpha-N VE Analyze remains an opt-in, session-qualified feature. 
 channels explain the existing qualification latch; they do not rearm it, relax it,
 or change fuel admission.
 
+The firmware also owns a separate 250 Hz TPS sample gate. It is independent of the
+legacy 20 Hz acceleration-enrichment update and of the composite-model qualification
+latch. The gate is currently exposed as diagnostic evidence only: this change does not
+alter TunerStudio filters, fuel scheduling, or the PR1 latch policy.
+
 `blendedVeAnalyzeCandidateEndpoint` records the endpoint identifiable for the
 current candidate: `0` none, `1` Speed Density, or `2` Alpha-N. A uniformly
 qualified map supplies the endpoint directly. For a mixed map, an authority
@@ -75,6 +80,86 @@ Engine reset or synchronization-loss reset.
 
 Qualification describes model idoneity, not lambda validity. A valid lambda
 reading does not make a blended authority endpoint suitable for VE analysis.
+
+## Independent TPS sample gate
+
+TPS is read with `Sensor::get(Tps1)` at the ECU fast callback rate. A valid reading is
+not clamped to the normal TPS percentile range. A new history sample is accepted only
+when the `Tps1` provider reports a timestamp newer than the previous fast observation;
+providers without timestamp support fail closed. A cached valid value can remain usable
+for at most the configured 50 ms sample tolerance. Invalid TPS is never converted into a
+valid zero-percent sample.
+
+The initial firmware policy is experimental and conservative:
+
+| Policy | Default |
+| --- | ---: |
+| TPS rate threshold | 5 percentage points/s |
+| TPS quick-movement threshold | 1 percentage point |
+| Causal rate window | 0.2 s |
+| TPS or fuel-correction recovery | 1.5 s |
+| Fuel/spark-cut or DFCO recovery | 2.0 s |
+| Maximum cached TPS age | 0.05 s |
+
+These values are firmware guardrails, not reads of TunerStudio-adjustable numeric
+thresholds or the Lambda Delay Table. They have not been physically validated against a
+particular engine, exhaust transport delay, wideband response, or measured VE result.
+
+The fast observation is performed after module callbacks so that current
+`LimpManager` injection/ignition permission is available. Actual fuel cuts, spark cuts,
+and DFCO all keep the gate closed and use the cut recovery hold. Published TPS
+acceleration enrichment above 0.01 ms uses the fuel-correction hold, including while it
+remains active. Other active launch, anti-lag, cranking, invalid-RPM, invalid-sensor, or
+invalid-fuel-calculation conditions keep the gate closed for as long as they persist.
+
+`veAnalyzeTpsRateAbs` is the absolute TPS rate in percentage points per second, and
+`veAnalyzeRateValid` reports only whether the TPS timestamp history is complete enough
+to calculate it. `veAnalyzeSampleReady` additionally requires recovery holds and every
+operating exclusion to clear. `veAnalyzeSampleRejectReasons` combines the sampler and
+operating reason bits. Time since movement, time since correction, and remaining
+recovery are exported in seconds with saturation. `veAnalyzeAcceptedObservations` and
+`veAnalyzeRejectedObservations` count ECU fast observations, not accepted
+TunerStudio/VE Analyze table cells. Resetting the owner engine or losing trigger
+synchronization clears these counters and requires a fresh TPS window plus the reset
+hold.
+
+The existing gate reason bits are:
+
+| Value | Reason |
+| ---: | --- |
+| 1 | `InvalidConfiguration` |
+| 2 | `InvalidTps` |
+| 4 | `StaleTps` |
+| 8 | `InsufficientHistory` |
+| 16 | `SampleGap` |
+| 32 | `DuplicateTimestamp` |
+| 64 | `RegressedTimestamp` |
+| 128 | `TpsMovementRecovery` |
+| 256 | `FuelCorrectionRecovery` |
+| 512 | `FuelCutRecovery` |
+| 1024 | `CalibrationRecovery` |
+| 2048 | `StartupRecovery` |
+| 4096 | `ResetRecovery` |
+
+The operating exclusions above those bits are:
+
+| Value | Reason |
+| ---: | --- |
+| 8192 | `InvalidRpm` |
+| 16384 | `Cranking` |
+| 32768 | `Launch` |
+| 65536 | `Antilag` |
+| 131072 | `InvalidSensor` |
+| 262144 | `InvalidFuelCalculation` |
+| 524288 | `FuelCut` |
+| 1048576 | `SparkCut` |
+| 2097152 | `Dfco` |
+
+Model-qualification and lambda validity are separate concerns. A ready sample gate does
+not qualify a mixed SD + Alpha-N authority map, validate lambda, or guarantee that
+TunerStudio will accept a cell. TunerStudio 3.3.01 automatic ECU writes are a supported
+user workflow, but this firmware change does not provide a client handshake or change
+the PR1 latch. The latch remains immutable for its session.
 
 For recovery, correct the reported calibration, authority, fallback, idle-VE, or
 sensor cause, then perform the normal engine stop/restart or synchronization

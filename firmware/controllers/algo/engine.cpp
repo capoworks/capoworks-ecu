@@ -19,6 +19,8 @@
 #include "speed_density.h"
 #include "init.h"
 
+#include <cmath>
+
 #include "perf_trace.h"
 #include "backup_ram.h"
 #include "idle_thread.h"
@@ -211,6 +213,97 @@ static uint16_t selectFirstVeAnalyzeReason(uint16_t reasons) {
 	return airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::None);
 }
 
+static void saturatingIncrement(uint32_t& value) {
+	if (value < UINT32_MAX) {
+		++value;
+	}
+}
+
+static uint16_t saturatedCentiseconds(uint32_t milliseconds) {
+	const uint64_t centiseconds = (static_cast<uint64_t>(milliseconds) + 5) / 10;
+	return centiseconds > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(centiseconds);
+}
+
+void EngineState::updateVeAnalyzeSampleGate(efitick_t nowNt) {
+#if EFI_ENGINE_CONTROL
+	const auto tps = Sensor::get(SensorType::Tps1);
+	const auto rpm = Sensor::get(SensorType::Rpm);
+	const bool tpsFresh = Sensor::hasUpdatedAfter(SensorType::Tps1, lastTpsObservationTick);
+
+	uint32_t operatingReasons = 0;
+	if (!rpm.Valid || !std::isfinite(rpm.Value) || rpm.Value <= 0) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::InvalidRpm);
+	}
+	if (engine->rpmCalculator.isCranking()) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::Cranking);
+	}
+	if (!tps.Valid) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::InvalidSensor);
+	}
+	if (!airmassCalculationValid || !std::isfinite(tpsAccelEnrich)) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::InvalidFuelCalculation);
+	}
+
+	auto& limpManager = engine->module<LimpManager>().unmock();
+	const bool fuelCut = !limpManager.allowInjection().value;
+	const bool sparkCut = !limpManager.allowIgnition().value;
+	const bool dfcoActive = engine->module<DfcoController>()->cutFuel();
+	if (fuelCut) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::FuelCut);
+	}
+	if (sparkCut) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::SparkCut);
+	}
+	if (dfcoActive) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::Dfco);
+	}
+
+	bool launchActive = false;
+#if EFI_LAUNCH_CONTROL
+	launchActive = engine->launchController.isLaunchCondition;
+#endif
+	if (launchActive) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::Launch);
+	}
+
+	bool antilagActive = false;
+#if EFI_ANTILAG_SYSTEM
+	antilagActive = engine->antilagController.isAntilagCondition;
+#endif
+	if (antilagActive) {
+		operatingReasons |= static_cast<uint32_t>(VeAnalyzeOperatingReason::Antilag);
+	}
+
+	const bool correctionActive = std::isfinite(tpsAccelEnrich) && std::fabs(tpsAccelEnrich) > 0.01f;
+	const bool cutActive = fuelCut || sparkCut || dfcoActive;
+	const float tpsPercent = tps.Valid ? tps.Value : NAN;
+
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		if (veAnalyzeGate.updateTps(nowNt, tpsPercent, tps.Valid, tpsFresh)) {
+			saturatingIncrement(veAnalyzeAcceptedObservations);
+		} else {
+			saturatingIncrement(veAnalyzeRejectedObservations);
+		}
+		lastTpsObservationTick = nowNt;
+		veAnalyzeGate.observeTransient(nowNt, VeAnalyzeTransient::FuelCorrection, correctionActive);
+		veAnalyzeGate.observeTransient(nowNt, VeAnalyzeTransient::FuelCut, cutActive);
+		veAnalyzeOperatingReasons = operatingReasons;
+	}
+#else
+	(void)nowNt;
+#endif // EFI_ENGINE_CONTROL
+}
+
+void EngineState::resetVeAnalyzeSampleGate(efitick_t nowNt) {
+	chibios_rt::CriticalSectionLocker csl;
+	veAnalyzeGate.reset(nowNt);
+	lastTpsObservationTick = nowNt;
+	veAnalyzeOperatingReasons = 0;
+	veAnalyzeAcceptedObservations = 0;
+	veAnalyzeRejectedObservations = 0;
+}
+
 void EngineState::resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration, uint32_t calculationEpoch) {
 	const uint32_t nextSessionGeneration = veAnalyzeDiagnostics.SessionGeneration + 1;
 	veAnalyzeDiagnostics = {};
@@ -270,6 +363,9 @@ void EngineState::resetVeAnalyzeDiscardedCalculationDiagnostics() {
 }
 
 void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
+	const VeAnalyzeGateSnapshot gateSnapshot = veAnalyzeGate.snapshot(getTimeNowNt());
+	const uint32_t gateReasons = gateSnapshot.Reasons | veAnalyzeOperatingReasons;
+
 	output.blendedVeAnalyzeCandidateEndpoint = veAnalyzeDiagnostics.CandidateEndpoint;
 	output.blendedVeAnalyzeFirstReason = veAnalyzeDiagnostics.FirstRejectReason;
 	output.blendedVeAnalyzeRejectReasons = veAnalyzeDiagnostics.CurrentRejectReasons;
@@ -289,12 +385,24 @@ void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
 	output.blendedVeAnalyzeDiscardedCount = discarded.Count;
 	output.blendedVeAnalyzeLastDiscardedReason = discarded.LastReason;
 	output.blendedVeAnalyzeLastDiscardedGeneration = discarded.LastCalibrationGeneration;
+
+	output.veAnalyzeTpsRateAbs =
+			std::isfinite(gateSnapshot.AbsTpsRatePercentPerSecond) ? gateSnapshot.AbsTpsRatePercentPerSecond : 0;
+	output.veAnalyzeRateValid = gateSnapshot.RateValid;
+	output.veAnalyzeSampleReady = gateSnapshot.Ready && veAnalyzeOperatingReasons == 0;
+	output.veAnalyzeSampleRejectReasons = gateReasons;
+	output.veAnalyzeTimeSinceMovement = saturatedCentiseconds(gateSnapshot.MillisecondsSinceMovement);
+	output.veAnalyzeTimeSinceCorrection = saturatedCentiseconds(gateSnapshot.MillisecondsSinceCorrection);
+	output.veAnalyzeRecoveryRemaining = saturatedCentiseconds(gateSnapshot.HoldRemainingMilliseconds);
+	output.veAnalyzeAcceptedObservations = veAnalyzeAcceptedObservations;
+	output.veAnalyzeRejectedObservations = veAnalyzeRejectedObservations;
 }
 
 static void resetOwnedAirmassRuntimeState(Engine& owner) {
 	owner.airmassInjectionState.onEngineStop();
 
 	auto& state = owner.engineState;
+	state.resetVeAnalyzeSampleGate(getTimeNowNt());
 	state.resetVeAnalyzeDiagnostics(
 			owner.airmassCalibration.Generation, owner.airmassInjectionState.publicationEpoch());
 	state.resetVeAnalyzeDiscardedCalculationDiagnostics();
@@ -577,6 +685,9 @@ void Engine::periodicFastCallback() {
 	speedoUpdate();
 
 	engineModules.apply_all([](auto& m) { m.onFastCallback(); });
+
+	// LimpManager's current cut state is updated by the module pass above.
+	engineState.updateVeAnalyzeSampleGate(getTimeNowNt());
 }
 
 EngineRotationState* getEngineRotationState() {

@@ -80,7 +80,9 @@ bool WarningCodeState::isWarningNow(ObdCode code) const {
 }
 
 EngineState::EngineState() {
-	timeSinceLastTChargeK.reset(getTimeNowNt());
+	const efitick_t nowNt = getTimeNowNt();
+	timeSinceLastTChargeK.reset(nowNt);
+	resetVeAnalyzeSampleGate(nowNt);
 }
 
 void EngineState::periodicFastCallback() {

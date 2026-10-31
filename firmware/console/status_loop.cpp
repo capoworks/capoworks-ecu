@@ -527,8 +527,8 @@ void updateTunerStudioState() {
 	static_assert(offsetof(TunerStudioOutputChannels, tsConfigVersion) == TS_FILE_VERSION_OFFSET);
 
 	{
-		// Refresh elapsed diagnostic time and copy both diagnostics domains from
-		// one owner-state snapshot, even when no fresh fuel publication succeeds.
+		// Refresh elapsed diagnostics and copy the latched diagnostics plus one
+		// independently aged sample-gate snapshot, even when fuel publication stops.
 		chibios_rt::CriticalSectionLocker csl;
 		engine->engineState.exportVeAnalyzeDiagnostics(*tsOutputChannels);
 	}
