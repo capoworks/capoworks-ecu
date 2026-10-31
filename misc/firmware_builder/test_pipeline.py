@@ -220,7 +220,7 @@ class PackageTests(unittest.TestCase):
         self.catalog_patch = catalog_patch.start()
         self.addCleanup(catalog_patch.stop)
 
-    def publish(self) -> dict:
+    def publish(self, *, source_ref: str | None = None) -> dict:
         return pipeline.package(
             root=self.root,
             resolved_path=self.resolved_path,
@@ -229,6 +229,7 @@ class PackageTests(unittest.TestCase):
             request_id="request-123",
             run_id="991",
             run_attempt="2",
+            source_ref=source_ref,
         )
 
     def _rewrite_report(self, report: dict) -> None:
@@ -591,6 +592,40 @@ class PackageTests(unittest.TestCase):
         self.assertIsNone(manifest["source"]["ref"])
         self.assertEqual(SOURCE_COMMIT, manifest["source"]["commit"])
 
+    def test_detached_head_records_explicit_source_branch(self) -> None:
+        self.ref_patch.return_value = None
+
+        manifest = self.publish(source_ref="refs/heads/release/firmware")
+
+        self.ref_patch.assert_not_called()
+        self.assertEqual(
+            "refs/heads/release/firmware", manifest["source"]["ref"]
+        )
+        self.assertEqual(SOURCE_COMMIT, manifest["source"]["commit"])
+
+    def test_invalid_source_ref_creates_no_output(self) -> None:
+        for source_ref in (
+            "feature/not-canonical",
+            "refs/tags/release",
+            "refs/heads/feature..broken",
+        ):
+            with self.subTest(source_ref=source_ref):
+                with self.assertRaisesRegex(
+                    pipeline.PackageError, "source ref"
+                ):
+                    self.publish(source_ref=source_ref)
+                self.assertFalse(self.output.exists())
+
+    def test_resource_report_must_match_actual_head(self) -> None:
+        self.git_patch.return_value = "a" * 40
+
+        with self.assertRaisesRegex(
+            pipeline.PackageError,
+            "resource source commit does not match repository HEAD",
+        ):
+            self.publish(source_ref="refs/heads/release/firmware")
+        self.assertFalse(self.output.exists())
+
 
 class GitRefTests(unittest.TestCase):
     def test_symbolic_ref_uses_explicit_repository_argument(self) -> None:
@@ -707,8 +742,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("type: boolean", sd_card)
         self.assertIn("default: true", sd_card)
 
+    def test_source_selector_inputs_are_manual_compatible(self) -> None:
+        source_ref = _input_section(self.workflow, "source_ref")
+        self.assertIn("type: string", source_ref)
+        self.assertIn("default: master", source_ref)
+        source_sha = _input_section(self.workflow, "source_sha")
+        self.assertIn("type: string", source_sha)
+        self.assertIn("default: ''", source_sha)
+
     def test_workflow_uses_catalog_and_gated_package_helper(self) -> None:
-        self.assertIn("misc/firmware_builder/catalog.py", self.workflow)
+        self.assertIn('"$BUILDER_TOOLING/catalog.py"', self.workflow)
         self.assertIn('resolve_args=(', self.workflow)
         self.assertIn('--board "$INPUT_BOARD"', self.workflow)
         self.assertIn('--features "$INPUT_FEATURES"', self.workflow)
@@ -717,8 +760,19 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertIn('--sd-card "$INPUT_SD_CARD"', self.workflow)
         self.assertIn('--github-env "$GITHUB_ENV"', self.workflow)
-        self.assertIn("misc/firmware_builder/resources.py", self.workflow)
-        self.assertIn("misc/firmware_builder/pipeline.py", self.workflow)
+        self.assertIn('"$BUILDER_TOOLING/resources.py"', self.workflow)
+        self.assertIn('"$BUILDER_TOOLING/pipeline.py"', self.workflow)
+        resolve_step = _workflow_step(
+            self.workflow, "Resolve canonical build profile"
+        )
+        resource_step = _workflow_step(
+            self.workflow, "Extract and gate resources"
+        )
+        package_step = _workflow_step(
+            self.workflow, "Package validated firmware"
+        )
+        for step in (resolve_step, resource_step, package_step):
+            self.assertIn('--root "$GITHUB_WORKSPACE"', step)
         self.assertNotIn("base_modules=(", self.workflow)
         self.assertNotIn("declare -A selected", self.workflow)
 
@@ -740,8 +794,60 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("fome.bin", diagnostic_step)
         self.assertNotIn("manifest.json", diagnostic_step)
 
+    def test_trusted_tooling_precedes_one_selected_source_checkout(self) -> None:
+        trusted = _workflow_step(
+            self.workflow, "Check out trusted builder tooling"
+        )
+        preserve = _workflow_step(
+            self.workflow,
+            "Validate source selector and preserve builder tooling",
+        )
+        selected = _workflow_step(
+            self.workflow, "Check out selected firmware source"
+        )
+
+        self.assertEqual(
+            2, self.workflow.count("uses: actions/checkout@v7")
+        )
+        self.assertNotIn("strategy:", self.workflow)
+        self.assertIn("repository: ${{ github.repository }}", trusted)
+        self.assertIn("ref: ${{ github.sha }}", trusted)
+        self.assertIn(
+            'cp -a "$GITHUB_WORKSPACE/misc/firmware_builder" "$builder_tooling"',
+            preserve,
+        )
+        self.assertIn(
+            'INPUT_SOURCE_REF: ${{ inputs.source_ref }}', preserve
+        )
+        self.assertIn(
+            'INPUT_SOURCE_SHA: ${{ inputs.source_sha }}', preserve
+        )
+        self.assertIn(
+            'git check-ref-format --branch "$INPUT_SOURCE_REF"', preserve
+        )
+        self.assertIn(
+            '"$INPUT_SOURCE_SHA" =~ ^[0-9a-f]{40}$', preserve
+        )
+        self.assertIn("repository: ${{ github.repository }}", selected)
+        self.assertIn(
+            "ref: ${{ inputs.source_sha || inputs.source_ref }}", selected
+        )
+        self.assertIn("submodules: true", selected)
+        self.assertIn("persist-credentials: false", selected)
+        self.assertLess(
+            self.workflow.index("Check out trusted builder tooling"),
+            self.workflow.index(
+                "Validate source selector and preserve builder tooling"
+            ),
+        )
+        self.assertLess(
+            self.workflow.index(
+                "Validate source selector and preserve builder tooling"
+            ),
+            self.workflow.index("Check out selected firmware source"),
+        )
+
     def test_source_commit_and_build_controls_are_pinned(self) -> None:
-        self.assertIn("ref: master", self.workflow)
         self.assertIn("permissions:\n  contents: read", self.workflow)
         self.assertIn("SOURCE_COMMIT", self.workflow)
         capture_step = _workflow_step(self.workflow, "Capture source revision")
@@ -753,8 +859,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(verify_step, repository_git)
         self.assertIn('source_commit="$(git -C', capture_step)
         self.assertIn('printf \'SOURCE_COMMIT=%s\\n\' "$source_commit"', capture_step)
+        self.assertIn(
+            '"$source_commit" != "$INPUT_SOURCE_SHA"', capture_step
+        )
         self.assertIn('actual_commit="$(git -C', verify_step)
         self.assertIn('"$actual_commit" != "$SOURCE_COMMIT"', verify_step)
+        package_step = _workflow_step(
+            self.workflow, "Package validated firmware"
+        )
+        self.assertIn(
+            '--source-ref "refs/heads/$SOURCE_REF"', package_step
+        )
+        self.assertNotIn("SOURCE_SHA=", self.workflow)
         self.assertIn("JOBS: '4'", self.workflow)
         self.assertLess(
             self.workflow.index("Capture source revision"),

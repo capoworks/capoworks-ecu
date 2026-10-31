@@ -26,6 +26,7 @@ except ImportError:  # Allow direct execution from this directory.
 
 MANIFEST_SCHEMA_VERSION = 2
 SOURCE_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+SOURCE_REF_PREFIX = "refs/heads/"
 ZIP_EOCD = b"PK\x05\x06"
 MAX_EMBEDDED_INI_BYTES = 8 * 1024 * 1024
 PERSISTENT_WRAPPER_BYTES = 20
@@ -96,6 +97,26 @@ def _git_ref(root: Path) -> str | None:
         detail = (result.stderr or result.stdout).strip()
         raise PackageError(f"could not read the checked-out Git ref: {detail}")
     return ref
+
+
+def _validated_source_ref(source_ref: str | None) -> str | None:
+    """Validate an optional canonical branch ref recorded for a detached HEAD."""
+    if source_ref is None:
+        return None
+    if not source_ref.startswith(SOURCE_REF_PREFIX) or source_ref == SOURCE_REF_PREFIX:
+        raise PackageError("source ref must be a canonical refs/heads/<branch> ref")
+    try:
+        result = subprocess.run(
+            ["git", "check-ref-format", source_ref],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        raise PackageError(f"could not execute git: {error}") from error
+    if result.returncode:
+        raise PackageError("source ref is not a valid canonical branch ref")
+    return source_ref
 
 
 def _safe_name(value: Any, label: str) -> str:
@@ -425,6 +446,7 @@ def package(
     request_id: str,
     run_id: str | None = None,
     run_attempt: str | None = None,
+    source_ref: str | None = None,
 ) -> dict[str, Any]:
     """Validate inputs and atomically publish a schema-2 firmware package."""
     root_path = Path(root).expanduser().resolve()
@@ -439,6 +461,7 @@ def package(
         raise PackageError(str(error)) from error
     run_id = _optional_run_value(run_id, "run id")
     run_attempt = _optional_run_value(run_attempt, "run attempt")
+    validated_source_ref = _validated_source_ref(source_ref)
 
     resolved = _load_json(resolved_file, "resolved profile")
     raw_resource_report = _load_json(resources_file, "resource report")
@@ -596,7 +619,11 @@ def package(
                 "repository": os.environ.get(
                     "GITHUB_REPOSITORY", "capoworks/capoworks-ecu"
                 ),
-                "ref": _git_ref(root_path),
+                "ref": (
+                    validated_source_ref
+                    if validated_source_ref is not None
+                    else _git_ref(root_path)
+                ),
                 "commit": source_commit,
             },
             "run": {
@@ -634,6 +661,7 @@ def build_parser() -> argparse.ArgumentParser:
     package_parser.add_argument("--request-id", required=True)
     package_parser.add_argument("--run-id")
     package_parser.add_argument("--run-attempt")
+    package_parser.add_argument("--source-ref")
     return parser
 
 
@@ -648,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:
             request_id=args.request_id,
             run_id=args.run_id,
             run_attempt=args.run_attempt,
+            source_ref=args.source_ref,
         )
     except (PackageError, OSError) as error:
         print(f"pipeline: error: {error}", file=sys.stderr)

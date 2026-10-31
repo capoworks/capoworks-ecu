@@ -8,6 +8,16 @@ on:
         description: Opaque URL-safe request identifier
         required: true
         type: string
+      source_ref:
+        description: Raw firmware source branch name
+        required: false
+        type: string
+        default: master
+      source_sha:
+        description: Optional full firmware source commit SHA
+        required: false
+        type: string
+        default: ''
       board:
         description: Firmware board to build
         required: true
@@ -87,10 +97,51 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Check out fixed master source
+      - name: Check out trusted builder tooling
         uses: actions/checkout@v7
         with:
-          ref: master
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate source selector and preserve builder tooling
+        shell: bash
+        env:
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+
+          if [[ -z "$INPUT_SOURCE_REF" ]] \
+            || [[ "$INPUT_SOURCE_REF" == refs/* ]] \
+            || [[ "$INPUT_SOURCE_REF" == -* ]] \
+            || [[ "$INPUT_SOURCE_REF" =~ [[:cntrl:]] ]] \
+            || [[ "$INPUT_SOURCE_REF" == *'@{'* ]]; then
+            printf '::error title=Invalid source ref::source_ref must be a raw branch name\n' >&2
+            exit 1
+          fi
+          if ! git check-ref-format --branch "$INPUT_SOURCE_REF" >/dev/null; then
+            printf '::error title=Invalid source ref::source_ref must be a valid raw branch name\n' >&2
+            exit 1
+          fi
+          if [[ -n "$INPUT_SOURCE_SHA" && ! "$INPUT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '::error title=Invalid source SHA::source_sha must be a full lowercase commit SHA\n' >&2
+            exit 1
+          fi
+
+          builder_tooling="$RUNNER_TEMP/custom-firmware-build/tooling"
+          mkdir -p "$(dirname "$builder_tooling")"
+          cp -a "$GITHUB_WORKSPACE/misc/firmware_builder" "$builder_tooling"
+          printf 'SOURCE_REF=%s\n' "$INPUT_SOURCE_REF" >> "$GITHUB_ENV"
+          printf 'BUILDER_TOOLING=%s\n' "$builder_tooling" >> "$GITHUB_ENV"
+
+      - name: Check out selected firmware source
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.source_sha || inputs.source_ref }}
           fetch-depth: 1
           submodules: true
           persist-credentials: false
@@ -133,7 +184,7 @@ jobs:
 
           resolve_args=(
             python3
-            misc/firmware_builder/catalog.py
+            "$BUILDER_TOOLING/catalog.py"
             resolve
             --root "$GITHUB_WORKSPACE"
             --board "$INPUT_BOARD"
@@ -167,11 +218,17 @@ jobs:
 
       - name: Capture source revision
         shell: bash
+        env:
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
           source_commit="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
           if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
             printf '::error title=Invalid source revision::%s\n' "$source_commit" >&2
+            exit 1
+          fi
+          if [[ -n "$INPUT_SOURCE_SHA" && "$source_commit" != "$INPUT_SOURCE_SHA" ]]; then
+            printf '::error title=Source revision mismatch::Checked-out HEAD does not match requested source SHA\n' >&2
             exit 1
           fi
           printf 'SOURCE_COMMIT=%s\n' "$source_commit" >> "$GITHUB_ENV"
@@ -214,13 +271,13 @@ jobs:
         run: |
           set -euo pipefail
           resource_file="$RUNNER_TEMP/custom-firmware-build/resources.json"
-          policy_file="$GITHUB_WORKSPACE/misc/firmware_builder/policies/$BOARD_ID.json"
+          policy_file="$BUILDER_TOOLING/policies/$BOARD_ID.json"
           if [[ ! -f "$policy_file" ]]; then
-            policy_file="$GITHUB_WORKSPACE/misc/firmware_builder/policies/default.json"
+            policy_file="$BUILDER_TOOLING/policies/default.json"
           fi
           resource_args=(
             python3
-            misc/firmware_builder/resources.py
+            "$BUILDER_TOOLING/resources.py"
             extract
             --elf "$GITHUB_WORKSPACE/firmware/build/fome.elf"
             --profile "$GITHUB_WORKSPACE/firmware/generated/module_profile.txt"
@@ -249,7 +306,7 @@ jobs:
           package_file="$RUNNER_TEMP/custom-firmware-package"
           package_args=(
             python3
-            misc/firmware_builder/pipeline.py
+            "$BUILDER_TOOLING/pipeline.py"
             package
             --root "$GITHUB_WORKSPACE"
             --resolved "$RUNNER_TEMP/custom-firmware-build/resolved-profile.json"
@@ -258,6 +315,7 @@ jobs:
             --request-id "$REQUEST_ID"
             --run-id "$GITHUB_RUN_ID"
             --run-attempt "$GITHUB_RUN_ATTEMPT"
+            --source-ref "refs/heads/$SOURCE_REF"
           )
           "${package_args[@]}"
 
