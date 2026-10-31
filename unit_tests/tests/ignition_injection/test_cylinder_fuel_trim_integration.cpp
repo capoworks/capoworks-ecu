@@ -229,6 +229,11 @@ TEST_F(CylinderFuelTrimIntegration, FuelProvenanceAppliesBankTrimToBaseAndAe) {
 	} idleController;
 	engine->engineModules.get<IdleController>().set(&idleController);
 
+	Sensor::setMockValue(SensorType::Iat, 27);
+	Sensor::setMockValue(SensorType::Clt, 27);
+	engine->engineState.sd.tCharge = 27;
+	engine->engineState.sd.tChargeK = 300.15f;
+
 	engineConfiguration->tpsAccelEnrichmentThreshold = 5;
 	engineConfiguration->tpsAccelLookback = 2;
 	engineConfiguration->tpsAccelFractionPeriod = 1;
@@ -242,6 +247,11 @@ TEST_F(CylinderFuelTrimIntegration, FuelProvenanceAppliesBankTrimToBaseAndAe) {
 	setAllTrims(0);
 	invalidateAirmassCalibration();
 	runFuelCalculation();
+
+	const float modeledTChargeC = engine->engineState.sd.tCharge;
+	const float modeledTChargeK = engine->engineState.sd.tChargeK;
+	EXPECT_FLOAT_EQ(27, modeledTChargeC);
+	EXPECT_FLOAT_EQ(300.15f, modeledTChargeK);
 
 	FuelAirmassCapture capture;
 	ASSERT_TRUE(captureFuelAirmassInputs(2500, engine->airmassInjectionState.publicationEpoch(), capture, false));
@@ -282,6 +292,9 @@ TEST_F(CylinderFuelTrimIntegration, FuelProvenanceAppliesBankTrimToBaseAndAe) {
 
 	invalidateAirmassCalibration();
 	runFuelCalculation();
+
+	EXPECT_FLOAT_EQ(modeledTChargeC, engine->engineState.sd.tCharge);
+	EXPECT_FLOAT_EQ(modeledTChargeK, engine->engineState.sd.tChargeK);
 
 	const float bankTrim = engine->stftCorrection[0];
 	const auto provenance = engine->cylinders[0].getFuelProvenance();

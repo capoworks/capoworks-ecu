@@ -1,4 +1,4 @@
 struct_no_prefix wall_fuel_state_s
-	float wallFuelCorrection;Wall fuel correction;"mg", 1, 0, 0, 0, 1
-	float wallFuel;Wall fuel amount;"mg", 1, 0, 0, 0, 1
+	float wallFuelCorrection;Wall fuel correction (raw g, client mg);"mg", 1000, 0, 0, 0, 1
+	float wallFuel;Wall fuel amount (raw g, client mg);"mg", 1000, 0, 0, 0, 1
 end_struct
