@@ -526,6 +526,13 @@ void updateTunerStudioState() {
 	tsOutputChannels->tsConfigVersion = TS_FILE_VERSION;
 	static_assert(offsetof(TunerStudioOutputChannels, tsConfigVersion) == TS_FILE_VERSION_OFFSET);
 
+	{
+		// Refresh elapsed diagnostic time and copy both diagnostics domains from
+		// one owner-state snapshot, even when no fresh fuel publication succeeds.
+		chibios_rt::CriticalSectionLocker csl;
+		engine->engineState.exportVeAnalyzeDiagnostics(*tsOutputChannels);
+	}
+
 #if EFI_SHAFT_POSITION_INPUT
 
 	tsOutputChannels->RPMValue = rpm;

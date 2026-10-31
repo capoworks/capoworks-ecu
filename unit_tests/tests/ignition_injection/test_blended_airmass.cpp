@@ -6,6 +6,7 @@
 #include "blended_airmass.h"
 #include "fuel_math.h"
 #include "speed_density_airmass.h"
+#include "tunerstudio.h"
 
 using ::testing::NiceMock;
 using ::testing::Return;
@@ -101,7 +102,35 @@ TEST(BlendedAirmassRuntimeOwnership, EngineConstructionDoesNotRequireInstalledGl
 	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeCandidateEndpoint);
 	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeFirstReason);
 	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeRejectReasons);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeDiscardedCount);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeLastDiscardedReason);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeLastDiscardedGeneration);
 	EXPECT_EQ(1, local.outputChannels.blendedVeAnalyzeSessionGeneration);
+}
+
+TEST(BlendedAirmassRuntimeOwnership, EngineResetClearsIndependentDiagnosticDomains) {
+	Engine local;
+	local.engineState.latchVeAnalyzeDiagnostics(airmassVeAnalyzeReason(VeReject::Configuration), 41, 52);
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		local.engineState.recordVeAnalyzeDiscardedCalculationLocked(63);
+	}
+	local.engineState.veAnalyzeSessionStarted = true;
+
+	local.reset();
+
+	EXPECT_FALSE(local.engineState.veAnalyzeSessionStarted);
+	EXPECT_FALSE(local.engineState.veAnalyzeSessionInvalid);
+	EXPECT_EQ(0, local.engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(0, local.engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
+	EXPECT_EQ(0, local.engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
+	EXPECT_EQ(0, local.engineState.veAnalyzeDiscardedCalculationDiagnostics.LastReason);
+	EXPECT_EQ(0, local.engineState.veAnalyzeDiscardedCalculationDiagnostics.LastCalibrationGeneration);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeRejectReasons);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeDiscardedCount);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeLastDiscardedReason);
+	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeLastDiscardedGeneration);
 }
 
 TEST_F(BlendedAirmassModelTest, DefaultAuthorityAxisIsTpsAndEvaluationUsesCapturedSnapshot) {
@@ -583,6 +612,10 @@ TEST_F(BlendedAirmassModelTest, HealthyAlphaNFallbackUsesNativeSubstituteWithout
 	EXPECT_FLOAT_EQ(engine->outputChannels.blendedEffectiveAuthority, 100);
 	EXPECT_FLOAT_EQ(getAirmassSelectedLoad(AFR_None, 0), 200);
 	EXPECT_FLOAT_EQ(engine->engineState.fuelingLoad, 200);
+	EXPECT_EQ(2, engine->outputChannels.blendedVeAnalyzeCandidateEndpoint);
+	EXPECT_EQ(2, engine->outputChannels.blendedVeAnalyzeEndpoint);
+	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeRejectReasons);
 	EXPECT_FALSE(engine->engineState.airmassLoads.ValidSources & (1u << AFR_None));
 	EXPECT_FALSE(engine->engineState.airmassLoads.ValidSources & (1u << AFR_MAP));
 	EXPECT_FALSE(engine->engineState.airmassLoads.ValidSources & (1u << AFR_EffectiveMAP));
@@ -726,8 +759,7 @@ TEST_F(BlendedAirmassModelTest, FirstVeAnalyzeReasonSurvivesLaterWritesAndValidR
 			airmassVeAnalyzeReason(VeReject::NonUniformAuthority),
 			engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
 	EXPECT_EQ(
-			airmassVeAnalyzeReason(VeReject::NonUniformAuthority),
-			engine->outputChannels.blendedVeAnalyzeFirstReason);
+			airmassVeAnalyzeReason(VeReject::NonUniformAuthority), engine->outputChannels.blendedVeAnalyzeFirstReason);
 	EXPECT_EQ(1, engine->outputChannels.blendedVeAnalyzeCandidateEndpoint);
 	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeEndpoint);
 
@@ -766,7 +798,58 @@ TEST_F(BlendedAirmassModelTest, FirstVeAnalyzeReasonSurvivesLaterWritesAndValidR
 	EXPECT_GT(engine->cylinders[0].getInjectionMass(), 0);
 }
 
-TEST_F(BlendedAirmassModelTest, RunningCalibrationWriteLatchesReasonAndPreservesFuelNumbers) {
+TEST_F(BlendedAirmassModelTest, RunningVeCalibrationWriteLatchesReasonAndPreservesFuelNumbers) {
+	setTimeNowUs(1'000'000);
+	config->useMapEstimateTable = false;
+	Sensor::setMockValue(SensorType::Rpm, 2500);
+	setTable(config->airmassBlendTable, 100);
+	engine->periodicFastCallback();
+
+	ASSERT_EQ(2, engine->outputChannels.blendedVeAnalyzeEndpoint);
+	const float acceptedFuelMass = engine->cylinders[0].getInjectionMass();
+	const auto calibrationGeneration = engine->engineState.veAnalyzeDiagnostics.CalibrationGeneration;
+	const auto calculationEpoch = engine->engineState.veAnalyzeDiagnostics.CalculationEpoch;
+	const auto sessionGeneration = engine->engineState.veAnalyzeDiagnostics.SessionGeneration;
+	ASSERT_GT(acceptedFuelMass, 0);
+
+	const float originalAlphaNVe = config->alphaNTable[0][0];
+	config->alphaNTable[0][0] = originalAlphaNVe;
+	engine->airmassInjectionState.onConfigurationWrite(LM_SD_ALPHA_N, false);
+
+	EXPECT_EQ(100, config->airmassBlendTable[0][0]);
+	EXPECT_FLOAT_EQ(originalAlphaNVe, config->alphaNTable[0][0]);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::CalibrationWrite),
+			engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::CalibrationWrite),
+			engine->engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
+	EXPECT_NE(calibrationGeneration, engine->engineState.veAnalyzeDiagnostics.CalibrationGeneration);
+	EXPECT_NE(calculationEpoch, engine->engineState.veAnalyzeDiagnostics.CalculationEpoch);
+	EXPECT_EQ(sessionGeneration, engine->engineState.veAnalyzeDiagnostics.SessionGeneration);
+	EXPECT_FALSE(engine->engineState.veAnalyzeSessionStarted);
+	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeCandidateEndpoint);
+	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeEndpoint);
+	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
+
+	advanceTimeUs(5'000'000);
+	updateTunerStudioState();
+	EXPECT_EQ(5, engine->outputChannels.blendedVeAnalyzeLatchedTime);
+	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
+
+	engine->periodicFastCallback();
+
+	EXPECT_EQ(2, engine->outputChannels.blendedVeAnalyzeCandidateEndpoint);
+	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeEndpoint);
+	EXPECT_EQ(airmassVeAnalyzeReason(VeReject::CalibrationWrite), engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::SessionAlreadyInvalid),
+			engine->outputChannels.blendedVeAnalyzeRejectReasons);
+	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
+	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
+}
+
+TEST_F(BlendedAirmassModelTest, RunningMixedAuthorityWriteLatchesReasonAndPreservesFuelNumbers) {
 	setTimeNowUs(1'000'000);
 	config->useMapEstimateTable = false;
 	Sensor::setMockValue(SensorType::Rpm, 2500);
@@ -800,18 +883,12 @@ TEST_F(BlendedAirmassModelTest, RunningCalibrationWriteLatchesReasonAndPreserves
 
 	EXPECT_EQ(1, engine->outputChannels.blendedVeAnalyzeCandidateEndpoint);
 	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeEndpoint);
-	EXPECT_EQ(
-			airmassVeAnalyzeReason(VeReject::CalibrationWrite),
-			engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(airmassVeAnalyzeReason(VeReject::CalibrationWrite), engine->outputChannels.blendedVeAnalyzeFirstReason);
 	EXPECT_EQ(
 			airmassVeAnalyzeReason(VeReject::SessionAlreadyInvalid),
 			engine->outputChannels.blendedVeAnalyzeRejectReasons);
 	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
 	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
-
-	advanceTimeUs(10'000'000);
-	engine->periodicFastCallback();
-	EXPECT_EQ(10, engine->outputChannels.blendedVeAnalyzeLatchedTime);
 }
 
 TEST_F(BlendedAirmassModelTest, RunningStrategyChangeUsesItsDistinctFirstReason) {
@@ -847,15 +924,9 @@ TEST_F(BlendedAirmassModelTest, MissingSensorRejectionIsVisibleWithoutAcceptedFu
 	EXPECT_FALSE(engine->engineState.airmassCalculationValid);
 	EXPECT_FALSE(engine->engineState.veAnalyzeSessionStarted);
 	EXPECT_FALSE(engine->airmassInjectionState.allowInjection());
-	EXPECT_EQ(
-			airmassVeAnalyzeReason(VeReject::Sensor),
-			engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
-	EXPECT_EQ(
-			airmassVeAnalyzeReason(VeReject::Sensor),
-			engine->outputChannels.blendedVeAnalyzeFirstReason);
-	EXPECT_TRUE(
-			engine->outputChannels.blendedVeAnalyzeRejectReasons &
-			airmassVeAnalyzeReason(VeReject::Sensor));
+	EXPECT_EQ(airmassVeAnalyzeReason(VeReject::Sensor), engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(airmassVeAnalyzeReason(VeReject::Sensor), engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_TRUE(engine->outputChannels.blendedVeAnalyzeRejectReasons & airmassVeAnalyzeReason(VeReject::Sensor));
 	EXPECT_TRUE(
 			engine->outputChannels.blendedVeAnalyzeRejectReasons &
 			airmassVeAnalyzeReason(VeReject::SessionAlreadyInvalid));
@@ -884,8 +955,7 @@ TEST_F(BlendedAirmassModelTest, StaleGenerationIsNotPublishedOverAcceptedState) 
 
 	const auto stale = calculateFuelPublication(2500, false, capture);
 	EXPECT_TRUE(stale.Stale);
-	EXPECT_EQ(
-			airmassVeAnalyzeReason(VeReject::StaleCalculation), stale.VeAnalyzeRejectReasons);
+	EXPECT_EQ(airmassVeAnalyzeReason(VeReject::StaleCalculation), stale.VeAnalyzeRejectReasons);
 
 	publishBlendedAirmassDiagnostics(stale);
 
@@ -893,6 +963,85 @@ TEST_F(BlendedAirmassModelTest, StaleGenerationIsNotPublishedOverAcceptedState) 
 	EXPECT_EQ(firstReason, engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
 	EXPECT_EQ(currentReasons, engine->engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
 	EXPECT_EQ(calculationEpoch, engine->engineState.veAnalyzeDiagnostics.CalculationEpoch);
+}
+
+TEST_F(BlendedAirmassModelTest, DiscardedPublicationIsSeparateFromLatchAndAcceptedFuel) {
+	config->useMapEstimateTable = false;
+	Sensor::setMockValue(SensorType::Rpm, 2500);
+	Sensor::setMockValue(SensorType::Tps1, 20);
+	setTable(config->airmassBlendTable, 0);
+	// Keep the active SD branch numerically unchanged while making the whole
+	// authority map nonuniform so the first latch has a distinct cause.
+	config->airmassBlendTable[3][4] = 50;
+	engine->periodicFastCallback();
+
+	const auto firstReason = engine->engineState.veAnalyzeDiagnostics.FirstRejectReason;
+	const auto currentReasons = engine->engineState.veAnalyzeDiagnostics.CurrentRejectReasons;
+	const auto acceptedFuelMass = engine->cylinders[0].getInjectionMass();
+	ASSERT_EQ(airmassVeAnalyzeReason(VeReject::NonUniformAuthority), firstReason);
+	ASSERT_GT(acceptedFuelMass, 0);
+	ASSERT_EQ(0, engine->engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
+
+	invalidateAirmassCalibration();
+	const auto capturedGeneration = engine->airmassCalibration.Generation;
+	bool raced = false;
+	engine->onAirmassCalibrationScanned = [&] {
+		if (!raced) {
+			raced = true;
+			invalidateAirmassCalibration();
+		}
+	};
+
+	engine->periodicFastCallback();
+	engine->onAirmassCalibrationScanned = nullptr;
+
+	EXPECT_TRUE(raced);
+	EXPECT_FALSE(engine->engineState.airmassCalculationValid);
+	EXPECT_EQ(1, engine->engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::StaleCalculation),
+			engine->engineState.veAnalyzeDiscardedCalculationDiagnostics.LastReason);
+	EXPECT_EQ(
+			capturedGeneration, engine->engineState.veAnalyzeDiscardedCalculationDiagnostics.LastCalibrationGeneration);
+	EXPECT_EQ(firstReason, engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(currentReasons, engine->engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
+	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
+	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
+
+	updateTunerStudioState();
+	EXPECT_EQ(firstReason, engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(1, engine->outputChannels.blendedVeAnalyzeDiscardedCount);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::StaleCalculation),
+			engine->outputChannels.blendedVeAnalyzeLastDiscardedReason);
+	EXPECT_EQ(capturedGeneration, engine->outputChannels.blendedVeAnalyzeLastDiscardedGeneration);
+
+	setTable(config->airmassBlendTable, 0);
+	engine->periodicFastCallback();
+
+	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
+	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
+	EXPECT_EQ(firstReason, engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(firstReason, engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::SessionAlreadyInvalid),
+			engine->outputChannels.blendedVeAnalyzeRejectReasons);
+	EXPECT_EQ(1, engine->outputChannels.blendedVeAnalyzeDiscardedCount);
+	EXPECT_EQ(capturedGeneration, engine->outputChannels.blendedVeAnalyzeLastDiscardedGeneration);
+	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
+}
+
+TEST_F(BlendedAirmassModelTest, NormalStatusExportRefreshesLatchedTimeWithoutFuelPublication) {
+	setTimeNowUs(3'000'000);
+	engine->engineState.latchVeAnalyzeDiagnostics(airmassVeAnalyzeReason(VeReject::Configuration), 17, 29);
+
+	advanceTimeUs(4'000'000);
+	updateTunerStudioState();
+
+	EXPECT_EQ(airmassVeAnalyzeReason(VeReject::Configuration), engine->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(4, engine->outputChannels.blendedVeAnalyzeLatchedTime);
+	EXPECT_EQ(17, engine->outputChannels.blendedVeAnalyzeCalibrationGeneration);
+	EXPECT_EQ(29, engine->outputChannels.blendedVeAnalyzeCalculationEpoch);
 }
 
 TEST_F(BlendedAirmassModelTest, OwnerEngineStopClearsRuntimeStateAndPreservesPendingCallbacks) {
@@ -920,6 +1069,7 @@ TEST_F(BlendedAirmassModelTest, OwnerEngineStopClearsRuntimeStateAndPreservesPen
 	EXPECT_EQ(0, engine->engineState.veAnalyzeDiagnostics.FirstRejectReason);
 	EXPECT_EQ(0, engine->engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
 	EXPECT_EQ(0, engine->engineState.veAnalyzeDiagnostics.CandidateEndpoint);
+	EXPECT_EQ(0, engine->engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
 	EXPECT_EQ(0, engine->outputChannels.blendedVeAnalyzeLatchedTime);
 	EXPECT_EQ(sessionGeneration + 1, engine->engineState.veAnalyzeDiagnostics.SessionGeneration);
 	EXPECT_EQ(static_cast<uint8_t>(AirmassInjectionStatus::NotReady), engine->outputChannels.blendedStatus);

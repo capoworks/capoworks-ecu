@@ -371,8 +371,7 @@ static AirmassVeAnalyzeEndpoint getBlendedVeAnalyzeCandidateEndpoint(
 	if (qualifiedEndpoint != AirmassVeAnalyzeEndpoint::None) {
 		return qualifiedEndpoint;
 	}
-	if ((diagnostics.Flags & BlendedAuthorityUnavailable) ||
-		!(diagnostics.Flags & BlendedAuthorityLoadValid)) {
+	if ((diagnostics.Flags & BlendedAuthorityUnavailable) || !(diagnostics.Flags & BlendedAuthorityLoadValid)) {
 		return AirmassVeAnalyzeEndpoint::None;
 	}
 	if (diagnostics.RequestedAuthority <= 0) {
@@ -389,18 +388,26 @@ static uint16_t getBlendedVeAnalyzeRejectReasons(
 		const BlendedAirmassDiagnostics& diagnostics,
 		const AirmassInputs& inputs,
 		AirmassVeAnalyzeEndpoint endpoint) {
+	if (isBlendedVeAnalyzeResult(evaluation, diagnostics, inputs, endpoint)) {
+		// Strict native-load fallback is downstream evidence, not a reason to
+		// reject an otherwise qualified endpoint.
+		return 0;
+	}
+
 	uint16_t reasons = 0;
-	const auto add = [&reasons](AirmassVeAnalyzeRejectReason reason) {
-		reasons |= airmassVeAnalyzeReason(reason);
-	};
+	const auto add = [&reasons](AirmassVeAnalyzeRejectReason reason) { reasons |= airmassVeAnalyzeReason(reason); };
 
 	if (diagnostics.Fault != AirmassInjectionFault::None) {
 		reasons |= veAnalyzeReasonFromFault(diagnostics.Fault);
 	}
 
-	constexpr uint16_t fallbackFlags = BlendedTemperatureFallback | BlendedBranchFallback |
-										BlendedAuthorityUnavailable | BlendedBaroFallback | BlendedIdleFallback |
-										BlendedCorrectionFallback | BlendedMapFallback;
+	uint16_t fallbackFlags = BlendedTemperatureFallback | BlendedBranchFallback | BlendedAuthorityUnavailable |
+							 BlendedBaroFallback | BlendedIdleFallback | BlendedCorrectionFallback;
+	// Alpha-N qualification never depends on the strict MAP/native-load
+	// substitute. Keep that fallback as evidence only for endpoints that use it.
+	if (endpoint != AirmassVeAnalyzeEndpoint::AlphaN) {
+		fallbackFlags |= BlendedMapFallback;
+	}
 	if (diagnostics.Flags & fallbackFlags) {
 		add(AirmassVeAnalyzeRejectReason::Fallback);
 	}
@@ -411,8 +418,7 @@ static uint16_t getBlendedVeAnalyzeRejectReasons(
 	if (endpoint == AirmassVeAnalyzeEndpoint::None) {
 		// A valid, available authority load with no endpoint comes from a mixed
 		// authority table. Keep this distinct from unavailable input/calibration.
-		if (!(diagnostics.Flags & BlendedAuthorityUnavailable) &&
-			(diagnostics.Flags & BlendedAuthorityLoadValid)) {
+		if (!(diagnostics.Flags & BlendedAuthorityUnavailable) && (diagnostics.Flags & BlendedAuthorityLoadValid)) {
 			add(AirmassVeAnalyzeRejectReason::NonUniformAuthority);
 		}
 	} else if (endpoint == AirmassVeAnalyzeEndpoint::SpeedDensity) {
@@ -427,7 +433,7 @@ static uint16_t getBlendedVeAnalyzeRejectReasons(
 		add(AirmassVeAnalyzeRejectReason::Sensor);
 	}
 
-	if (reasons == 0 && !isBlendedVeAnalyzeResult(evaluation, diagnostics, inputs, endpoint)) {
+	if (reasons == 0) {
 		add(AirmassVeAnalyzeRejectReason::CalculationResult);
 	}
 	return reasons;
@@ -440,8 +446,7 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 	FuelPublicationCandidate candidate;
 	if (!capture.Current || (requireCurrent && !isFuelCaptureCurrent(capture))) {
 		candidate.Stale = true;
-		candidate.VeAnalyzeRejectReasons =
-				airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
+		candidate.VeAnalyzeRejectReasons = airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
 		return candidate;
 	}
 
@@ -481,9 +486,8 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			const auto candidateEndpoint =
 					getBlendedVeAnalyzeCandidateEndpoint(candidate.BlendedDiagnostics, qualifiedEndpoint);
 			candidate.VeAnalyzeCandidateEndpoint = static_cast<uint8_t>(candidateEndpoint);
-			candidate.VeAnalyzeRejectReasons =
-					getBlendedVeAnalyzeRejectReasons(
-							evaluation, candidate.BlendedDiagnostics, capture.Inputs, qualifiedEndpoint);
+			candidate.VeAnalyzeRejectReasons = getBlendedVeAnalyzeRejectReasons(
+					evaluation, candidate.BlendedDiagnostics, capture.Inputs, qualifiedEndpoint);
 			if (!evaluation.Airmass.Valid) {
 				candidate.Fault = evaluation.Fault;
 				return candidate;
@@ -493,8 +497,7 @@ calculateFuelPublication(float rpm, bool isCranking, const FuelAirmassCapture& c
 			candidate.Degraded = evaluation.Airmass.Degraded;
 			candidate.Fault = evaluation.Fault;
 			candidate.NormalizedCylinderFilling = evaluation.NormalizedFilling;
-			if (isBlendedVeAnalyzeResult(
-						evaluation, candidate.BlendedDiagnostics, capture.Inputs, qualifiedEndpoint)) {
+			if (isBlendedVeAnalyzeResult(evaluation, candidate.BlendedDiagnostics, capture.Inputs, qualifiedEndpoint)) {
 				candidate.VeAnalyzeEndpoint = static_cast<uint8_t>(qualifiedEndpoint);
 			}
 		} else {

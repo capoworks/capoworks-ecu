@@ -189,17 +189,17 @@ void Engine::updateSwitchInputs() {
 
 static uint16_t selectFirstVeAnalyzeReason(uint16_t reasons) {
 	constexpr AirmassVeAnalyzeRejectReason priority[] = {
-		AirmassVeAnalyzeRejectReason::StrategyChange,
-		AirmassVeAnalyzeRejectReason::CalibrationWrite,
-		AirmassVeAnalyzeRejectReason::NonUniformAuthority,
-		AirmassVeAnalyzeRejectReason::Configuration,
-		AirmassVeAnalyzeRejectReason::Sensor,
-		AirmassVeAnalyzeRejectReason::IdleVe,
-		AirmassVeAnalyzeRejectReason::Fallback,
-		AirmassVeAnalyzeRejectReason::CalculationResult,
-		AirmassVeAnalyzeRejectReason::StaleCalculation,
-		AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid,
-		AirmassVeAnalyzeRejectReason::Stabilization,
+			AirmassVeAnalyzeRejectReason::StrategyChange,
+			AirmassVeAnalyzeRejectReason::CalibrationWrite,
+			AirmassVeAnalyzeRejectReason::NonUniformAuthority,
+			AirmassVeAnalyzeRejectReason::Configuration,
+			AirmassVeAnalyzeRejectReason::Sensor,
+			AirmassVeAnalyzeRejectReason::IdleVe,
+			AirmassVeAnalyzeRejectReason::Fallback,
+			AirmassVeAnalyzeRejectReason::CalculationResult,
+			AirmassVeAnalyzeRejectReason::StaleCalculation,
+			AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid,
+			AirmassVeAnalyzeRejectReason::Stabilization,
 	};
 
 	for (const auto reason : priority) {
@@ -225,8 +225,7 @@ void EngineState::resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration, uint
 void EngineState::latchVeAnalyzeDiagnostics(
 		uint16_t reasonMask, uint32_t calibrationGeneration, uint32_t calculationEpoch) {
 	const auto alreadyInvalid = airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::SessionAlreadyInvalid);
-	veAnalyzeDiagnostics.CurrentRejectReasons =
-			reasonMask | (veAnalyzeSessionInvalid ? alreadyInvalid : 0);
+	veAnalyzeDiagnostics.CurrentRejectReasons = reasonMask | (veAnalyzeSessionInvalid ? alreadyInvalid : 0);
 	veAnalyzeDiagnostics.CalibrationGeneration = calibrationGeneration;
 	veAnalyzeDiagnostics.CalculationEpoch = calculationEpoch;
 	veAnalyzeSessionInvalid = true;
@@ -257,6 +256,19 @@ void EngineState::observeVeAnalyzeCandidate(
 	}
 }
 
+void EngineState::recordVeAnalyzeDiscardedCalculationLocked(uint32_t capturedCalibrationGeneration) {
+	auto& diagnostics = veAnalyzeDiscardedCalculationDiagnostics;
+	if (diagnostics.Count < UINT16_MAX) {
+		++diagnostics.Count;
+	}
+	diagnostics.LastReason = airmassVeAnalyzeReason(AirmassVeAnalyzeRejectReason::StaleCalculation);
+	diagnostics.LastCalibrationGeneration = capturedCalibrationGeneration;
+}
+
+void EngineState::resetVeAnalyzeDiscardedCalculationDiagnostics() {
+	veAnalyzeDiscardedCalculationDiagnostics = {};
+}
+
 void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
 	output.blendedVeAnalyzeCandidateEndpoint = veAnalyzeDiagnostics.CandidateEndpoint;
 	output.blendedVeAnalyzeFirstReason = veAnalyzeDiagnostics.FirstRejectReason;
@@ -265,14 +277,18 @@ void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
 	uint16_t elapsedSeconds = 0;
 	if (veAnalyzeDiagnostics.FirstRejectReason != 0) {
 		const int64_t elapsed = getTimeNowS() - veAnalyzeDiagnostics.FirstLatchTimeSeconds;
-		elapsedSeconds =
-				elapsed <= 0 ? 0 : elapsed > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(elapsed);
+		elapsedSeconds = elapsed <= 0 ? 0 : elapsed > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(elapsed);
 	}
 	output.blendedVeAnalyzeLatchedTime = elapsedSeconds;
 	output.blendedVeAnalyzeSessionGeneration = veAnalyzeDiagnostics.SessionGeneration;
 	output.blendedVeAnalyzeCalibrationGeneration = veAnalyzeDiagnostics.CalibrationGeneration;
 	output.blendedVeAnalyzeCalculationEpoch = veAnalyzeDiagnostics.CalculationEpoch;
 	output.blendedVeAnalyzeEndpoint = veAnalyzeSessionInvalid ? 0 : veAnalyzeEndpoint;
+
+	const auto& discarded = veAnalyzeDiscardedCalculationDiagnostics;
+	output.blendedVeAnalyzeDiscardedCount = discarded.Count;
+	output.blendedVeAnalyzeLastDiscardedReason = discarded.LastReason;
+	output.blendedVeAnalyzeLastDiscardedGeneration = discarded.LastCalibrationGeneration;
 }
 
 static void resetOwnedAirmassRuntimeState(Engine& owner) {
@@ -281,6 +297,7 @@ static void resetOwnedAirmassRuntimeState(Engine& owner) {
 	auto& state = owner.engineState;
 	state.resetVeAnalyzeDiagnostics(
 			owner.airmassCalibration.Generation, owner.airmassInjectionState.publicationEpoch());
+	state.resetVeAnalyzeDiscardedCalculationDiagnostics();
 
 	auto& output = owner.outputChannels;
 	state.exportVeAnalyzeDiagnostics(output);

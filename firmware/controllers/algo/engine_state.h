@@ -27,19 +27,29 @@ struct VeAnalyzeLatchDiagnostics {
 	int64_t FirstLatchTimeSeconds = 0;
 };
 
+// Diagnostic-only evidence for composite calculations discarded at publication.
+// This domain never participates in qualification, admission, or fuel output.
+struct VeAnalyzeDiscardedCalculationDiagnostics {
+	uint16_t Count = 0;
+	uint16_t LastReason = 0;
+	uint32_t LastCalibrationGeneration = 0;
+};
+
 class EngineState : public engine_state_s {
 public:
 	EngineState();
 	void periodicFastCallback();
 	void updateTChargeK(float rpm, float tps);
 	void resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration = 0, uint32_t calculationEpoch = 0);
-	void latchVeAnalyzeDiagnostics(
-			uint16_t reasonMask, uint32_t calibrationGeneration, uint32_t calculationEpoch);
+	void latchVeAnalyzeDiagnostics(uint16_t reasonMask, uint32_t calibrationGeneration, uint32_t calculationEpoch);
 	void observeVeAnalyzeCandidate(
 			uint8_t candidateEndpoint,
 			uint16_t rejectReasonMask,
 			uint32_t calibrationGeneration,
 			uint32_t calculationEpoch);
+	// Caller must hold the publication state's critical section.
+	void recordVeAnalyzeDiscardedCalculationLocked(uint32_t capturedCalibrationGeneration);
+	void resetVeAnalyzeDiscardedCalculationDiagnostics();
 	void exportVeAnalyzeDiagnostics(output_channels_s& output) const;
 
 	/**
@@ -82,6 +92,7 @@ public:
 	bool veAnalyzeSessionInvalid = false;
 	uint8_t veAnalyzeEndpoint = 0;
 	VeAnalyzeLatchDiagnostics veAnalyzeDiagnostics;
+	VeAnalyzeDiscardedCalculationDiagnostics veAnalyzeDiscardedCalculationDiagnostics;
 
 	/**
 	 * Raw fuel injection duration produced by current fuel algorithm, without any correction

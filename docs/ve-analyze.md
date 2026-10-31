@@ -22,7 +22,14 @@ a branch was identifiable but the current calculation did not qualify.
 first rejects a result. `blendedVeAnalyzeRejectReasons` is the current bitmask;
 after a valid candidate arrives in an already-invalid session it contains
 `SessionAlreadyInvalid`. `blendedVeAnalyzeLatchedTime` is the whole number of
-seconds since the first cause, saturated at 65535.
+seconds since the first cause, saturated at 65535. Normal status export refreshes
+this elapsed time even when no new fuel publication succeeds.
+
+Qualification reasons are emitted only when the existing qualification predicate
+does not accept the candidate. A fallback that is irrelevant to the endpoint does
+not reject it: in particular, an otherwise valid Alpha-N result remains qualified
+when only the strict MAP/native-load substitute falls back. This rule does not
+weaken the whole-authority-map uniformity check.
 
 Reason bits:
 
@@ -43,13 +50,28 @@ Reason bits:
 The first-reason priority is strategy change, calibration write, nonuniform
 authority, configuration, sensor, idle VE, fallback, calculation result, stale
 calculation, then session-already-invalid. A running calibration write latches
-`CalibrationWrite` even when the next valid candidate is otherwise usable.
+`CalibrationWrite` even when a VE or Alpha-N table cell changed to the same value,
+the authority map remains uniformly valid, and the next valid candidate is
+otherwise usable. The write does not by itself change accepted fuel numbers.
 
 `blendedVeAnalyzeCalibrationGeneration`, `blendedVeAnalyzeCalculationEpoch`, and
 `blendedVeAnalyzeSessionGeneration` distinguish a calibration write, an
 individual calculation, and the lifetime of a VE Analyze session. A session is
 cleared by the existing owner Engine reset or synchronization-loss path, and by
-existing stopped-engine or strategy-reset transitions.
+existing stopped-engine or strategy-reset transitions. A calibration write keeps
+the existing behavior of clearing `veAnalyzeSessionStarted` and invalidating the
+session.
+
+`blendedVeAnalyzeDiscardedCount`, `blendedVeAnalyzeLastDiscardedReason`, and
+`blendedVeAnalyzeLastDiscardedGeneration` are a separate discarded-calculation
+domain. They record composite calculations rejected at the publication commit
+when the captured calculation is no longer current. `LastDiscardedReason` is the
+`StaleCalculation` bit, the count saturates at 65535, and the generation is the
+calibration generation captured by the discarded calculation. This evidence is
+updated under the publication critical section. It never latches the VE Analyze
+qualification reason, replaces accepted candidate or endpoint evidence, or changes
+accepted fuel output. It persists across later valid publications until the owner
+Engine reset or synchronization-loss reset.
 
 Qualification describes model idoneity, not lambda validity. A valid lambda
 reading does not make a blended authority endpoint suitable for VE analysis.

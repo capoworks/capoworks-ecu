@@ -357,6 +357,11 @@ void EngineState::periodicFastCallback() {
 				publicationCurrent = false;
 			}
 		}
+		if (!publicationCurrent && fuelCapture.Standalone && fuelCapture.Strategy == LM_SD_ALPHA_N) {
+			// Keep discarded calculations in their own evidence domain. They do
+			// not own qualification faults or any accepted fuel output.
+			engine->engineState.recordVeAnalyzeDiscardedCalculationLocked(fuelCapture.CalibrationGeneration);
+		}
 		if (publicationCurrent) {
 			if (fuelPublicationValid) {
 #ifdef MODULE_CYLINDER_FUEL_TRIM

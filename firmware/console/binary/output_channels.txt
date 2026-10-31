@@ -334,4 +334,7 @@ struct_no_prefix output_channels_s
 	uint32_t blendedVeAnalyzeSessionGeneration;VE Analyze: session generation;"", 1, 0, 0, 0, 0
 	uint32_t blendedVeAnalyzeCalibrationGeneration;VE Analyze: calibration generation;"", 1, 0, 0, 0, 0
 	uint32_t blendedVeAnalyzeCalculationEpoch;VE Analyze: calculation epoch;"", 1, 0, 0, 0, 0
+	uint16_t blendedVeAnalyzeDiscardedCount;VE Analyze: discarded calculation count;"", 1, 0, 0, 65535, 0
+	uint16_t blendedVeAnalyzeLastDiscardedReason;VE Analyze: last discarded calculation reason;"code", 1, 0, 0, 1024, 0
+	uint32_t blendedVeAnalyzeLastDiscardedGeneration;VE Analyze: last discarded calculation generation;"", 1, 0, 0, 0, 0
 end_struct
