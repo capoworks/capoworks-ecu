@@ -85,6 +85,7 @@ TESTS_SRC_CPP = \
 	tests/test_cpp_memory_layout.cpp \
 	tests/test_pid.cpp \
 	tests/test_ve_analyze_gate.cpp \
+	tests/test_ve_analyze_fuel_events.cpp \
 	tests/test_accel_enrichment.cpp \
 	tests/test_gpiochip.cpp \
 	tests/test_deadband.cpp \
