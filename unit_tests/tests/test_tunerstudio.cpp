@@ -156,9 +156,19 @@ TEST(VeAnalyzeSampleGateIntegration, freshStationarySamplesBecomeReadyAndExportF
 	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTpsRateAbs));
 	EXPECT_NEAR(0, engine->outputChannels.veAnalyzeTpsRateAbs, 0.001f);
 	EXPECT_GT(engine->outputChannels.veAnalyzeAcceptedObservations, 0u);
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTimeSinceMovement));
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTimeSinceCorrection));
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeRecoveryRemaining));
 	EXPECT_FLOAT_EQ(655.35f, engine->outputChannels.veAnalyzeTimeSinceMovement);
 	EXPECT_FLOAT_EQ(655.35f, engine->outputChannels.veAnalyzeTimeSinceCorrection);
 	EXPECT_FLOAT_EQ(0, engine->outputChannels.veAnalyzeRecoveryRemaining);
+
+	const uint32_t acceptedBefore = engine->outputChannels.veAnalyzeAcceptedObservations;
+	const uint32_t rejectedBefore = engine->outputChannels.veAnalyzeRejectedObservations;
+	fixture.observe(20);
+	fixture.exportState();
+	EXPECT_EQ(acceptedBefore + 1, engine->outputChannels.veAnalyzeAcceptedObservations);
+	EXPECT_EQ(rejectedBefore, engine->outputChannels.veAnalyzeRejectedObservations);
 }
 
 TEST(VeAnalyzeSampleGateIntegration, synchronizationLossClearsAndRequiresWindowHold) {
@@ -190,12 +200,20 @@ TEST(VeAnalyzeSampleGateIntegration, synchronizationLossClearsAndRequiresWindowH
 TEST(VeAnalyzeSampleGateIntegration, fuelCorrectionTailRenewsWhileActive) {
 	VeAnalyzeIntegrationFixture fixture;
 	fixture.warmToReady();
+	fixture.exportState();
+	const uint32_t acceptedBefore = engine->outputChannels.veAnalyzeAcceptedObservations;
+	const uint32_t rejectedBefore = engine->outputChannels.veAnalyzeRejectedObservations;
 
 	engine->engineState.tpsAccelEnrich = 0.02f;
 	fixture.observe(20);
 	fixture.exportState();
+	EXPECT_EQ(acceptedBefore, engine->outputChannels.veAnalyzeAcceptedObservations);
+	EXPECT_EQ(rejectedBefore + 1, engine->outputChannels.veAnalyzeRejectedObservations);
 	EXPECT_FALSE(engine->outputChannels.veAnalyzeSampleReady);
 	EXPECT_NEAR(1.5f, engine->outputChannels.veAnalyzeRecoveryRemaining, 0.01f);
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTimeSinceMovement));
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTimeSinceCorrection));
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeRecoveryRemaining));
 	expectGateReason(engine->outputChannels, VeAnalyzeGateReason::FuelCorrectionRecovery);
 
 	fixture.feed(250);
@@ -219,14 +237,22 @@ TEST(VeAnalyzeSampleGateIntegration, fuelCorrectionTailRenewsWhileActive) {
 TEST(VeAnalyzeSampleGateIntegration, cutTailRenewsAndUsesCutHold) {
 	VeAnalyzeIntegrationFixture fixture;
 	fixture.warmToReady();
+	fixture.exportState();
+	const uint32_t acceptedBefore = engine->outputChannels.veAnalyzeAcceptedObservations;
+	const uint32_t rejectedBefore = engine->outputChannels.veAnalyzeRejectedObservations;
 	auto& limpManager = engine->module<LimpManager>().unmock();
 
 	engineConfiguration->isInjectionEnabled = false;
 	limpManager.updateState(1500, getTimeNowNt());
 	fixture.observe(20);
 	fixture.exportState();
+	EXPECT_EQ(acceptedBefore, engine->outputChannels.veAnalyzeAcceptedObservations);
+	EXPECT_EQ(rejectedBefore + 1, engine->outputChannels.veAnalyzeRejectedObservations);
 	EXPECT_FALSE(engine->outputChannels.veAnalyzeSampleReady);
 	EXPECT_NEAR(2.0f, engine->outputChannels.veAnalyzeRecoveryRemaining, 0.01f);
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTimeSinceMovement));
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeTimeSinceCorrection));
+	EXPECT_TRUE(std::isfinite(engine->outputChannels.veAnalyzeRecoveryRemaining));
 	expectGateReason(engine->outputChannels, VeAnalyzeGateReason::FuelCutRecovery);
 	expectOperatingReason(engine->outputChannels, VeAnalyzeOperatingReason::FuelCut);
 

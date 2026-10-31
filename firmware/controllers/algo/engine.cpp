@@ -19,6 +19,7 @@
 #include "speed_density.h"
 #include "init.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "perf_trace.h"
@@ -219,16 +220,25 @@ static void saturatingIncrement(uint32_t& value) {
 	}
 }
 
-static uint16_t saturatedCentiseconds(uint32_t milliseconds) {
-	const uint64_t centiseconds = (static_cast<uint64_t>(milliseconds) + 5) / 10;
-	return centiseconds > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(centiseconds);
+static float saturatedSeconds(uint32_t milliseconds) {
+	constexpr float maximumSeconds = 655.35f;
+	const float seconds = static_cast<float>(milliseconds) / 1000.0f;
+	return std::isfinite(seconds) ? std::min(seconds, maximumSeconds) : maximumSeconds;
 }
 
 void EngineState::updateVeAnalyzeSampleGate(efitick_t nowNt) {
 #if EFI_ENGINE_CONTROL
-	const auto tps = Sensor::get(SensorType::Tps1);
+	bool tpsFresh = false;
+	const SensorResult tps = [&]() {
+		// Keep the sampled value, its publication marker, and the ECU observation
+		// marker coherent when an ADC update or gate reset runs on another thread.
+		chibios_rt::CriticalSectionLocker csl;
+		const auto reading = Sensor::get(SensorType::Tps1);
+		tpsFresh = Sensor::hasUpdatedAfter(SensorType::Tps1, lastTpsObservationTick);
+		lastTpsObservationTick = nowNt;
+		return reading;
+	}();
 	const auto rpm = Sensor::get(SensorType::Rpm);
-	const bool tpsFresh = Sensor::hasUpdatedAfter(SensorType::Tps1, lastTpsObservationTick);
 
 	uint32_t operatingReasons = 0;
 	if (!rpm.Valid || !std::isfinite(rpm.Value) || rpm.Value <= 0) {
@@ -280,15 +290,16 @@ void EngineState::updateVeAnalyzeSampleGate(efitick_t nowNt) {
 
 	{
 		chibios_rt::CriticalSectionLocker csl;
-		if (veAnalyzeGate.updateTps(nowNt, tpsPercent, tps.Valid, tpsFresh)) {
+		(void)veAnalyzeGate.updateTps(nowNt, tpsPercent, tps.Valid, tpsFresh);
+		veAnalyzeGate.observeTransient(nowNt, VeAnalyzeTransient::FuelCorrection, correctionActive);
+		veAnalyzeGate.observeTransient(nowNt, VeAnalyzeTransient::FuelCut, cutActive);
+		veAnalyzeOperatingReasons = operatingReasons;
+		const auto gateSnapshot = veAnalyzeGate.snapshot(nowNt);
+		if (gateSnapshot.Ready && operatingReasons == 0) {
 			saturatingIncrement(veAnalyzeAcceptedObservations);
 		} else {
 			saturatingIncrement(veAnalyzeRejectedObservations);
 		}
-		lastTpsObservationTick = nowNt;
-		veAnalyzeGate.observeTransient(nowNt, VeAnalyzeTransient::FuelCorrection, correctionActive);
-		veAnalyzeGate.observeTransient(nowNt, VeAnalyzeTransient::FuelCut, cutActive);
-		veAnalyzeOperatingReasons = operatingReasons;
 	}
 #else
 	(void)nowNt;
@@ -391,9 +402,9 @@ void EngineState::exportVeAnalyzeDiagnostics(output_channels_s& output) const {
 	output.veAnalyzeRateValid = gateSnapshot.RateValid;
 	output.veAnalyzeSampleReady = gateSnapshot.Ready && veAnalyzeOperatingReasons == 0;
 	output.veAnalyzeSampleRejectReasons = gateReasons;
-	output.veAnalyzeTimeSinceMovement = saturatedCentiseconds(gateSnapshot.MillisecondsSinceMovement);
-	output.veAnalyzeTimeSinceCorrection = saturatedCentiseconds(gateSnapshot.MillisecondsSinceCorrection);
-	output.veAnalyzeRecoveryRemaining = saturatedCentiseconds(gateSnapshot.HoldRemainingMilliseconds);
+	output.veAnalyzeTimeSinceMovement = saturatedSeconds(gateSnapshot.MillisecondsSinceMovement);
+	output.veAnalyzeTimeSinceCorrection = saturatedSeconds(gateSnapshot.MillisecondsSinceCorrection);
+	output.veAnalyzeRecoveryRemaining = saturatedSeconds(gateSnapshot.HoldRemainingMilliseconds);
 	output.veAnalyzeAcceptedObservations = veAnalyzeAcceptedObservations;
 	output.veAnalyzeRejectedObservations = veAnalyzeRejectedObservations;
 }

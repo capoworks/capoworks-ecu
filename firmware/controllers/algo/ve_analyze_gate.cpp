@@ -24,7 +24,7 @@ constexpr uint8_t TransientActive = 2;
 constexpr uint8_t InactiveTransientStates = 0x55;
 
 int64_t secondsToNt(float seconds) {
-	return static_cast<int64_t>(USF2NT(seconds * US_PER_SECOND_F));
+	return static_cast<int64_t>(std::ceil(static_cast<double>(seconds) * US_PER_SECOND_F * US_TO_NT_MULTIPLIER));
 }
 
 int64_t saturatingAdd(efitick_t nowNt, int64_t durationNt) {
@@ -79,8 +79,8 @@ uint32_t remainingMilliseconds(efitick_t nowNt, int64_t untilNt) {
 	}
 
 	const uint64_t remainingNt = static_cast<uint64_t>(untilNt) - static_cast<uint64_t>(nowNt.count);
-	const uint64_t remainingUs = remainingNt / static_cast<uint64_t>(US_TO_NT_MULTIPLIER);
-	const uint64_t milliseconds = (remainingUs + 999) / 1000;
+	const uint64_t ticksPerMillisecond = static_cast<uint64_t>(US_TO_NT_MULTIPLIER) * 1000;
+	const uint64_t milliseconds = remainingNt / ticksPerMillisecond + (remainingNt % ticksPerMillisecond != 0 ? 1 : 0);
 	const uint64_t maximum = std::numeric_limits<uint32_t>::max();
 	return milliseconds > maximum ? static_cast<uint32_t>(maximum) : static_cast<uint32_t>(milliseconds);
 }
@@ -448,12 +448,12 @@ VeAnalyzeGateSnapshot VeAnalyzeGate::snapshot(efitick_t nowNt) const {
 		}
 	}
 
-	if (m_holdUntilNt > nowNt.count) {
+	const bool holdActive = m_holdUntilNt > nowNt.count;
+	if (holdActive) {
 		result.HoldRemainingMilliseconds = remainingMilliseconds(nowNt, m_holdUntilNt);
 		result.Reasons |= m_holdReasons;
 	}
 
-	result.Ready = result.TpsValid && result.RateValid && result.HoldRemainingMilliseconds == 0 && timestampValid &&
-				   !hasActiveExternalCondition;
+	result.Ready = result.TpsValid && result.RateValid && !holdActive && timestampValid && !hasActiveExternalCondition;
 	return result;
 }

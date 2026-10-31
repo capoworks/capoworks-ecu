@@ -86,9 +86,13 @@ reading does not make a blended authority endpoint suitable for VE analysis.
 TPS is read with `Sensor::get(Tps1)` at the ECU fast callback rate. A valid reading is
 not clamped to the normal TPS percentile range. A new history sample is accepted only
 when the `Tps1` provider reports a timestamp newer than the previous fast observation;
-providers without timestamp support fail closed. A cached valid value can remain usable
-for at most the configured 50 ms sample tolerance. Invalid TPS is never converted into a
-valid zero-percent sample.
+providers without timestamp support fail closed. The sampled value, provider freshness,
+and previous-observation marker are read under the ECU critical section so an ADC update
+cannot pair an old value with new freshness. History timestamps are approximate fast-loop
+observation times rather than exact ADC conversion times. A cached valid value can remain
+usable for at most the configured 50 ms sample tolerance. Invalid TPS is never converted
+into a valid zero-percent sample. This does not change the separate 20 Hz
+acceleration-enrichment sampling path.
 
 The initial firmware policy is experimental and conservative:
 
@@ -117,11 +121,12 @@ invalid-fuel-calculation conditions keep the gate closed for as long as they per
 to calculate it. `veAnalyzeSampleReady` additionally requires recovery holds and every
 operating exclusion to clear. `veAnalyzeSampleRejectReasons` combines the sampler and
 operating reason bits. Time since movement, time since correction, and remaining
-recovery are exported in seconds with saturation. `veAnalyzeAcceptedObservations` and
-`veAnalyzeRejectedObservations` count ECU fast observations, not accepted
-TunerStudio/VE Analyze table cells. Resetting the owner engine or losing trigger
-synchronization clears these counters and requires a fresh TPS window plus the reset
-hold.
+recovery are exported as physical seconds with saturation at 655.35 s.
+`veAnalyzeAcceptedObservations` and `veAnalyzeRejectedObservations` classify each ECU
+fast observation after applying the sample gate and operating exclusions. They do not
+apply composite-model qualification, validate lambda, or represent client/TunerStudio
+acceptance of a table cell. Resetting the owner engine or losing trigger synchronization
+clears these counters and requires a fresh TPS window plus the reset hold.
 
 The existing gate reason bits are:
 
@@ -157,11 +162,14 @@ The operating exclusions above those bits are:
 
 Model-qualification and lambda validity are separate concerns. A ready sample gate does
 not qualify a mixed SD + Alpha-N authority map, validate lambda, or guarantee that
-TunerStudio will accept a cell. TunerStudio 3.3.01 automatic ECU writes are a supported
-user workflow, but this firmware change does not provide a client handshake or change
-the PR1 latch. The latch remains immutable for its session.
+TunerStudio will accept a cell. TunerStudio 3.3.01 automatic ECU writes are a user-target
+workflow, not a capability already supported or validated by this firmware change for
+continuous VE analysis. This change provides no client handshake and does not change the
+PR1 latch: an ordinary running calibration write still invalidates the session, and the
+latch remains immutable until an existing session-boundary transition.
 
 For recovery, correct the reported calibration, authority, fallback, idle-VE, or
 sensor cause, then perform the normal engine stop/restart or synchronization
-loss that starts a new session. Firmware does not automatically reset client
-history, force endpoint `2`, or expose a rearm command.
+loss that starts a new session. Firmware does not automatically reset client history,
+force endpoint `2`, expose a rearm command, rearm on a timer alone, or guarantee physical
+alignment of analysis samples with lambda measurement.

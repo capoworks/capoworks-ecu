@@ -223,6 +223,32 @@ TEST(VeAnalyzeGate, RateEqualToThresholdDoesNotTriggerStrictGreaterThanGate) {
 	EXPECT_FALSE(snapshot.hasReason(VeAnalyzeGateReason::TpsMovementRecovery));
 }
 
+TEST(VeAnalyzeGate, SubMicrosecondPositiveHoldTickCannotOpenEarly) {
+	VeAnalyzeGateConfig gatePolicy = testPolicy();
+	gatePolicy.QuietHoldSeconds = 1.0f;
+	GateFixture fixture(gatePolicy);
+	fixture.Gate.reset(timeUs(0));
+
+	const efitick_t holdEndNt{US2NT(1'000'000).count()};
+	const efitick_t lastTickBeforeHoldEnd{holdEndNt.count - 1};
+	int64_t nowUs = 0;
+	while (nowUs + FastPeriod < US_PER_SECOND) {
+		EXPECT_TRUE(fixture.feed(nowUs, 20.0f));
+		nowUs += FastPeriod;
+	}
+
+	ASSERT_TRUE(fixture.Gate.updateTps(lastTickBeforeHoldEnd, 20.0f, true, true));
+	auto before = fixture.Gate.snapshot(lastTickBeforeHoldEnd);
+	EXPECT_FALSE(before.Ready);
+	EXPECT_EQ(1u, before.HoldRemainingMilliseconds);
+	EXPECT_TRUE(before.hasReason(VeAnalyzeGateReason::ResetRecovery));
+
+	ASSERT_TRUE(fixture.Gate.updateTps(holdEndNt, 20.0f, true, true));
+	auto atBoundary = fixture.Gate.snapshot(holdEndNt);
+	EXPECT_TRUE(atBoundary.Ready);
+	EXPECT_EQ(0u, atBoundary.HoldRemainingMilliseconds);
+}
+
 TEST(VeAnalyzeGate, DuplicateAndRegressedTimestampsCannotManufactureSamples) {
 	GateFixture fixture;
 	fixture.Gate.reset(timeUs(0));
