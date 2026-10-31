@@ -33,28 +33,49 @@ float IFuelComputer::getTChargeCoefficient(float rpm, float tps) {
 				engineConfiguration->tChargeMaxRpmMaxTps,
 				tps);
 
-		return interpolateMsg("Kcurr", rpmMin, minRpmKcurrentTPS, rpmMax, maxRpmKcurrentTPS, rpm);
+		const float coefficient = interpolateMsg("Kcurr", rpmMin, minRpmKcurrentTPS, rpmMax, maxRpmKcurrentTPS, rpm);
+		clearThermalCoefficientInput();
+		return coefficient;
 	}
 
 	constexpr floatms_t gramsPerMsToKgPerHour = (3600.0f * 1000.0f) / 1000.0f;
 	// We're actually using an 'old' airMass calculated for the previous cycle, but it's ok, we're not having any
 	// self-excitaton issues
-	floatms_t airMassForEngine = sdAirMassInOneCylinder * engine->engineState.cylinderCount;
+	floatms_t airMassForEngine;
+	uint32_t sourceGeneration;
+	bool sourceValid;
+	{
+		// The coefficient reads the prior accepted publication. Capture its mass
+		// and stamp together so diagnostics cannot pair an old mass with a newer
+		// publication identity.
+		chibios_rt::CriticalSectionLocker csl;
+		airMassForEngine = sdAirMassInOneCylinder * engine->engineState.cylinderCount;
+		sourceGeneration = thermalProvenance.AcceptedCalibrationGeneration;
+		sourceValid = thermalProvenance.AcceptedValid;
+	}
 	// airMass is in grams per 1 cycle for 1 cyl. Convert it to airFlow in kg/h for the engine.
 	// And if the engine is stopped (0 rpm), then airFlow is also zero (avoiding NaN division)
 	floatms_t airFlow = (rpm == 0) ? 0 : airMassForEngine * gramsPerMsToKgPerHour / getEngineCycleDuration(rpm);
 
 	if (engineConfiguration->tChargeMode == TCHARGE_MODE_AIR_INTERP) {
 		// just interpolate between user-specified min and max coefs, based on the max airFlow value
-		return interpolateClamped(
+		const float coefficient = interpolateClamped(
 				0.0,
 				engineConfiguration->tChargeAirCoefMin,
 				engineConfiguration->tChargeAirFlowMax,
 				engineConfiguration->tChargeAirCoefMax,
 				airFlow);
+		recordThermalCoefficientInput(
+				airFlow, sourceGeneration, sourceValid && std::isfinite(airFlow), TCHARGE_MODE_AIR_INTERP);
+		return coefficient;
 	} else if (engineConfiguration->tChargeMode == TCHARGE_MODE_AIR_INTERP_TABLE) {
-		return interpolate2d(airFlow, engineConfiguration->tchargeBins, engineConfiguration->tchargeValues);
+		const float coefficient =
+				interpolate2d(airFlow, engineConfiguration->tchargeBins, engineConfiguration->tchargeValues);
+		recordThermalCoefficientInput(
+				airFlow, sourceGeneration, sourceValid && std::isfinite(airFlow), TCHARGE_MODE_AIR_INTERP_TABLE);
+		return coefficient;
 	} else {
+		clearThermalCoefficientInput();
 		firmwareError("Unexpected tChargeMode: %d", engineConfiguration->tChargeMode);
 		return 0;
 	}
@@ -71,9 +92,11 @@ temperature_t IFuelComputer::getTCharge(float rpm, float tps) {
 	// Without either valid, return 0C.  It's wrong, but it'll pretend to be nice and dense, so at least you won't go
 	// lean.
 	if (!iat && !clt) {
+		clearThermalCoefficientInput();
 		return 0;
 	} else if (!clt && iat) {
 		// Intake temperature will almost always be colder (richer) than CLT - use that
+		clearThermalCoefficientInput();
 		return iat.Value;
 	} else if (!iat && clt) {
 		// Without valid intake temperature, assume intake temp is 0C, and interpolate anyway
@@ -104,4 +127,21 @@ temperature_t IFuelComputer::getTCharge(float rpm, float tps) {
 	}
 
 	return Tcharge;
+}
+
+void IFuelComputer::clearThermalCoefficientInput() {
+	chibios_rt::CriticalSectionLocker csl;
+	thermalProvenance.CoefficientAirflowKgPerHour = 0;
+	thermalProvenance.CoefficientSourceGeneration = 0;
+	thermalProvenance.CoefficientAirflowValid = false;
+	thermalProvenance.CoefficientMode = static_cast<uint8_t>(engineConfiguration->tChargeMode);
+}
+
+void IFuelComputer::recordThermalCoefficientInput(
+		float airflowKgPerHour, uint32_t sourceGeneration, bool airflowValid, tChargeMode_e mode) {
+	chibios_rt::CriticalSectionLocker csl;
+	thermalProvenance.CoefficientAirflowKgPerHour = std::isfinite(airflowKgPerHour) ? airflowKgPerHour : 0;
+	thermalProvenance.CoefficientSourceGeneration = sourceGeneration;
+	thermalProvenance.CoefficientAirflowValid = airflowValid;
+	thermalProvenance.CoefficientMode = static_cast<uint8_t>(mode);
 }

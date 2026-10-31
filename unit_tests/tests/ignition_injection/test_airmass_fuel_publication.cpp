@@ -28,6 +28,19 @@ void configureSpeedDensityFuel(EngineTestHelper& eth) {
 	setTable(config->veTable, 60);
 }
 
+void configureThermalSpeedDensityFuel(EngineTestHelper& eth) {
+	configureSpeedDensityFuel(eth);
+	constexpr float thermalInputC = 27.0f;
+	Sensor::setMockValue(SensorType::Clt, thermalInputC);
+	Sensor::setMockValue(SensorType::Iat, thermalInputC);
+	engine->engineState.sd.tCharge = thermalInputC;
+	engine->engineState.sd.tChargeK = thermalInputC + KELV;
+	engineConfiguration->tChargeMode = TCHARGE_MODE_AIR_INTERP_TABLE;
+	setLinearCurve(engineConfiguration->tchargeBins, 0, 1000, 1);
+	setArrayValues(engineConfiguration->tchargeValues, 0.5f);
+	invalidateAirmassCalibration();
+}
+
 void runFuelCalculation(EngineTestHelper& eth) {
 	eth.engine.periodicFastCallback();
 }
@@ -268,6 +281,128 @@ TEST(AirmassFuelPublication, CurrentCorrectionFailureClearsEverythingAndRecovers
 	EXPECT_TRUE(engine->airmassInjectionState.allowInjection());
 	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
 	EXPECT_GT(engine->cylinders[0].getInjectionMass(), 0);
+}
+
+TEST(AirmassFuelPublication, ThermalCoefficientUsesPrecedingAcceptedAirmassThenAdvances) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	configureThermalSpeedDensityFuel(eth);
+
+	// The first pass has no preceding accepted publication. A second steady pass
+	// establishes the source for the next temperature calculation.
+	runFuelCalculation(eth);
+	runFuelCalculation(eth);
+	ASSERT_TRUE(engine->outputChannels.thermalAcceptedAirflowValid);
+	ASSERT_TRUE(engine->outputChannels.thermalCoefficientAirflowValid);
+
+	const float precedingAirflow = engine->engineState.airflowEstimate;
+	const uint32_t precedingGeneration = engine->outputChannels.thermalAcceptedAirflowGeneration;
+	ASSERT_EQ(engine->airmassCalibration.Generation, precedingGeneration);
+	EXPECT_FLOAT_EQ(engine->fuelComputer.sdTcharge_coff, 0.5f);
+	EXPECT_EQ(static_cast<uint8_t>(TCHARGE_MODE_AIR_INTERP_TABLE), engine->outputChannels.thermalCoefficientSourceMode);
+
+	engine->airmassInjectionState.onConfigurationWrite(LM_SPEED_DENSITY, false);
+	setTable(config->veTable, 70);
+	runFuelCalculation(eth);
+
+	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
+	EXPECT_NE(precedingGeneration, engine->airmassCalibration.Generation);
+	EXPECT_EQ(precedingGeneration, engine->outputChannels.thermalCoefficientSourceGeneration)
+			<< "the coefficient must describe the publication preceding this calculation";
+	// airflowEstimate is transported at 0.1 kg/h resolution; the coefficient
+	// channel retains the unquantized local input.
+	EXPECT_NEAR(precedingAirflow, engine->outputChannels.thermalCoefficientAirflowKgPerHour, 0.2f);
+	EXPECT_EQ(engine->airmassCalibration.Generation, engine->outputChannels.thermalAcceptedAirflowGeneration);
+	EXPECT_GT(engine->engineState.airflowEstimate, precedingAirflow)
+			<< "the newly accepted VE publication advances airflow only after coefficient evaluation";
+	EXPECT_EQ(engine->airmassCalibration.Generation, engine->outputChannels.thermalFuelTemperatureGeneration);
+	EXPECT_TRUE(engine->outputChannels.thermalFuelTemperatureValid);
+	EXPECT_FLOAT_EQ(engine->engineState.sd.tChargeK, engine->outputChannels.thermalFuelTemperatureK);
+}
+
+TEST(AirmassFuelPublication, StaleThermalCandidateCannotReplaceAcceptedStamp) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	configureThermalSpeedDensityFuel(eth);
+	runFuelCalculation(eth);
+	runFuelCalculation(eth);
+
+	ASSERT_TRUE(engine->outputChannels.thermalAcceptedAirflowValid);
+	const uint32_t acceptedGeneration = engine->outputChannels.thermalAcceptedAirflowGeneration;
+	const float acceptedFuelMass = engine->cylinders[0].getInjectionMass();
+
+	invalidateAirmassCalibration();
+	bool invalidated = false;
+	engine->onAirmassCalibrationScanned = [&] {
+		if (invalidated) {
+			return;
+		}
+		invalidated = true;
+		invalidateAirmassCalibration();
+	};
+
+	runFuelCalculation(eth);
+
+	EXPECT_TRUE(invalidated);
+	EXPECT_FALSE(engine->engineState.airmassCalculationValid);
+	EXPECT_EQ(acceptedGeneration, engine->outputChannels.thermalAcceptedAirflowGeneration);
+	EXPECT_FLOAT_EQ(acceptedFuelMass, engine->cylinders[0].getInjectionMass());
+
+	engine->onAirmassCalibrationScanned = nullptr;
+	runFuelCalculation(eth);
+
+	EXPECT_TRUE(engine->engineState.airmassCalculationValid);
+	EXPECT_EQ(acceptedGeneration, engine->outputChannels.thermalCoefficientSourceGeneration);
+	EXPECT_EQ(engine->airmassCalibration.Generation, engine->outputChannels.thermalAcceptedAirflowGeneration);
+}
+
+TEST(AirmassFuelPublication, CurrentThermalFailureClearsAllUnknowns) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	configureThermalSpeedDensityFuel(eth);
+	runFuelCalculation(eth);
+	runFuelCalculation(eth);
+	ASSERT_TRUE(engine->outputChannels.thermalAcceptedAirflowValid);
+
+	engineConfiguration->globalFuelCorrection = NAN;
+	runFuelCalculation(eth);
+
+	EXPECT_FALSE(engine->outputChannels.thermalAcceptedAirflowValid);
+	EXPECT_FALSE(engine->outputChannels.thermalCoefficientAirflowValid);
+	EXPECT_FALSE(engine->outputChannels.thermalFuelTemperatureValid);
+	EXPECT_EQ(0, engine->outputChannels.thermalAcceptedAirflowGeneration);
+	EXPECT_EQ(0, engine->outputChannels.thermalCoefficientSourceGeneration);
+	EXPECT_EQ(0, engine->outputChannels.thermalFuelTemperatureGeneration);
+}
+
+TEST(AirmassFuelPublication, ReconstructedOwnerStartsWithInvalidThermalProvenance) {
+	{
+		EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+		configureThermalSpeedDensityFuel(eth);
+		runFuelCalculation(eth);
+		runFuelCalculation(eth);
+		ASSERT_TRUE(engine->outputChannels.thermalAcceptedAirflowValid);
+	}
+
+	EngineTestHelper reconstructed(engine_type_e::TEST_ENGINE);
+	EXPECT_FALSE(reconstructed.engine.outputChannels.thermalAcceptedAirflowValid);
+	EXPECT_FALSE(reconstructed.engine.outputChannels.thermalCoefficientAirflowValid);
+	EXPECT_FALSE(reconstructed.engine.outputChannels.thermalFuelTemperatureValid);
+	EXPECT_EQ(0, reconstructed.engine.outputChannels.thermalAcceptedAirflowGeneration);
+	EXPECT_EQ(0, reconstructed.engine.outputChannels.thermalCoefficientSourceGeneration);
+	EXPECT_EQ(0, reconstructed.engine.outputChannels.thermalFuelTemperatureGeneration);
+}
+
+TEST(AirmassFuelPublication, RpmTpsThermalModeHasNoValidAirflowInput) {
+	EngineTestHelper eth(engine_type_e::TEST_ENGINE);
+	configureSpeedDensityFuel(eth);
+	engineConfiguration->tChargeMode = TCHARGE_MODE_RPM_TPS;
+	invalidateAirmassCalibration();
+
+	runFuelCalculation(eth);
+
+	EXPECT_TRUE(engine->outputChannels.thermalAcceptedAirflowValid);
+	EXPECT_FALSE(engine->outputChannels.thermalCoefficientAirflowValid);
+	EXPECT_EQ(static_cast<uint8_t>(TCHARGE_MODE_RPM_TPS), engine->outputChannels.thermalCoefficientSourceMode);
+	EXPECT_FLOAT_EQ(0, engine->outputChannels.thermalCoefficientAirflowKgPerHour);
+	EXPECT_EQ(0, engine->outputChannels.thermalCoefficientSourceGeneration);
 }
 
 TEST(AirmassFuelPublication, StandaloneSpeedDensityFallbackRemainsFueledAndRecovers) {

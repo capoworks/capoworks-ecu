@@ -389,4 +389,14 @@ struct_no_prefix output_channels_s
 	uint32_t[12 iterate] veAnalyzeFuelCylinderReasonMask;VE Analyze: cylinder fuel evidence reasons;"bits", 1, 0, 0, 0, 0
 	uint16_t[12 iterate] veAnalyzeFuelCylinderAge;VE Analyze: cylinder latest fuel evidence age;"ms", 1, 0, 0, 65535, 0
 	uint32_t[25 iterate] veAnalyzeFuelEventRejectCountByReason;VE Analyze: fuel rejection count by reason bit;"count", 1, 0, 0, 0, 0
+
+	float thermalCoefficientAirflowKgPerHour;Thermal provenance: coefficient-input airflow;"kg/h", 1, 0, 0, 0, 3
+	uint32_t thermalCoefficientSourceGeneration;Thermal provenance: coefficient-input calibration generation;"", 1, 0, 0, 0, 0
+	uint8_t thermalCoefficientAirflowValid;Thermal provenance: coefficient-input airflow valid;"", 1, 0, 0, 1, 0
+	uint8_t thermalCoefficientSourceMode;Thermal provenance: charge-temperature source mode;"code", 1, 0, 0, 2, 0
+	float thermalFuelTemperatureK;Thermal provenance: accepted fuel-candidate temperature;"K", 1, 0, 0, 0, 3
+	uint32_t thermalFuelTemperatureGeneration;Thermal provenance: fuel-candidate calibration generation;"", 1, 0, 0, 0, 0
+	uint8_t thermalFuelTemperatureValid;Thermal provenance: fuel-candidate temperature valid;"", 1, 0, 0, 1, 0
+	uint32_t thermalAcceptedAirflowGeneration;Thermal provenance: accepted airflow calibration generation;"", 1, 0, 0, 0, 0
+	uint8_t thermalAcceptedAirflowValid;Thermal provenance: accepted airflow valid;"", 1, 0, 0, 1, 0
 end_struct

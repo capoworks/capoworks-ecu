@@ -555,6 +555,36 @@ void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) con
 	}
 }
 
+void IFuelComputer::clearThermalProvenance() {
+	thermalProvenance = {};
+}
+
+void IFuelComputer::acceptThermalProvenance(
+		uint32_t calibrationGeneration, float fuelTemperatureK, bool fuelTemperatureValid) {
+	thermalProvenance.AcceptedCalibrationGeneration = calibrationGeneration;
+	thermalProvenance.AcceptedValid = true;
+	thermalProvenance.FuelTemperatureK = fuelTemperatureValid && std::isfinite(fuelTemperatureK) ? fuelTemperatureK : 0;
+	thermalProvenance.FuelTemperatureCalibrationGeneration = calibrationGeneration;
+	thermalProvenance.FuelTemperatureValid = fuelTemperatureValid && std::isfinite(fuelTemperatureK);
+}
+
+void IFuelComputer::exportThermalProvenance(output_channels_s& output) const {
+	output.thermalAcceptedAirflowGeneration =
+			thermalProvenance.AcceptedValid ? thermalProvenance.AcceptedCalibrationGeneration : 0;
+	output.thermalAcceptedAirflowValid = thermalProvenance.AcceptedValid;
+
+	output.thermalCoefficientAirflowKgPerHour =
+			thermalProvenance.CoefficientAirflowValid ? thermalProvenance.CoefficientAirflowKgPerHour : 0;
+	output.thermalCoefficientSourceGeneration = thermalProvenance.CoefficientSourceGeneration;
+	output.thermalCoefficientAirflowValid = thermalProvenance.CoefficientAirflowValid;
+	output.thermalCoefficientSourceMode = thermalProvenance.CoefficientMode;
+
+	output.thermalFuelTemperatureK = thermalProvenance.FuelTemperatureValid ? thermalProvenance.FuelTemperatureK : 0;
+	output.thermalFuelTemperatureGeneration =
+			thermalProvenance.FuelTemperatureValid ? thermalProvenance.FuelTemperatureCalibrationGeneration : 0;
+	output.thermalFuelTemperatureValid = thermalProvenance.FuelTemperatureValid;
+}
+
 static void resetOwnedAirmassRuntimeState(Engine& owner) {
 	owner.airmassInjectionState.onEngineStop();
 
@@ -566,6 +596,10 @@ static void resetOwnedAirmassRuntimeState(Engine& owner) {
 		}
 	}
 #endif // EFI_ENGINE_CONTROL
+	{
+		chibios_rt::CriticalSectionLocker csl;
+		owner.fuelComputer.clearThermalProvenance();
+	}
 
 	auto& state = owner.engineState;
 	const efitick_t nowNt = getTimeNowNt();
@@ -580,6 +614,7 @@ static void resetOwnedAirmassRuntimeState(Engine& owner) {
 
 	auto& output = owner.outputChannels;
 	state.exportVeAnalyzeDiagnostics(output);
+	owner.fuelComputer.exportThermalProvenance(output);
 	output.blendedStatus = static_cast<uint8_t>(owner.airmassInjectionState.status());
 	output.blendedFault = static_cast<uint8_t>(owner.airmassInjectionState.fault());
 }

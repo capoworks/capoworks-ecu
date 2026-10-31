@@ -5,6 +5,7 @@
 #pragma once
 
 class ValueProvider3D;
+struct output_channels_s;
 
 #include "rusefi_types.h"
 #include "fuel_computer_generated.h"
@@ -14,8 +15,35 @@ struct IFuelComputer : public fuel_computer_s {
 	temperature_t getTCharge(float rpm, float tps);
 	float getLoadOverride(float defaultLoad, load_override_e overrideMode) const;
 
+	// Diagnostic-only snapshots for the charge-temperature calculation. The
+	// accepted fields are updated only with a completed fuel publication, while
+	// the coefficient fields describe the preceding accepted publication used by
+	// the current charge-temperature evaluation.
+	void clearThermalProvenance();
+	void acceptThermalProvenance(uint32_t calibrationGeneration, float fuelTemperatureK, bool fuelTemperatureValid);
+	void exportThermalProvenance(output_channels_s& output) const;
+
 private:
 	float getTChargeCoefficient(float rpm, float tps);
+	void clearThermalCoefficientInput();
+	void recordThermalCoefficientInput(
+			float airflowKgPerHour, uint32_t sourceGeneration, bool airflowValid, tChargeMode_e mode);
+
+	struct ThermalProvenanceRuntime {
+		uint32_t AcceptedCalibrationGeneration = 0;
+		bool AcceptedValid = false;
+
+		float CoefficientAirflowKgPerHour = 0;
+		uint32_t CoefficientSourceGeneration = 0;
+		bool CoefficientAirflowValid = false;
+		uint8_t CoefficientMode = static_cast<uint8_t>(TCHARGE_MODE_RPM_TPS);
+
+		float FuelTemperatureK = 0;
+		uint32_t FuelTemperatureCalibrationGeneration = 0;
+		bool FuelTemperatureValid = false;
+	};
+
+	ThermalProvenanceRuntime thermalProvenance;
 };
 
 // This contains the math of the fuel model, but doesn't actually read any configuration

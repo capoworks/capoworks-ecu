@@ -48,17 +48,18 @@ Reason bits:
 | 16 | `IdleVe` | Separate idle VE was active, or the model used its idle-VE fallback. |
 | 32 | `CalculationResult` | The candidate failed validation without a more specific category. |
 | 64 | `StaleCalculation` | A superseded generation calculation was rejected. Stale candidate diagnostics are never published over accepted state. |
-| 128 | `CalibrationWrite` | A running-engine calibration mutation invalidated the session. |
+| 128 | `CalibrationWrite` | A running-engine composite `LM_SD_ALPHA_N` calibration mutation invalidated the session. |
 | 256 | `StrategyChange` | A running-engine strategy mutation invalidated the session. |
 | 512 | `SessionAlreadyInvalid` | The current candidate did not own the latch, but the session was already invalid. |
 | 1024 | `Stabilization` | Reserved; no stabilization policy is implemented. |
 
 The first-reason priority is strategy change, calibration write, nonuniform
 authority, configuration, sensor, idle VE, fallback, calculation result, stale
-calculation, then session-already-invalid. A running calibration write latches
-`CalibrationWrite` even when a VE or Alpha-N table cell changed to the same value,
-the authority map remains uniformly valid, and the next valid candidate is
-otherwise usable. The write does not by itself change accepted fuel numbers.
+calculation, then session-already-invalid. In composite `LM_SD_ALPHA_N`, a running
+calibration write latches `CalibrationWrite` even when a VE or Alpha-N table cell
+changed to the same value, the authority map remains uniformly valid, and the next
+valid candidate is otherwise usable. The write does not by itself change accepted
+fuel numbers.
 
 `blendedVeAnalyzeCalibrationGeneration`, `blendedVeAnalyzeCalculationEpoch`, and
 `blendedVeAnalyzeSessionGeneration` distinguish a calibration write, an
@@ -287,13 +288,15 @@ not qualify a mixed SD + Alpha-N authority map, validate lambda, or guarantee th
 TunerStudio will accept a cell. TunerStudio 3.3.01 automatic ECU writes are a user-target
 workflow, not a capability already supported or validated by this firmware change for
 continuous VE analysis. This change provides no client handshake and does not change the
-PR1 latch: an ordinary running calibration write still invalidates the session, and the
-latch remains immutable until an existing session-boundary transition.
+PR1 latch: in composite `LM_SD_ALPHA_N`, an ordinary running calibration write still
+invalidates the session, and the latch remains immutable until an existing
+session-boundary transition. The composite latch does not cover standalone modes; see
+[Live TunerStudio write target](#live-tunerstudio-write-target) for their limitations.
 
-For recovery, correct the reported calibration, authority, fallback, idle-VE, or
-sensor cause, then perform the normal engine stop/restart or synchronization
-loss that starts a new session. Firmware does not automatically reset client history,
-force endpoint `2`, expose a rearm command, rearm on a timer alone, or guarantee physical
+For composite recovery, correct the reported calibration, authority, fallback, idle-VE,
+or sensor cause, then perform the normal engine stop/restart or synchronization loss
+that starts a new session. Firmware does not automatically reset client history, force
+endpoint `2`, expose a rearm command, rearm on a timer alone, or guarantee physical
 alignment of analysis samples with lambda measurement.
 
 ## TunerStudio INI integration
@@ -376,3 +379,145 @@ unchanged names and layout. Their generated telemetry descriptors scale by `1000
 declare `mg`, so a raw `0.001 g` value is decoded by the client as `1 mg`.
 `wallFuelCorrectionValue` is a separate packed output that already converts grams to
 milligrams before transport; its scaling must not be applied a second time.
+
+## PR5: thermal provenance and live-write/session contract
+
+This section adds diagnostic provenance only. It does not add a production thermal
+filter, tune change, airflow formula, fuel fallback, or VE Analyze rearm policy.
+
+### Charge-temperature observation domain
+
+The fast path evaluates `updateTChargeK(rpm, tps)` before it captures airmass inputs
+and calculates the current fuel candidate. In `AIR_INTERP` and
+`AIR_INTERP_TABLE` modes, the charge-temperature coefficient consumes the previous
+accepted `sdAirMassInOneCylinder` multiplied by the current cylinder count, together
+with the current RPM and engine-cycle duration. The new `airflowEstimate` and
+`sdAirMassInOneCylinder` values are written later, only when that new fuel candidate
+is accepted. They therefore are not the airflow that fed the coefficient in the same
+callback.
+
+The following channels make that ordering observable:
+
+| Channel | Meaning |
+| --- | --- |
+| `thermalCoefficientAirflowKgPerHour` | The exact local airflow expression passed to the charge-temperature coefficient. |
+| `thermalCoefficientSourceGeneration` | The calibration generation attached to the preceding accepted airflow publication. |
+| `thermalCoefficientAirflowValid` | Whether a source publication was valid and the coefficient actually consumed a finite airflow input. |
+| `thermalCoefficientSourceMode` | The `tChargeMode_e` value used for this evaluation: `0` RPM/TPS, `1` airflow interpolation, `2` airflow table. |
+| `thermalAcceptedAirflowGeneration` | Calibration generation stamped with the currently accepted fuel publication. |
+| `thermalAcceptedAirflowValid` | Whether that accepted fuel publication exists and is valid. |
+| `thermalFuelTemperatureK` | The captured temperature supplied to the accepted standalone fuel candidate, in kelvin. |
+| `thermalFuelTemperatureGeneration` | Calibration generation captured with that fuel candidate. |
+| `thermalFuelTemperatureValid` | Whether the temperature used by the accepted candidate is available. |
+
+The accepted mass and its generation/validity are committed together under the
+existing fuel-publication critical section. Coefficient evaluation captures the prior
+mass and source generation under that same lock before applying the unchanged airflow
+operation. This prevents an old mass from being paired with a newer generation during
+diagnostic export. A stale candidate never replaces either the accepted stamp or the
+last exported accepted evidence. A current calculation failure, owner reset, or
+synchronization-loss reset clears the accepted stamp and all thermal snapshots because
+their source is then unknown or no longer live.
+
+After a calibration write, the previously accepted publication can remain live until
+its replacement is accepted. Its older generation makes that distinction explicit; it
+is not evidence that the new calibration has already propagated into thermal input.
+On the callback after a successful replacement, the coefficient source generation
+still identifies the preceding publication while `thermalAcceptedAirflowGeneration`
+and `airflowEstimate` advance to the newly accepted publication.
+
+`RPM/TPS` charge-temperature mode does not consume airflow. It exports
+`thermalCoefficientAirflowValid == 0`, generation `0`, and mode `0`; a zero airflow
+value in this case is not a valid measurement. Mode `1` or `2` with an invalid source
+stamp also exports invalid evidence rather than treating the stale scalar as current.
+
+The temperature snapshot is captured with standalone physical-model fuel inputs.
+Non-standalone legacy models do not expose an immutable temperature-input snapshot on
+this path, so the fuel-temperature provenance remains invalid for them. Existing
+`sdTcharge_coff`, `sd_tChargeK`, and `airmassTemperature` channels remain available.
+Their values do not establish a common calibration generation when read on their own.
+
+The optional charge-temperature slope, `dTcharge/dt` in C/s, is explicitly
+experimental. This change does not implement or filter that slope, and it must not be
+used to tune or alter the existing temperature rate limits.
+
+### Live TunerStudio write target
+
+TunerStudio 3.3.01 automatic ECU update is a user-target workflow. It is not a
+continuous VE Analyze workflow validated by this firmware. The local TunerStudio JAR
+artifact inspected for this contract had SHA-256
+`3ebafb867fef3722816e768879501845904f81bc5e13249c77d170e9adf61cf8`.
+Identical bytes on any user's tablet are not established, and the proprietary JAR or
+bytecode is not copied into this repository.
+
+Static bytecode inspection observed current axes and current lambda alongside
+historical VE-table, EGO, and target scalars. It also showed that rows rejected by the
+current-packet filters have already been inserted into history. An inactive
+`activeCondition` skips the sample and history insertion, but no reliable false-to-true
+transition that clears history was observed. Consequently firmware has no reliable
+client-history reset handshake, upper delay bound, or post-write watermark to key an
+automatic rearm on.
+
+The existing qualification latch is therefore preserved for composite
+`LM_SD_ALPHA_N`. For the user-target blended all-authority-100 workflow, the
+running-write branch in `AirmassInjectionState::onConfigurationWrite` is gated by
+`isComposite(m_mode)`: it records `CalibrationWrite`, clears `veAnalyzeSessionStarted`,
+and keeps the session invalid through the existing transitions. The firmware does not
+force endpoint `2`, automatically rearm after a write, or rearm on a timer alone. In
+that mode, a calibration write while the engine is running, including an ordinary VE
+table edit, can latch `CalibrationWrite`. Fueling continues once a valid replacement
+candidate is accepted; the latch prevents that candidate from silently qualifying a
+new VE Analyze session.
+
+Standalone `LM_ALPHA_N`, `LM_SPEED_DENSITY`, and `LM_REAL_MAF` do not take that latch
+branch. Their running `onConfigurationWrite` path resets qualification diagnostics and
+generation/session recovery instead. The TPS sample and fuel-event gates provide only
+per-sample or per-event evidence; they do not guarantee that the client drops
+historical rows recorded under an earlier calibration. Standalone modes are therefore
+also unsupported for continuous live-write historical-row correctness, and the
+composite latch does not protect them. No firmware-side fallback or recovery policy is
+added for those modes, and endpoint forcing and automatic rearm remain unimplemented.
+
+### Recovery procedure
+
+For the composite workflow, do not continue an automatic-write analysis after a live
+calibration write and expect the old client history or ECU qualification state to be
+reused. The same client-history uncertainty applies to standalone modes, which are not
+covered by the composite latch. The following procedure is proposed for validation:
+
+1. Finish or stop VE Analyze, then exit TunerStudio completely. A restart discards
+   process-local memory, but persisted or restored client state has not been verified.
+2. Stop the engine.
+3. Apply the desired tune while the engine is stopped.
+4. Reopen TunerStudio and reconnect to the ECU.
+5. Start a new ECU session and verify full authority/model qualification.
+6. Verify model qualification plus `veAnalyzeSampleReady == 1`,
+   `veAnalyzeRateValid == 1`, `veAnalyzeFuelEventReady == 1`, and valid lambda while
+   holding steady operating conditions before analyzing samples.
+
+This procedure is proposed for validation and is not evidence that client history was
+reset. Returning to automatic ECU writes can latch `CalibrationWrite` again.
+Continuous automatic ECU writes are not supported by this workflow.
+
+### Validation protocol
+
+Client-log validation should use a bench or safe stationary setup, synthetic
+bounded-lambda-delay cases of `0.2`, `0.5`, and `1.0` seconds, a controlled synthetic
+VE write, a short acceleration-enrichment event, a short film/wall-wetting event, and
+both lambda banks. Record matching ECU telemetry, especially the accepted and
+coefficient generations, temperature provenance, sample-gate fields, calibration
+generation, endpoint, and first/current reject reasons. Confirm that pre-write rows do
+not qualify the new session and that a completed recovery produces current,
+generation-matching data for both banks.
+
+The repository unit tests cover the deterministic ECU-side provenance sequence:
+preceding accepted airflow, a subsequent VE-only publication, stale-publication
+preservation, failure/reset invalidation, and RPM/TPS air-input invalidity. These are
+unit tests only. Real TunerStudio client behavior, physical lambda delay, hardware
+timing, and the original October 30 replay were not validated here; the replay package
+was unavailable. Static bytecode observations do not prove runtime behavior beyond the
+observed code paths, and the public product/definition documentation does not establish
+client history-reset semantics:
+
+- <https://www.efianalytics.com/TunerStudio/>
+- <https://efianalytics.com/TunerStudio/docs/EFI%20Analytics%20ECU%20Definition%20files.pdf>

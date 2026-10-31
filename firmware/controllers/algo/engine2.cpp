@@ -92,6 +92,9 @@ __attribute__((noinline)) void EngineState::completeFuelPublication(
 		float rpm,
 		bool isCranking,
 		AirmassInjectionState::CalculationToken fuelCalculation) {
+	const bool hasCapturedFuelTemperature =
+			fuelCapture.Standalone && fuelCapture.Inputs.HasPublicationContext && fuelCapture.Inputs.TemperatureValid;
+	const float candidateTemperatureK = hasCapturedFuelTemperature ? fuelCapture.Inputs.TemperatureK : 0;
 	const bool hasCurrentConsumerContext = fuelCapture.Standalone && fuelCandidate.Valid && !fuelCandidate.Stale &&
 										   fuelCandidate.ConsumerLoads.Prepared;
 	const AirmassConsumerLoadContext currentLoads(fuelCandidate.ConsumerLoads);
@@ -331,6 +334,8 @@ __attribute__((noinline)) void EngineState::completeFuelPublication(
 				shouldUpdateInjectionTiming = fuelCandidate.ShouldUpdateInjectionTiming;
 
 				engine->fuelComputer.sdAirMassInOneCylinder = fuelCandidate.SdAirMassInOneCylinder;
+				engine->fuelComputer.acceptThermalProvenance(
+						fuelCapture.CalibrationGeneration, candidateTemperatureK, hasCapturedFuelTemperature);
 				engine->fuelComputer.normalizedCylinderFilling = fuelCandidate.NormalizedCylinderFilling;
 				engine->engineState.fuelingLoad = fuelCandidate.FuelingLoad;
 				engine->engineState.ignitionLoad = fuelCandidate.IgnitionLoad;
@@ -400,6 +405,7 @@ __attribute__((noinline)) void EngineState::completeFuelPublication(
 				shouldUpdateInjectionTiming = false;
 
 				engine->fuelComputer.sdAirMassInOneCylinder = 0;
+				engine->fuelComputer.clearThermalProvenance();
 				engine->fuelComputer.normalizedCylinderFilling = 0;
 				engine->engineState.fuelingLoad = 0;
 				engine->engineState.ignitionLoad = 0;
@@ -429,6 +435,7 @@ __attribute__((noinline)) void EngineState::completeFuelPublication(
 					invalidateAirmassConsumerLoadsLocked();
 				}
 			}
+			engine->fuelComputer.exportThermalProvenance(engine->outputChannels);
 
 			engine->outputChannels.ignitionAdvance = nextIgnitionAdvance;
 			for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
