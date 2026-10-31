@@ -432,8 +432,9 @@ bool EngineState::observeVeAnalyzeFuelEventLocked(VeAnalyzeFuelEventInput input)
 	return veAnalyzeFuelEvents.observeEvent(input);
 }
 
-VeAnalyzeFuelEventSnapshot EngineState::snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const {
-	return veAnalyzeFuelEvents.snapshot(nowNt);
+const VeAnalyzeFuelEventSnapshot& EngineState::snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const {
+	veAnalyzeFuelEvents.fillSnapshot(veAnalyzeFuelEventsSnapshot, nowNt);
+	return veAnalyzeFuelEventsSnapshot;
 }
 
 void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const {
@@ -460,7 +461,7 @@ void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) con
 			sizeof(output.veAnalyzeFuelCylinderAge) / sizeof(output.veAnalyzeFuelCylinderAge[0]) == MAX_CYLINDER_COUNT);
 
 	const efitick_t nowNt = getTimeNowNt();
-	const VeAnalyzeFuelEventSnapshot snapshot = snapshotVeAnalyzeFuelEventsLocked(nowNt);
+	const VeAnalyzeFuelEventSnapshot& snapshot = snapshotVeAnalyzeFuelEventsLocked(nowNt);
 	output.veAnalyzeFuelEventReady = snapshot.Ready;
 	output.veAnalyzeFuelEventRejectReasons = snapshot.Reasons;
 	output.veAnalyzeFuelEventAttemptedCount = snapshot.AttemptedEventCount;

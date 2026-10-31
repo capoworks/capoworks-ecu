@@ -46,9 +46,9 @@ public:
 		engineConfiguration->fuelAlgorithm = LM_MOCK;
 		engineConfiguration->injectionMode = IM_SEQUENTIAL;
 		engineConfiguration->crankingInjectionMode = IM_SEQUENTIAL;
-		engine->rpmCalculator.oneDegreeUs = 100;
-		engine->engineState.injectionOffset = 0;
-		engine->engineState.shouldUpdateInjectionTiming = true;
+		eth.engine.rpmCalculator.oneDegreeUs = 100;
+		eth.engine.engineState.injectionOffset = 0;
+		eth.engine.engineState.shouldUpdateInjectionTiming = true;
 
 		for (size_t i = 0; i < 4; i++) {
 			engineConfiguration->cylinderBankSelect[i] = i < 2 ? 0 : 1;
@@ -66,22 +66,22 @@ public:
 			}
 			return std::clamp(mass * 1000.0f, 0.02f, 20.0f);
 		}));
-		engine->module<InjectorModelPrimary>().set(&primary);
-		engine->module<InjectorModelSecondary>().set(&secondary);
-		engine->module<WallFuelController>().set(&wall);
+		eth.engine.module<InjectorModelPrimary>().set(&primary);
+		eth.engine.module<InjectorModelSecondary>().set(&secondary);
+		eth.engine.module<WallFuelController>().set(&wall);
 	}
 
 	void seed(uint8_t cylinder, mass_t mass = UnscaledCycleMass, uint32_t generation = 0, bool valid = true) {
 		CylinderFuelProvenance provenance;
 		provenance.PreAeBaseFuelMass = mass;
 		provenance.AppliedAeFuelMass = 0;
-		provenance.CalibrationGeneration = generation == 0 ? engine->airmassCalibration.Generation : generation;
+		provenance.CalibrationGeneration = generation == 0 ? eth.engine.airmassCalibration.Generation : generation;
 		provenance.Valid = valid;
-		engine->cylinders[cylinder].setInjectionMassAndProvenance(mass, provenance);
+		eth.engine.cylinders[cylinder].setInjectionMassAndProvenance(mass, provenance);
 	}
 
 	void seedAll() {
-		for (uint8_t i = 0; i < engine->engineState.cylinderCount; i++) {
+		for (uint8_t i = 0; i < eth.engine.engineState.cylinderCount; i++) {
 			seed(i);
 		}
 	}
@@ -89,7 +89,7 @@ public:
 	InjectionEvent makeEvent(uint8_t firingIndex, injection_mode_e mode = IM_SEQUENTIAL) {
 		engineConfiguration->injectionMode = mode;
 		engineConfiguration->crankingInjectionMode = mode;
-		engine->triggerCentral.triggerState.syncEnginePhase(2, 0, engine->engineState.engineCycle);
+		eth.engine.triggerCentral.triggerState.syncEnginePhase(2, 0, eth.engine.engineState.engineCycle);
 
 		InjectionEvent event;
 		event.setIndex(firingIndex);
@@ -103,31 +103,31 @@ public:
 	}
 
 	void configureFuelSchedule() {
-		for (uint8_t i = 0; i < engine->engineState.cylinderCount; i++) {
-			auto& event = engine->injectionEvents.elements[i];
+		for (uint8_t i = 0; i < eth.engine.engineState.cylinderCount; i++) {
+			auto& event = eth.engine.injectionEvents.elements[i];
 			event.setIndex(i);
 			ASSERT_TRUE(event.update());
 			event.injectionStartAngle = 5;
 		}
-		engine->injectionEvents.isReady = true;
+		eth.engine.injectionEvents.isReady = true;
 	}
 
 	void fireFuelSchedule() {
-		for (uint8_t i = 0; i < engine->engineState.cylinderCount; i++) {
+		for (uint8_t i = 0; i < eth.engine.engineState.cylinderCount; i++) {
 			// The completion callback may rebuild the real injection angle between teeth.
-			engine->injectionEvents.elements[i].injectionStartAngle = 5;
+			eth.engine.injectionEvents.elements[i].injectionStartAngle = 5;
 		}
-		engine->injectionEvents.onTriggerTooth({getTimeNowNt(), 0, 0, 0, 10});
+		eth.engine.injectionEvents.onTriggerTooth({getTimeNowNt(), 0, 0, 0, 10});
 	}
 
 	VeAnalyzeFuelEventSnapshot snapshot() {
 		chibios_rt::CriticalSectionLocker csl;
-		return engine->engineState.snapshotVeAnalyzeFuelEventsLocked(getTimeNowNt());
+		return eth.engine.engineState.snapshotVeAnalyzeFuelEventsLocked(getTimeNowNt());
 	}
 
 	void exportOutput() {
 		chibios_rt::CriticalSectionLocker csl;
-		engine->engineState.exportVeAnalyzeFuelEventsLocked(engine->outputChannels);
+		eth.engine.engineState.exportVeAnalyzeFuelEventsLocked(eth.engine.outputChannels);
 	}
 
 	NiceMock<MockInjectorModel2> primary;
@@ -138,7 +138,7 @@ public:
 
 void establishStagedEvent(InjectionEventHarness& harness) {
 	harness.seed(0);
-	harness.engine->engineState.injectionStage2Fraction = 0.2f;
+	harness.eth.engine.engineState.injectionStage2Fraction = 0.2f;
 	auto event = harness.makeEvent(0);
 	harness.fire(event);
 
@@ -159,28 +159,28 @@ void expectUnsupportedAfterGoodEvidence(UnsupportedCase unsupportedCase) {
 	establishStagedEvent(harness);
 	harness.eth.moveTimeForwardUs(1000);
 
-	const size_t queueBefore = harness.engine->scheduler.size();
+	const size_t queueBefore = harness.eth.engine.scheduler.size();
 	harness.seed(0);
-	harness.engine->engineState.injectionStage2Fraction = 0.2f;
+	harness.eth.engine.engineState.injectionStage2Fraction = 0.2f;
 
 	injection_mode_e mode = IM_SEQUENTIAL;
 	switch (unsupportedCase) {
 		case UnsupportedCase::Split:
-			harness.engine->engineState.doSplitInjection = true;
+			harness.eth.engine.engineState.doSplitInjection = true;
 			break;
 		case UnsupportedCase::SinglePoint:
 			mode = IM_SINGLE_POINT;
-			harness.engine->engineState.injectionStage2Fraction = 0;
+			harness.eth.engine.engineState.injectionStage2Fraction = 0;
 			break;
 		case UnsupportedCase::SuppressedStage2:
-			harness.engine->engineState.injectionStage2Fraction = 0.002f;
+			harness.eth.engine.engineState.injectionStage2Fraction = 0.002f;
 			break;
 	}
 
 	auto attempt = harness.makeEvent(0, mode);
 	harness.fire(attempt);
 
-	EXPECT_EQ(queueBefore + 2, harness.engine->scheduler.size())
+	EXPECT_EQ(queueBefore + 2, harness.eth.engine.scheduler.size())
 			<< "the real fueling scheduler must retain their existing pulse behavior";
 
 	auto evidence = harness.snapshot();
@@ -193,17 +193,17 @@ void expectUnsupportedAfterGoodEvidence(UnsupportedCase unsupportedCase) {
 	EXPECT_TRUE(evidence.Cylinders[0].SupersededByRejection);
 
 	harness.exportOutput();
-	EXPECT_EQ(1u, harness.engine->outputChannels.veAnalyzeFuelEventAcceptedCount);
-	EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelCylinderScheduledMg[0]);
-	EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelBankScheduledMg[0]);
-	EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelEventLastScheduledMg);
+	EXPECT_EQ(1u, harness.eth.engine.outputChannels.veAnalyzeFuelEventAcceptedCount);
+	EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelCylinderScheduledMg[0]);
+	EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelBankScheduledMg[0]);
+	EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelEventLastScheduledMg);
 }
 } // namespace
 
 TEST(VeAnalyzeInjectionEvents, SequentialModeScalesOnceAndSchedulesRealCallbacks) {
 	InjectionEventHarness harness;
 	harness.seedAll();
-	const size_t queueBefore = harness.engine->scheduler.size();
+	const size_t queueBefore = harness.eth.engine.scheduler.size();
 
 	auto event = harness.makeEvent(1, IM_SEQUENTIAL);
 	const uint16_t expectedCylinderMask = static_cast<uint16_t>(1u << 2);
@@ -211,9 +211,9 @@ TEST(VeAnalyzeInjectionEvents, SequentialModeScalesOnceAndSchedulesRealCallbacks
 
 	auto evidence = harness.snapshot();
 	harness.exportOutput();
-	EXPECT_EQ(queueBefore + 2, harness.engine->scheduler.size());
+	EXPECT_EQ(queueBefore + 2, harness.eth.engine.scheduler.size());
 	EXPECT_EQ(1u, evidence.AcceptedEventCount);
-	EXPECT_EQ(1u, harness.engine->outputChannels.veAnalyzeFuelEventAcceptedCount);
+	EXPECT_EQ(1u, harness.eth.engine.outputChannels.veAnalyzeFuelEventAcceptedCount);
 	EXPECT_EQ(expectedCylinderMask, evidence.LastEvent.AffectedCylinderMask);
 	EXPECT_EQ(2, evidence.LastEvent.AffectedBankMask);
 	EXPECT_FLOAT_EQ(10.0f, evidence.LastEvent.CalculatedBaseMassMilligrams);
@@ -223,13 +223,13 @@ TEST(VeAnalyzeInjectionEvents, SequentialModeScalesOnceAndSchedulesRealCallbacks
 TEST(VeAnalyzeInjectionEvents, BatchModeScalesOnceAndMasksItsPhysicalPair) {
 	InjectionEventHarness harness;
 	harness.seed(0);
-	const size_t queueBefore = harness.engine->scheduler.size();
+	const size_t queueBefore = harness.eth.engine.scheduler.size();
 
 	auto event = harness.makeEvent(0, IM_BATCH);
 	harness.fire(event);
 
 	auto evidence = harness.snapshot();
-	EXPECT_EQ(queueBefore + 2, harness.engine->scheduler.size());
+	EXPECT_EQ(queueBefore + 2, harness.eth.engine.scheduler.size());
 	EXPECT_EQ(1u, evidence.AcceptedEventCount);
 	EXPECT_EQ(0x9u, evidence.LastEvent.AffectedCylinderMask);
 	EXPECT_EQ(0x3u, evidence.LastEvent.AffectedBankMask);
@@ -240,13 +240,13 @@ TEST(VeAnalyzeInjectionEvents, BatchModeScalesOnceAndMasksItsPhysicalPair) {
 TEST(VeAnalyzeInjectionEvents, SimultaneousModeScalesOnceAndMasksConfiguredEngine) {
 	InjectionEventHarness harness;
 	harness.seed(0);
-	const size_t queueBefore = harness.engine->scheduler.size();
+	const size_t queueBefore = harness.eth.engine.scheduler.size();
 
 	auto event = harness.makeEvent(0, IM_SIMULTANEOUS);
 	harness.fire(event);
 
 	auto evidence = harness.snapshot();
-	EXPECT_EQ(queueBefore + 2, harness.engine->scheduler.size());
+	EXPECT_EQ(queueBefore + 2, harness.eth.engine.scheduler.size());
 	EXPECT_EQ(1u, evidence.AcceptedEventCount);
 	EXPECT_EQ(0xFu, evidence.LastEvent.AffectedCylinderMask);
 	EXPECT_EQ(0x3u, evidence.LastEvent.AffectedBankMask);
@@ -257,14 +257,14 @@ TEST(VeAnalyzeInjectionEvents, SimultaneousModeScalesOnceAndMasksConfiguredEngin
 TEST(VeAnalyzeInjectionEvents, CompleteStagedMassRequiresAndReportsBothScheduledPulses) {
 	InjectionEventHarness harness;
 	harness.seed(0);
-	harness.engine->engineState.injectionStage2Fraction = 0.2f;
-	const size_t queueBefore = harness.engine->scheduler.size();
+	harness.eth.engine.engineState.injectionStage2Fraction = 0.2f;
+	const size_t queueBefore = harness.eth.engine.scheduler.size();
 
 	auto event = harness.makeEvent(0);
 	harness.fire(event);
 
 	auto evidence = harness.snapshot();
-	EXPECT_EQ(queueBefore + 3, harness.engine->scheduler.size());
+	EXPECT_EQ(queueBefore + 3, harness.eth.engine.scheduler.size());
 	EXPECT_EQ(1u, evidence.AcceptedEventCount);
 	EXPECT_TRUE(evidence.LastEvent.SchedulerAccepted);
 	EXPECT_TRUE(evidence.LastEvent.Stage1Supplied);
@@ -283,7 +283,7 @@ TEST(VeAnalyzeInjectionEvents, SplitSinglePointAndSuppressedStage2RemainUnsuppor
 
 TEST(VeAnalyzeInjectionEvents, TooShortAndZeroPulsesAreRejectedWithoutSchedulerWork) {
 	InjectionEventHarness harness;
-	const size_t queueBefore = harness.engine->scheduler.size();
+	const size_t queueBefore = harness.eth.engine.scheduler.size();
 
 	harness.seed(0, 0.00001f);
 	auto shortEvent = harness.makeEvent(0);
@@ -295,7 +295,7 @@ TEST(VeAnalyzeInjectionEvents, TooShortAndZeroPulsesAreRejectedWithoutSchedulerW
 	harness.fire(zeroEvent);
 
 	auto evidence = harness.snapshot();
-	EXPECT_EQ(queueBefore, harness.engine->scheduler.size());
+	EXPECT_EQ(queueBefore, harness.eth.engine.scheduler.size());
 	EXPECT_EQ(2u, evidence.AttemptedEventCount);
 	EXPECT_EQ(0u, evidence.AcceptedEventCount);
 	EXPECT_EQ(2u, evidence.RejectedEventCount);
@@ -307,23 +307,23 @@ TEST(VeAnalyzeInjectionEvents, TooShortAndZeroPulsesAreRejectedWithoutSchedulerW
 TEST(VeAnalyzeInjectionEvents, FullSchedulerRejectsActualEventAndExportsAttemptedMassOnly) {
 	InjectionEventHarness harness;
 	for (size_t i = 0; i < 64; i++) {
-		harness.engine->scheduler.schedule("fill", nullptr, getTimeNowNt() + US2NT(10000), {+[](void*) {}, nullptr});
+		harness.eth.engine.scheduler.schedule("fill", nullptr, getTimeNowNt() + US2NT(10000), {+[](void*) {}, nullptr});
 	}
-	ASSERT_EQ(64u, harness.engine->scheduler.size());
+	ASSERT_EQ(64u, harness.eth.engine.scheduler.size());
 
 	harness.seed(0);
 	auto event = harness.makeEvent(0);
 	harness.fire(event);
 
 	auto evidence = harness.snapshot();
-	EXPECT_EQ(64u, harness.engine->scheduler.size());
+	EXPECT_EQ(64u, harness.eth.engine.scheduler.size());
 	EXPECT_EQ(1u, evidence.AttemptedEventCount);
 	EXPECT_EQ(0u, evidence.AcceptedEventCount);
 	EXPECT_EQ(1u, evidence.RejectedEventCount);
 	EXPECT_FALSE(evidence.LastEvent.SchedulerAccepted);
 	EXPECT_FLOAT_EQ(10.0f, evidence.LastEvent.AttemptedFinalCommandedMassMilligrams);
 	EXPECT_FLOAT_EQ(0, evidence.LastEvent.ScheduledCommandMassMilligrams);
-	EXPECT_EQ(0u, harness.engine->airmassInjectionState.pendingCallbacks());
+	EXPECT_EQ(0u, harness.eth.engine.airmassInjectionState.pendingCallbacks());
 }
 
 TEST(VeAnalyzeInjectionEvents, WallClampAndFilmEvidenceUseTheActualAdjustment) {
@@ -336,15 +336,15 @@ TEST(VeAnalyzeInjectionEvents, WallClampAndFilmEvidenceUseTheActualAdjustment) {
 	event.getWallFuel().wallFuelCorrection = 99;
 	harness.fire(event);
 	harness.exportOutput();
-	EXPECT_NEAR(13.3333f, harness.engine->outputChannels.veAnalyzeFuelEventLastFinalMg, 0.01f);
-	EXPECT_NEAR(3.3333f, harness.engine->outputChannels.veAnalyzeFuelEventLastFilmMg, 0.01f);
+	EXPECT_NEAR(13.3333f, harness.eth.engine.outputChannels.veAnalyzeFuelEventLastFinalMg, 0.01f);
+	EXPECT_NEAR(3.3333f, harness.eth.engine.outputChannels.veAnalyzeFuelEventLastFilmMg, 0.01f);
 
 	harness.eth.moveTimeForwardUs(1000);
 	event.getWallFuel().wallFuel = 1;
 	harness.fire(event);
 	harness.exportOutput();
-	EXPECT_TRUE(harness.engine->outputChannels.veAnalyzeFuelEventLastWallClamp);
-	EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelEventLastScheduledMg);
+	EXPECT_TRUE(harness.eth.engine.outputChannels.veAnalyzeFuelEventLastWallClamp);
+	EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelEventLastScheduledMg);
 	event.getWallFuel().resetWF();
 	EXPECT_FALSE(event.getWallFuel().wasZeroClamped());
 	EXPECT_FLOAT_EQ(0, event.getWallFuel().getWallFuel());
@@ -355,15 +355,15 @@ TEST(VeAnalyzeInjectionEvents, WallClampAndFilmEvidenceUseTheActualAdjustment) {
 	event.getWallFuel().wallFuelCorrection = 99;
 	harness.fire(event);
 	harness.exportOutput();
-	EXPECT_FALSE(harness.engine->outputChannels.veAnalyzeFuelEventLastWallClamp);
-	EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelEventLastFilmMg);
+	EXPECT_FALSE(harness.eth.engine.outputChannels.veAnalyzeFuelEventLastWallClamp);
+	EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelEventLastFilmMg);
 
 	harness.eth.moveTimeForwardUs(1000);
 	harness.wall.Enabled = true;
 	harness.seed(0, NAN);
 	harness.fire(event);
 	harness.exportOutput();
-	EXPECT_FALSE(harness.engine->outputChannels.veAnalyzeFuelEventLastWallClamp);
+	EXPECT_FALSE(harness.eth.engine.outputChannels.veAnalyzeFuelEventLastWallClamp);
 
 	event.getWallFuel().wallFuel = 0.25f;
 	event.getWallFuel().wallFuelCorrection = 99;
@@ -419,8 +419,8 @@ TEST(VeAnalyzeInjectionEvents, GenerationTransitionRetainsCoverageAndProvenanceG
 	ASSERT_EQ(0x3u, first.ExpectedBankMask);
 
 	harness.eth.moveTimeForwardUs(1000);
-	harness.engine->airmassCalibration.Generation++;
-	const uint32_t nextGeneration = harness.engine->airmassCalibration.Generation;
+	harness.eth.engine.airmassCalibration.Generation++;
+	const uint32_t nextGeneration = harness.eth.engine.airmassCalibration.Generation;
 	harness.seed(2, UnscaledCycleMass, nextGeneration);
 	auto transitioned = harness.makeEvent(1);
 	harness.fire(transitioned);
@@ -434,12 +434,13 @@ TEST(VeAnalyzeInjectionEvents, GenerationTransitionRetainsCoverageAndProvenanceG
 	EXPECT_FALSE(transition.CoverageComplete);
 
 	harness.eth.moveTimeForwardUs(1000);
-	harness.engine->cylinders[1].setInjectionMass(UnscaledCycleMass);
+	harness.eth.engine.cylinders[1].setInjectionMass(UnscaledCycleMass);
 	auto missing = harness.makeEvent(3);
 	harness.fire(missing);
 	auto afterMissing = harness.snapshot();
 	EXPECT_EQ(nextGeneration, afterMissing.PublicationGeneration);
-	EXPECT_NE(0u, afterMissing.rejectedEventCount(FuelEventReason::InvalidGeneration));
+	const uint32_t invalidGenerationAfterMissing = afterMissing.rejectedEventCount(FuelEventReason::InvalidGeneration);
+	EXPECT_NE(0u, invalidGenerationAfterMissing);
 	EXPECT_FALSE(afterMissing.Ready);
 
 	harness.eth.moveTimeForwardUs(1000);
@@ -448,7 +449,7 @@ TEST(VeAnalyzeInjectionEvents, GenerationTransitionRetainsCoverageAndProvenanceG
 	harness.fire(stale);
 	auto afterStale = harness.snapshot();
 	EXPECT_EQ(nextGeneration, afterStale.PublicationGeneration);
-	EXPECT_NE(0u, afterStale.rejectedEventCount(FuelEventReason::RegressedGeneration));
+	EXPECT_GT(afterStale.rejectedEventCount(FuelEventReason::InvalidGeneration), invalidGenerationAfterMissing);
 	EXPECT_FALSE(afterStale.Ready);
 }
 
@@ -458,7 +459,7 @@ TEST(VeAnalyzeInjectionEvents, RejectionSupersedesEvidenceAndPollingCannotClearS
 	harness.eth.moveTimeForwardUs(1000);
 
 	harness.seed(0);
-	harness.engine->engineState.injectionStage2Fraction = 0.002f;
+	harness.eth.engine.engineState.injectionStage2Fraction = 0.002f;
 	auto unsupported = harness.makeEvent(0);
 	harness.fire(unsupported);
 
@@ -471,9 +472,9 @@ TEST(VeAnalyzeInjectionEvents, RejectionSupersedesEvidenceAndPollingCannotClearS
 		EXPECT_TRUE(evidence.hasReason(FuelEventReason::IntegrationUnsupported));
 
 		harness.exportOutput();
-		EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelCylinderScheduledMg[0]);
-		EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelBankScheduledMg[0]);
-		EXPECT_FLOAT_EQ(0, harness.engine->outputChannels.veAnalyzeFuelEventLastScheduledMg);
+		EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelCylinderScheduledMg[0]);
+		EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelBankScheduledMg[0]);
+		EXPECT_FLOAT_EQ(0, harness.eth.engine.outputChannels.veAnalyzeFuelEventLastScheduledMg);
 		harness.eth.moveTimeForwardUs(100000);
 	}
 }
@@ -483,11 +484,11 @@ TEST(VeAnalyzeInjectionEvents, OwnerResetSyncLossAndReconstructionRequireFreshCo
 		InjectionEventHarness harness;
 		establishStagedEvent(harness);
 		harness.exportOutput();
-		ASSERT_GT(harness.engine->outputChannels.veAnalyzeFuelEventLastScheduledMg, 0);
+		ASSERT_GT(harness.eth.engine.outputChannels.veAnalyzeFuelEventLastScheduledMg, 0);
 
 		{
 			chibios_rt::CriticalSectionLocker csl;
-			harness.engine->engineState.resetVeAnalyzeFuelEventsLocked(getTimeNowNt());
+			harness.eth.engine.engineState.resetVeAnalyzeFuelEventsLocked(getTimeNowNt());
 		}
 		auto afterReset = harness.snapshot();
 		EXPECT_EQ(0u, afterReset.ObservedCylinderMask);
@@ -498,7 +499,7 @@ TEST(VeAnalyzeInjectionEvents, OwnerResetSyncLossAndReconstructionRequireFreshCo
 
 		harness.eth.moveTimeForwardUs(1000);
 		establishStagedEvent(harness);
-		harness.engine->OnTriggerSynchronizationLost();
+		harness.eth.engine.OnTriggerSynchronizationLost();
 		auto afterSyncLoss = harness.snapshot();
 		EXPECT_EQ(0u, afterSyncLoss.ObservedCylinderMask);
 		EXPECT_EQ(0u, afterSyncLoss.AcceptedEventCount);

@@ -308,6 +308,8 @@ public:
 	}
 
 	// Read-only and safe to poll slowly. Polling does not clear peaks or timers.
+	// Fills caller-owned storage completely, without allocating a snapshot temporary.
+	void fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efitick_t nowNt) const;
 	VeAnalyzeFuelEventSnapshot snapshot(efitick_t nowNt) const;
 	VeAnalyzeFuelEventRecord cylinderSnapshot(size_t ownerCylinder, efitick_t nowNt) const;
 
@@ -377,11 +379,14 @@ private:
 			uint32_t cutReasons);
 	void updatePeak(BankState& bank, efitick_t nowNt, const StoredEvent& event);
 	bool timestampIsFresh(efitick_t nowNt, efitick_t timestamp) const;
+	void fillRecord(VeAnalyzeFuelEventRecord& result, const StoredEvent& event, efitick_t nowNt) const;
 	VeAnalyzeFuelEventRecord makeRecord(const StoredEvent& event, efitick_t nowNt) const;
-	VeAnalyzeFuelEventBankSnapshot makeBankSnapshot(size_t bankIndex, efitick_t nowNt) const;
-	VeAnalyzeFuelEventCylinderSnapshot makeCylinderSnapshot(
+	void fillBankSnapshot(VeAnalyzeFuelEventBankSnapshot& result, size_t bankIndex, efitick_t nowNt) const;
+	void fillCylinderSnapshot(
+			VeAnalyzeFuelEventCylinderSnapshot& result,
 			size_t cylinderIndex,
 			efitick_t nowNt,
+			const VeAnalyzeFuelEventRecord& record,
 			const std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks>& banks) const;
 
 	VeAnalyzeFuelEventPolicy m_policy;

@@ -180,15 +180,17 @@ mode-scaled input event mass, rather than from stale `wallFuel` state.
 Every phase-relevant attempt after admission is recorded, including non-finite
 or negative pulse validation, a first-stage pulse shorter than 50 us, duration
 or delay bounds, timestamp overflow, and scheduler failure. `SchedulerAccepted`
-is set only from the actual `scheduleFuelCallbacks()` result. It means that the
-scheduler reserved callbacks; it does not claim that a pin opened or that fuel
+is set to true only from an actual successful `scheduleFuelCallbacks()` call.
+It means that the scheduler reserved callbacks; it does not claim that a pin opened or that fuel
 was physically delivered. `veAnalyzeFuelEventAttemptedCount` and the per-bank
-attempt counters include rejected attempts. `veAnalyzeFuelEventAcceptedCount`
-counts coherent, completely represented events whose scheduler call succeeded.
-`veAnalyzeFuelEventRejectedCount` retains its narrower meaning: coherent attempts
-rejected by the scheduler. `veAnalyzeFuelEventInvalidCount` counts attempts
-whose evidence was structurally invalid or could not represent the complete
-command.
+attempt counters count all observed attempts. `veAnalyzeFuelEventAcceptedCount`
+counts only coherent, completely represented attempts with
+`SchedulerAccepted=true`. `veAnalyzeFuelEventRejectedCount` counts all observed
+attempts with `SchedulerAccepted=false`, including structurally invalid attempts
+and failures in early validation. `veAnalyzeFuelEventInvalidCount` counts
+structurally invalid or unsupported evidence, independent of scheduling.
+Rejection is evaluated before the structural-invalid return, so the Rejected and
+Invalid counters can overlap and are not disjoint partitions of attempts.
 
 The event timestamp and age describe the trigger phase that calculated and
 attempted the schedule. They are not the scheduled opening time, an observed

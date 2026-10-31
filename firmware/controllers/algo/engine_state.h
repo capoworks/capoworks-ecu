@@ -83,7 +83,9 @@ public:
 	// slow telemetry snapshot with the caller-owned critical section held.
 	void resetVeAnalyzeFuelEventsLocked(efitick_t nowNt);
 	bool observeVeAnalyzeFuelEventLocked(VeAnalyzeFuelEventInput input);
-	VeAnalyzeFuelEventSnapshot snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const;
+	// The returned reference remains valid until the next snapshot while the
+	// caller continues to hold the critical section.
+	const VeAnalyzeFuelEventSnapshot& snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const;
 	void exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const;
 
 	/**
@@ -187,6 +189,7 @@ private:
 	float veAnalyzeFuelLastAttemptAeGrams = 0;
 	float veAnalyzeFuelLastAttemptFilmGrams = 0;
 	float veAnalyzeFuelLastAttemptFinalGrams = 0;
+	mutable VeAnalyzeFuelEventSnapshot veAnalyzeFuelEventsSnapshot;
 };
 
 EngineState* getEngineState();

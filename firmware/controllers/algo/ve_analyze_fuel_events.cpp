@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <new>
 
 namespace {
 using namespace ve_analyze_fuel_events;
@@ -240,11 +241,14 @@ bool VeAnalyzeFuelEvents::timestampIsFresh(efitick_t nowNt, efitick_t timestamp)
 	return nowNt.count - timestamp.count <= m_eventFreshnessNt;
 }
 
-VeAnalyzeFuelEventRecord VeAnalyzeFuelEvents::makeRecord(const StoredEvent& event, efitick_t nowNt) const {
-	VeAnalyzeFuelEventRecord result;
+void VeAnalyzeFuelEvents::fillRecord(
+		VeAnalyzeFuelEventRecord& result, const StoredEvent& event, efitick_t nowNt) const {
+	// Reconstruct in place so reused output storage receives every default
+	// without materializing a second full snapshot-sized temporary.
+	new (&result) VeAnalyzeFuelEventRecord{};
 	result.HasEvent = event.HasEvent;
 	if (!event.HasEvent) {
-		return result;
+		return;
 	}
 
 	result.Fresh = timestampIsFresh(nowNt, event.Timestamp);
@@ -273,6 +277,11 @@ VeAnalyzeFuelEventRecord VeAnalyzeFuelEvents::makeRecord(const StoredEvent& even
 		result.FilmPercentOfBase = ratioPercent(event.FilmCorrectionMassGrams, event.BasePreAeMassGrams);
 		result.CombinedPercentOfBase = result.AePercentOfBase + result.FilmPercentOfBase;
 	}
+}
+
+VeAnalyzeFuelEventRecord VeAnalyzeFuelEvents::makeRecord(const StoredEvent& event, efitick_t nowNt) const {
+	VeAnalyzeFuelEventRecord result;
+	fillRecord(result, event, nowNt);
 	return result;
 }
 
@@ -655,8 +664,9 @@ bool VeAnalyzeFuelEvents::observeEvent(const VeAnalyzeFuelEventInput& input) {
 	return true;
 }
 
-VeAnalyzeFuelEventBankSnapshot VeAnalyzeFuelEvents::makeBankSnapshot(size_t bankIndex, efitick_t nowNt) const {
-	VeAnalyzeFuelEventBankSnapshot result;
+void VeAnalyzeFuelEvents::fillBankSnapshot(
+		VeAnalyzeFuelEventBankSnapshot& result, size_t bankIndex, efitick_t nowNt) const {
+	new (&result) VeAnalyzeFuelEventBankSnapshot{};
 	const BankState& bank = m_banks[bankIndex];
 
 	result.Observed = bank.Latest.HasEvent || bank.ObservedCylinderMask != 0;
@@ -666,7 +676,7 @@ VeAnalyzeFuelEventBankSnapshot VeAnalyzeFuelEvents::makeBankSnapshot(size_t bank
 	result.AttemptedEventCount = bank.AttemptedEvents;
 	result.ScheduledEventCount = bank.ScheduledEvents;
 	result.SchedulerRejectedEventCount = bank.SchedulerRejectedEvents;
-	result.LatestEvent = makeRecord(bank.Latest, nowNt);
+	fillRecord(result.LatestEvent, bank.Latest, nowNt);
 	result.LatestEvent.SupersededByRejection = bank.Latest.HasEvent && bank.LatestRejectedAfterEvent;
 	if (bank.PeakUntilNt > nowNt.count) {
 		result.PeakAePercentOfBase = bank.PeakAePercent;
@@ -723,16 +733,16 @@ VeAnalyzeFuelEventBankSnapshot VeAnalyzeFuelEvents::makeBankSnapshot(size_t bank
 	if (m_globalFaultUntilNt > nowNt.count) {
 		result.Reasons |= m_globalFaultReasons;
 	}
-	return result;
 }
 
-VeAnalyzeFuelEventCylinderSnapshot VeAnalyzeFuelEvents::makeCylinderSnapshot(
+void VeAnalyzeFuelEvents::fillCylinderSnapshot(
+		VeAnalyzeFuelEventCylinderSnapshot& result,
 		size_t cylinderIndex,
 		efitick_t nowNt,
+		const VeAnalyzeFuelEventRecord& record,
 		const std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks>& banks) const {
-	VeAnalyzeFuelEventCylinderSnapshot result;
+	new (&result) VeAnalyzeFuelEventCylinderSnapshot{};
 	const StoredEvent& event = m_cylinders[cylinderIndex];
-	const VeAnalyzeFuelEventRecord record = makeRecord(event, nowNt);
 	result.HasEvent = record.HasEvent;
 	result.Fresh = record.Fresh;
 	result.SupersededByRejection = event.HasEvent && m_cylinderRejectionAfterEvent[cylinderIndex];
@@ -760,14 +770,15 @@ VeAnalyzeFuelEventCylinderSnapshot VeAnalyzeFuelEvents::makeCylinderSnapshot(
 	if (m_resetUntilNt > nowNt.count) {
 		result.Reasons |= m_resetReasons;
 	}
-	return result;
 }
 
-VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const {
-	VeAnalyzeFuelEventSnapshot result;
+void VeAnalyzeFuelEvents::fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efitick_t nowNt) const {
+	// Reconstruct the caller-owned storage in place. Snapshot reuse must not
+	// retain stale counters, reasons, bank data, or cylinder data.
+	new (&result) VeAnalyzeFuelEventSnapshot{};
 	if (!m_configValid) {
 		result.Reasons = static_cast<uint32_t>(FuelEventReason::InvalidConfiguration);
-		return result;
+		return;
 	}
 
 	result.AttemptedEventCount = m_attemptedEvents;
@@ -795,7 +806,7 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 		}
 		if (!hasLatestTimestamp || cylinder.Timestamp.count > latestTimestamp.count) {
 			latestTimestamp = cylinder.Timestamp;
-			result.LastEvent = makeRecord(cylinder, nowNt);
+			fillRecord(result.LastEvent, cylinder, nowNt);
 			result.LastEvent.SupersededByRejection = m_rejectionSinceLatestEvent;
 			hasLatestTimestamp = true;
 		}
@@ -803,7 +814,7 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 
 	result.HasFreshEvent = false;
 	for (size_t bankIndex = 0; bankIndex < MaximumBanks; bankIndex++) {
-		result.Banks[bankIndex] = makeBankSnapshot(bankIndex, nowNt);
+		fillBankSnapshot(result.Banks[bankIndex], bankIndex, nowNt);
 		if (result.Banks[bankIndex].EvidenceFresh) {
 			result.FreshBankMask |= static_cast<uint8_t>(1u << bankIndex);
 		}
@@ -814,8 +825,10 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 		result.HasFreshEvent |= result.Banks[bankIndex].EvidenceFresh;
 	}
 
+	VeAnalyzeFuelEventRecord cylinderRecord;
 	for (size_t cylinderIndex = 0; cylinderIndex < MaximumCylinders; cylinderIndex++) {
-		result.Cylinders[cylinderIndex] = makeCylinderSnapshot(cylinderIndex, nowNt, result.Banks);
+		fillRecord(cylinderRecord, m_cylinders[cylinderIndex], nowNt);
+		fillCylinderSnapshot(result.Cylinders[cylinderIndex], cylinderIndex, nowNt, cylinderRecord, result.Banks);
 		if (isBitSet(m_expectedCylinderMask, cylinderIndex) && !isBitSet(result.FreshCylinderMask, cylinderIndex)) {
 			result.Cylinders[cylinderIndex].Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
 		}
@@ -845,5 +858,10 @@ VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const 
 	}
 
 	result.Ready = result.HasFreshEvent && result.CoverageComplete && result.Reasons == 0;
+}
+
+VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const {
+	VeAnalyzeFuelEventSnapshot result;
+	fillSnapshot(result, nowNt);
 	return result;
 }

@@ -106,8 +106,8 @@ struct_no_prefix persistent_config_s
 
 struct_no_prefix engine_configuration_s
 
-! 1640 covers the 1628-byte upcoming Shock profile plus 10 bytes of overhead without increasing the 1664-byte USB buffers.
-#define BLOCKING_FACTOR 1640
+! 2304 covers the current 2280-byte output block plus 10 bytes of protocol overhead.
+#define BLOCKING_FACTOR 2304
 
 ! https://github.com/rusefi/rusefi/issues/2010 shows the corner case wheel with huge depth requirement
 #define GAP_TRACKING_LENGTH 18
