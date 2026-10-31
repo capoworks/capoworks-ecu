@@ -130,8 +130,8 @@ public:
 		eth.engine.engineState.exportVeAnalyzeFuelEventsLocked(eth.engine.outputChannels);
 	}
 
-	NiceMock<MockInjectorModel2> primary;
-	NiceMock<MockInjectorModel2> secondary;
+	testing::NiceMock<MockInjectorModel2> primary;
+	testing::NiceMock<MockInjectorModel2> secondary;
 	ControlledWallModel wall;
 	EngineTestHelper eth;
 };
