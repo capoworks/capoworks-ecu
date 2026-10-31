@@ -8,6 +8,8 @@
 #include "speed_density_airmass.h"
 #include "tunerstudio.h"
 
+#include <optional>
+
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::StrictMock;
@@ -108,29 +110,36 @@ TEST(BlendedAirmassRuntimeOwnership, EngineConstructionDoesNotRequireInstalledGl
 	EXPECT_EQ(1, local.outputChannels.blendedVeAnalyzeSessionGeneration);
 }
 
-TEST(BlendedAirmassRuntimeOwnership, EngineResetClearsIndependentDiagnosticDomains) {
-	Engine local;
-	local.engineState.latchVeAnalyzeDiagnostics(airmassVeAnalyzeReason(VeReject::Configuration), 41, 52);
+TEST(BlendedAirmassRuntimeOwnership, EngineDestructionAndConstructionClearsIndependentDiagnosticDomains) {
+	std::optional<Engine> owner;
+	owner.emplace();
+	owner->engineState.latchVeAnalyzeDiagnostics(airmassVeAnalyzeReason(VeReject::Configuration), 41, 52);
 	{
 		chibios_rt::CriticalSectionLocker csl;
-		local.engineState.recordVeAnalyzeDiscardedCalculationLocked(63);
+		owner->engineState.recordVeAnalyzeDiscardedCalculationLocked(63);
 	}
-	local.engineState.veAnalyzeSessionStarted = true;
+	owner->engineState.veAnalyzeSessionStarted = true;
 
-	local.reset();
+	EXPECT_TRUE(owner->engineState.veAnalyzeSessionStarted);
+	EXPECT_EQ(
+			airmassVeAnalyzeReason(VeReject::Configuration), owner->engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(1, owner->engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
 
-	EXPECT_FALSE(local.engineState.veAnalyzeSessionStarted);
-	EXPECT_FALSE(local.engineState.veAnalyzeSessionInvalid);
-	EXPECT_EQ(0, local.engineState.veAnalyzeDiagnostics.FirstRejectReason);
-	EXPECT_EQ(0, local.engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
-	EXPECT_EQ(0, local.engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
-	EXPECT_EQ(0, local.engineState.veAnalyzeDiscardedCalculationDiagnostics.LastReason);
-	EXPECT_EQ(0, local.engineState.veAnalyzeDiscardedCalculationDiagnostics.LastCalibrationGeneration);
-	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeFirstReason);
-	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeRejectReasons);
-	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeDiscardedCount);
-	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeLastDiscardedReason);
-	EXPECT_EQ(0, local.outputChannels.blendedVeAnalyzeLastDiscardedGeneration);
+	owner.reset();
+	owner.emplace();
+
+	EXPECT_FALSE(owner->engineState.veAnalyzeSessionStarted);
+	EXPECT_FALSE(owner->engineState.veAnalyzeSessionInvalid);
+	EXPECT_EQ(0, owner->engineState.veAnalyzeDiagnostics.FirstRejectReason);
+	EXPECT_EQ(0, owner->engineState.veAnalyzeDiagnostics.CurrentRejectReasons);
+	EXPECT_EQ(0, owner->engineState.veAnalyzeDiscardedCalculationDiagnostics.Count);
+	EXPECT_EQ(0, owner->engineState.veAnalyzeDiscardedCalculationDiagnostics.LastReason);
+	EXPECT_EQ(0, owner->engineState.veAnalyzeDiscardedCalculationDiagnostics.LastCalibrationGeneration);
+	EXPECT_EQ(0, owner->outputChannels.blendedVeAnalyzeFirstReason);
+	EXPECT_EQ(0, owner->outputChannels.blendedVeAnalyzeRejectReasons);
+	EXPECT_EQ(0, owner->outputChannels.blendedVeAnalyzeDiscardedCount);
+	EXPECT_EQ(0, owner->outputChannels.blendedVeAnalyzeLastDiscardedReason);
+	EXPECT_EQ(0, owner->outputChannels.blendedVeAnalyzeLastDiscardedGeneration);
 }
 
 TEST_F(BlendedAirmassModelTest, DefaultAuthorityAxisIsTpsAndEvaluationUsesCapturedSnapshot) {
