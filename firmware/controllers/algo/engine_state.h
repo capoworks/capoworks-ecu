@@ -16,6 +16,8 @@
 #include "ve_analyze_fuel_events.h"
 
 struct output_channels_s;
+struct FuelAirmassCapture;
+struct FuelPublicationCandidate;
 
 // Diagnostic-only evidence for the existing VE Analyze qualification latch.
 // This does not add admission or recovery policy.
@@ -64,7 +66,7 @@ class EngineState : public engine_state_s {
 public:
 	EngineState();
 	void periodicFastCallback();
-	void updateVeAnalyzeSampleGate(efitick_t nowNt);
+	__attribute__((noinline)) void updateVeAnalyzeSampleGate(efitick_t nowNt);
 	void resetVeAnalyzeSampleGate(efitick_t nowNt);
 	void updateTChargeK(float rpm, float tps);
 	void resetVeAnalyzeDiagnostics(uint32_t calibrationGeneration = 0, uint32_t calculationEpoch = 0);
@@ -83,9 +85,9 @@ public:
 	// slow telemetry snapshot with the caller-owned critical section held.
 	void resetVeAnalyzeFuelEventsLocked(efitick_t nowNt);
 	bool observeVeAnalyzeFuelEventLocked(VeAnalyzeFuelEventInput input);
-	// The returned reference remains valid until the next snapshot while the
-	// caller continues to hold the critical section.
-	const VeAnalyzeFuelEventSnapshot& snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const;
+	// Full snapshots are for standalone tests and diagnostics. Production export
+	// uses the compact persistent summary and a single cylinder at a time.
+	VeAnalyzeFuelEventSnapshot snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const;
 	void exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const;
 
 	/**
@@ -171,6 +173,13 @@ public:
 	float mapCylinderBalance[MAX_CYLINDER_COUNT] = {0};
 
 private:
+	__attribute__((noinline)) void completeFuelPublication(
+			const FuelAirmassCapture& fuelCapture,
+			FuelPublicationCandidate& fuelCandidate,
+			float rpm,
+			bool isCranking,
+			AirmassInjectionState::CalculationToken fuelCalculation);
+
 	VeAnalyzeGate veAnalyzeGate;
 	efitick_t lastTpsObservationTick;
 	uint32_t veAnalyzeOperatingReasons = 0;
@@ -189,7 +198,7 @@ private:
 	float veAnalyzeFuelLastAttemptAeGrams = 0;
 	float veAnalyzeFuelLastAttemptFilmGrams = 0;
 	float veAnalyzeFuelLastAttemptFinalGrams = 0;
-	mutable VeAnalyzeFuelEventSnapshot veAnalyzeFuelEventsSnapshot;
+	mutable VeAnalyzeFuelEventSummary veAnalyzeFuelEventsSummary;
 };
 
 EngineState* getEngineState();

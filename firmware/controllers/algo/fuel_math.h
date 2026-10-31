@@ -98,7 +98,6 @@ struct FuelPublicationCandidate {
 	float InjectionOffset = 0;
 	bool ShouldUpdateInjectionTiming = false;
 	float CylinderFuelMasses[MAX_CYLINDER_COUNT] = {};
-	CylinderFuelProvenance CylinderFuelProvenanceValues[MAX_CYLINDER_COUNT] = {};
 };
 
 void initFuelMap();

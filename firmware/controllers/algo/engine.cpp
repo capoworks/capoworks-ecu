@@ -226,7 +226,7 @@ static float saturatedSeconds(uint32_t milliseconds) {
 	return std::isfinite(seconds) ? std::min(seconds, maximumSeconds) : maximumSeconds;
 }
 
-void EngineState::updateVeAnalyzeSampleGate(efitick_t nowNt) {
+__attribute__((noinline)) void EngineState::updateVeAnalyzeSampleGate(efitick_t nowNt) {
 #if EFI_ENGINE_CONTROL
 	bool tpsFresh = false;
 	const SensorResult tps = [&]() {
@@ -432,9 +432,8 @@ bool EngineState::observeVeAnalyzeFuelEventLocked(VeAnalyzeFuelEventInput input)
 	return veAnalyzeFuelEvents.observeEvent(input);
 }
 
-const VeAnalyzeFuelEventSnapshot& EngineState::snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const {
-	veAnalyzeFuelEvents.fillSnapshot(veAnalyzeFuelEventsSnapshot, nowNt);
-	return veAnalyzeFuelEventsSnapshot;
+VeAnalyzeFuelEventSnapshot EngineState::snapshotVeAnalyzeFuelEventsLocked(efitick_t nowNt) const {
+	return veAnalyzeFuelEvents.snapshot(nowNt);
 }
 
 void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) const {
@@ -461,7 +460,8 @@ void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) con
 			sizeof(output.veAnalyzeFuelCylinderAge) / sizeof(output.veAnalyzeFuelCylinderAge[0]) == MAX_CYLINDER_COUNT);
 
 	const efitick_t nowNt = getTimeNowNt();
-	const VeAnalyzeFuelEventSnapshot& snapshot = snapshotVeAnalyzeFuelEventsLocked(nowNt);
+	veAnalyzeFuelEvents.fillSummary(veAnalyzeFuelEventsSummary, nowNt);
+	const VeAnalyzeFuelEventSummary& snapshot = veAnalyzeFuelEventsSummary;
 	output.veAnalyzeFuelEventReady = snapshot.Ready;
 	output.veAnalyzeFuelEventRejectReasons = snapshot.Reasons;
 	output.veAnalyzeFuelEventAttemptedCount = snapshot.AttemptedEventCount;
@@ -533,8 +533,11 @@ void EngineState::exportVeAnalyzeFuelEventsLocked(output_channels_s& output) con
 		output.veAnalyzeFuelBankReasonMask[bankIndex] = bank.Reasons;
 	}
 
+	VeAnalyzeFuelEventCylinderSnapshot cylinder;
 	for (size_t cylinderIndex = 0; cylinderIndex < MAX_CYLINDER_COUNT; cylinderIndex++) {
-		const auto& cylinder = snapshot.Cylinders[cylinderIndex];
+		if (!veAnalyzeFuelEvents.fillCylinderSummary(cylinder, cylinderIndex, nowNt, snapshot)) {
+			continue;
+		}
 		output.veAnalyzeFuelCylinderBaseMg[cylinderIndex] = cylinder.CalculatedBaseMassMilligrams;
 		output.veAnalyzeFuelCylinderAeMg[cylinderIndex] = cylinder.CalculatedAppliedAeMassMilligrams;
 		output.veAnalyzeFuelCylinderFilmMg[cylinderIndex] = cylinder.CalculatedFilmCorrectionMassMilligrams;

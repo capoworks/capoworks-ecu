@@ -166,8 +166,11 @@ The operating exclusions above those bits are:
 for the TPS sample gate also runs from Engine construction, Engine reset, and
 trigger-synchronization loss, so stopped or unsynchronized engines require fresh
 fuel-event coverage. Collector observation and snapshots require the caller to
-hold the ECU critical section. The trigger path only records one bounded attempt;
-the full collector snapshot is taken in the slow TunerStudio export path.
+hold the ECU critical section. The trigger path only records one bounded attempt.
+Production TunerStudio export uses a compact Engine-owned summary and streams one
+bounded cylinder at a time under the existing lock. The full collector snapshot
+API is retained for standalone use and tests; production does not take a full
+automatic snapshot or allocate heap storage for this export.
 
 For an actual `InjectionEvent` that has passed admission, the owner cylinder's
 cycle mass and `CylinderFuelProvenance` are captured as one pair under the

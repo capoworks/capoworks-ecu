@@ -76,6 +76,21 @@ void feedNormalUntil(FuelEventsFixture& fixture, int64_t& nowUs, int64_t endUs, 
 		feed(fixture, fixture.normal(nowUs, 0, 1, 1, 1.0f, generation));
 	}
 }
+
+void expectCylinderSnapshotEquals(
+		const VeAnalyzeFuelEventCylinderSnapshot& expected, const VeAnalyzeFuelEventCylinderSnapshot& actual) {
+	EXPECT_EQ(expected.HasEvent, actual.HasEvent);
+	EXPECT_EQ(expected.Fresh, actual.Fresh);
+	EXPECT_EQ(expected.SupersededByRejection, actual.SupersededByRejection);
+	EXPECT_EQ(expected.Serial, actual.Serial);
+	EXPECT_EQ(expected.AgeMilliseconds, actual.AgeMilliseconds);
+	EXPECT_FLOAT_EQ(expected.CalculatedBaseMassMilligrams, actual.CalculatedBaseMassMilligrams);
+	EXPECT_FLOAT_EQ(expected.CalculatedAppliedAeMassMilligrams, actual.CalculatedAppliedAeMassMilligrams);
+	EXPECT_FLOAT_EQ(expected.CalculatedFilmCorrectionMassMilligrams, actual.CalculatedFilmCorrectionMassMilligrams);
+	EXPECT_FLOAT_EQ(expected.AttemptedFinalCommandedMassMilligrams, actual.AttemptedFinalCommandedMassMilligrams);
+	EXPECT_FLOAT_EQ(expected.ScheduledCommandMassMilligrams, actual.ScheduledCommandMassMilligrams);
+	EXPECT_EQ(expected.Reasons, actual.Reasons);
+}
 } // namespace
 
 TEST(VeAnalyzeFuelEvents, ExportsExplicitMilligramsAndAttemptedVersusScheduledMass) {
@@ -427,6 +442,97 @@ TEST(VeAnalyzeFuelEvents, MissingObservationsBecomeStaleAndGapNeedsRecovery) {
 	EXPECT_TRUE(resumed.LastEvent.Fresh);
 	EXPECT_FALSE(resumed.Ready);
 	EXPECT_TRUE(resumed.hasReason(FuelEventReason::StaleEvent));
+}
+
+TEST(VeAnalyzeFuelEvents, CompactSummaryAndBoundedCylindersMatchFullSnapshot) {
+	FuelEventsFixture fixture;
+	auto first = fixture.make(0, 1.0f, 0.02f, 0, 0, 1, 1);
+	first.ExpectedCylinderMask = 0x5;
+	first.ExpectedBankMask = 0x3;
+	feed(fixture, first);
+
+	auto second = fixture.make(100 * Millisecond, 1.0f, 0, 0, 2, 4, 2);
+	second.ExpectedCylinderMask = 0x5;
+	second.ExpectedBankMask = 0x3;
+	feed(fixture, second);
+
+	const efitick_t now = timeUs(300 * Millisecond);
+	const auto full = fixture.Collector.snapshot(now);
+
+	VeAnalyzeFuelEventSummary summary;
+	summary.Ready = true;
+	summary.Reasons = UINT32_MAX;
+	summary.LastEvent.HasEvent = true;
+	summary.LastEventAgeMilliseconds = 0;
+	summary.Banks[0].LatestEvent.HasEvent = true;
+	summary.RejectedEventCountsByReason.fill(UINT32_MAX);
+	fixture.Collector.fillSummary(summary, now);
+
+	EXPECT_EQ(full.Ready, summary.Ready);
+	EXPECT_EQ(full.HasFreshEvent, summary.HasFreshEvent);
+	EXPECT_EQ(full.Reasons, summary.Reasons);
+	EXPECT_EQ(full.AttemptedEventCount, summary.AttemptedEventCount);
+	EXPECT_EQ(full.AcceptedEventCount, summary.AcceptedEventCount);
+	EXPECT_EQ(full.RejectedEventCount, summary.RejectedEventCount);
+	EXPECT_EQ(full.GuardRejectedEventCount, summary.GuardRejectedEventCount);
+	EXPECT_EQ(full.InvalidEvidenceEventCount, summary.InvalidEvidenceEventCount);
+	EXPECT_EQ(full.ObservedCylinderMask, summary.ObservedCylinderMask);
+	EXPECT_EQ(full.ObservedBankMask, summary.ObservedBankMask);
+	EXPECT_EQ(full.CoverageComplete, summary.CoverageComplete);
+	EXPECT_EQ(full.ExpectedCylinderMask, summary.ExpectedCylinderMask);
+	EXPECT_EQ(full.ExpectedBankMask, summary.ExpectedBankMask);
+	EXPECT_EQ(full.FreshCylinderMask, summary.FreshCylinderMask);
+	EXPECT_EQ(full.FreshBankMask, summary.FreshBankMask);
+	EXPECT_EQ(full.LastEventAgeMilliseconds, summary.LastEventAgeMilliseconds);
+	EXPECT_EQ(full.LastEvent.Serial, summary.LastEvent.Serial);
+	EXPECT_TRUE(full.RejectedEventCountsByReason == summary.RejectedEventCountsByReason);
+	for (size_t bankIndex = 0; bankIndex < STFT_BANK_COUNT; bankIndex++) {
+		EXPECT_EQ(full.Banks[bankIndex].Reasons, summary.Banks[bankIndex].Reasons);
+		EXPECT_EQ(full.Banks[bankIndex].ScheduledEventCount, summary.Banks[bankIndex].ScheduledEventCount);
+		EXPECT_EQ(full.Banks[bankIndex].LatestEvent.Serial, summary.Banks[bankIndex].LatestEvent.Serial);
+	}
+
+	for (size_t cylinderIndex = 0; cylinderIndex < ve_analyze_fuel_events::MaximumCylinders; cylinderIndex++) {
+		expectCylinderSnapshotEquals(
+				full.Cylinders[cylinderIndex], fixture.Collector.cylinderSummary(cylinderIndex, now, summary));
+	}
+
+	VeAnalyzeFuelEventCylinderSnapshot invalidCylinder;
+	invalidCylinder.HasEvent = true;
+	invalidCylinder.Reasons = UINT32_MAX;
+	EXPECT_FALSE(fixture.Collector.fillCylinderSummary(
+			invalidCylinder, ve_analyze_fuel_events::MaximumCylinders, now, summary));
+	EXPECT_FALSE(invalidCylinder.HasEvent);
+	EXPECT_EQ(0u, invalidCylinder.Reasons);
+	EXPECT_EQ(std::numeric_limits<uint32_t>::max(), invalidCylinder.AgeMilliseconds);
+}
+
+TEST(VeAnalyzeFuelEvents, ReusedCompactSummaryClearsAllFields) {
+	FuelEventsFixture fixture;
+	feed(fixture, fixture.normal(0));
+	auto rejected = fixture.make(100 * Millisecond, 1.0f, 0, 0, 0, 1, 1, false);
+	EXPECT_TRUE(fixture.Collector.observeEvent(rejected));
+
+	VeAnalyzeFuelEventSummary summary;
+	fixture.Collector.fillSummary(summary, timeUs(100 * Millisecond));
+	EXPECT_TRUE(summary.LastEvent.HasEvent);
+	EXPECT_TRUE(summary.Banks[0].LatestEvent.HasEvent);
+	EXPECT_GT(summary.rejectedEventCount(FuelEventReason::SchedulingRejectedRecovery), 0u);
+
+	fixture.Collector.reset(timeUs(100 * Millisecond));
+	fixture.Collector.fillSummary(summary, timeUs(100 * Millisecond));
+	EXPECT_FALSE(summary.Ready);
+	EXPECT_FALSE(summary.HasFreshEvent);
+	EXPECT_FALSE(summary.LastEvent.HasEvent);
+	EXPECT_FALSE(summary.Banks[0].LatestEvent.HasEvent);
+	EXPECT_EQ(0u, summary.ObservedCylinderMask);
+	EXPECT_EQ(0u, summary.ObservedBankMask);
+	EXPECT_EQ(0u, summary.AttemptedEventCount);
+	EXPECT_EQ(0u, summary.RejectedEventCount);
+	EXPECT_EQ(std::numeric_limits<uint32_t>::max(), summary.LastEventAgeMilliseconds);
+	for (const uint32_t count : summary.RejectedEventCountsByReason) {
+		EXPECT_EQ(0u, count);
+	}
 }
 
 TEST(VeAnalyzeFuelEvents, InvalidPolicyFailsClosed) {

@@ -17,7 +17,8 @@ public:
 	bool update();
 
 	// Call this every decoded trigger tooth.  It will schedule any relevant events for this injector.
-	void onTriggerTooth(const EnginePhaseInfo& phase);
+	// Keep scheduling-only fuel-event scratch out of the trigger ISR frame.
+	__attribute__((noinline)) void onTriggerTooth(const EnginePhaseInfo& phase);
 
 	WallFuel& getWallFuel();
 

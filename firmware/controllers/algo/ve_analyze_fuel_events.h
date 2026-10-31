@@ -223,7 +223,13 @@ struct VeAnalyzeFuelEventCylinderSnapshot {
 	}
 };
 
-struct VeAnalyzeFuelEventSnapshot {
+/**
+ * Persistent-friendly event snapshot without per-cylinder output storage.
+ *
+ * Per-cylinder summaries are intentionally filled one at a time by callers
+ * that need the complete exported view.
+ */
+struct VeAnalyzeFuelEventSummary {
 	// Ready describes collector evidence only. It deliberately excludes model
 	// qualification and lambda validity.
 	bool Ready = false;
@@ -250,7 +256,6 @@ struct VeAnalyzeFuelEventSnapshot {
 
 	VeAnalyzeFuelEventRecord LastEvent;
 	std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks> Banks;
-	std::array<VeAnalyzeFuelEventCylinderSnapshot, ve_analyze_fuel_events::MaximumCylinders> Cylinders;
 	std::array<uint32_t, ve_analyze_fuel_events::FuelEventReasonCount> RejectedEventCountsByReason = {};
 
 	bool hasReason(ve_analyze_fuel_events::FuelEventReason reason) const {
@@ -261,6 +266,14 @@ struct VeAnalyzeFuelEventSnapshot {
 		const size_t index = ve_analyze_fuel_events::reasonIndex(reason);
 		return index < RejectedEventCountsByReason.size() ? RejectedEventCountsByReason[index] : 0;
 	}
+};
+
+/**
+ * Complete standalone snapshot. Inheriting the summary preserves direct field
+ * access for existing standalone and test clients.
+ */
+struct VeAnalyzeFuelEventSnapshot : VeAnalyzeFuelEventSummary {
+	std::array<VeAnalyzeFuelEventCylinderSnapshot, ve_analyze_fuel_events::MaximumCylinders> Cylinders;
 };
 
 /**
@@ -309,8 +322,17 @@ public:
 
 	// Read-only and safe to poll slowly. Polling does not clear peaks or timers.
 	// Fills caller-owned storage completely, without allocating a snapshot temporary.
+	void fillSummary(VeAnalyzeFuelEventSummary& result, efitick_t nowNt) const;
 	void fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efitick_t nowNt) const;
 	VeAnalyzeFuelEventSnapshot snapshot(efitick_t nowNt) const;
+	// Fills one bounded per-cylinder view using the bank data from this summary.
+	bool fillCylinderSummary(
+			VeAnalyzeFuelEventCylinderSnapshot& result,
+			size_t cylinderIndex,
+			efitick_t nowNt,
+			const VeAnalyzeFuelEventSummary& summary) const;
+	VeAnalyzeFuelEventCylinderSnapshot
+	cylinderSummary(size_t cylinderIndex, efitick_t nowNt, const VeAnalyzeFuelEventSummary& summary) const;
 	VeAnalyzeFuelEventRecord cylinderSnapshot(size_t ownerCylinder, efitick_t nowNt) const;
 
 private:
@@ -381,13 +403,13 @@ private:
 	bool timestampIsFresh(efitick_t nowNt, efitick_t timestamp) const;
 	void fillRecord(VeAnalyzeFuelEventRecord& result, const StoredEvent& event, efitick_t nowNt) const;
 	VeAnalyzeFuelEventRecord makeRecord(const StoredEvent& event, efitick_t nowNt) const;
+	void fillSummaryContent(VeAnalyzeFuelEventSummary& result, efitick_t nowNt) const;
 	void fillBankSnapshot(VeAnalyzeFuelEventBankSnapshot& result, size_t bankIndex, efitick_t nowNt) const;
 	void fillCylinderSnapshot(
 			VeAnalyzeFuelEventCylinderSnapshot& result,
 			size_t cylinderIndex,
 			efitick_t nowNt,
-			const VeAnalyzeFuelEventRecord& record,
-			const std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks>& banks) const;
+			const VeAnalyzeFuelEventSummary& summary) const;
 
 	VeAnalyzeFuelEventPolicy m_policy;
 	bool m_configValid = false;

@@ -739,43 +739,45 @@ void VeAnalyzeFuelEvents::fillCylinderSnapshot(
 		VeAnalyzeFuelEventCylinderSnapshot& result,
 		size_t cylinderIndex,
 		efitick_t nowNt,
-		const VeAnalyzeFuelEventRecord& record,
-		const std::array<VeAnalyzeFuelEventBankSnapshot, ve_analyze_fuel_events::MaximumBanks>& banks) const {
+		const VeAnalyzeFuelEventSummary& summary) const {
 	new (&result) VeAnalyzeFuelEventCylinderSnapshot{};
 	const StoredEvent& event = m_cylinders[cylinderIndex];
-	result.HasEvent = record.HasEvent;
-	result.Fresh = record.Fresh;
+	result.HasEvent = event.HasEvent;
 	result.SupersededByRejection = event.HasEvent && m_cylinderRejectionAfterEvent[cylinderIndex];
-	result.Serial = record.Serial;
-	result.AgeMilliseconds = record.AgeMilliseconds;
-	result.CalculatedBaseMassMilligrams = record.CalculatedBaseMassMilligrams;
-	result.CalculatedAppliedAeMassMilligrams = record.CalculatedAppliedAeMassMilligrams;
-	result.CalculatedFilmCorrectionMassMilligrams = record.CalculatedFilmCorrectionMassMilligrams;
-	result.AttemptedFinalCommandedMassMilligrams = record.AttemptedFinalCommandedMassMilligrams;
-	result.ScheduledCommandMassMilligrams = record.ScheduledCommandMassMilligrams;
-
 	if (!event.HasEvent) {
 		result.Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
-	} else if (nowNt.count < event.Timestamp.count) {
-		result.Reasons |= static_cast<uint32_t>(FuelEventReason::FutureTimestamp);
-	} else if (!timestampIsFresh(nowNt, event.Timestamp)) {
-		result.Reasons |= static_cast<uint32_t>(FuelEventReason::StaleEvent);
+	} else {
+		result.Fresh = timestampIsFresh(nowNt, event.Timestamp);
+		result.Serial = event.Serial;
+		result.AgeMilliseconds = nowNt.count > event.Timestamp.count ? elapsedMilliseconds(nowNt, event.Timestamp) : 0;
+		result.CalculatedBaseMassMilligrams = gramsToMilligrams(event.BasePreAeMassGrams);
+		result.CalculatedAppliedAeMassMilligrams = gramsToMilligrams(event.AppliedAeMassGrams);
+		result.CalculatedFilmCorrectionMassMilligrams = gramsToMilligrams(event.FilmCorrectionMassGrams);
+		result.AttemptedFinalCommandedMassMilligrams = gramsToMilligrams(event.FinalCommandedMassGrams);
+		result.ScheduledCommandMassMilligrams =
+				event.SchedulerAccepted ? result.AttemptedFinalCommandedMassMilligrams : 0;
+
+		if (nowNt.count < event.Timestamp.count) {
+			result.Reasons |= static_cast<uint32_t>(FuelEventReason::FutureTimestamp);
+		} else if (!result.Fresh) {
+			result.Reasons |= static_cast<uint32_t>(FuelEventReason::StaleEvent);
+		}
 	}
 
 	for (size_t bankIndex = 0; bankIndex < MaximumBanks; bankIndex++) {
 		if (isBitSet(event.AffectedBankMask, bankIndex)) {
-			result.Reasons |= banks[bankIndex].Reasons;
+			result.Reasons |= summary.Banks[bankIndex].Reasons;
 		}
 	}
 	if (m_resetUntilNt > nowNt.count) {
 		result.Reasons |= m_resetReasons;
 	}
+	if (isBitSet(summary.ExpectedCylinderMask, cylinderIndex) && !isBitSet(summary.FreshCylinderMask, cylinderIndex)) {
+		result.Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
+	}
 }
 
-void VeAnalyzeFuelEvents::fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efitick_t nowNt) const {
-	// Reconstruct the caller-owned storage in place. Snapshot reuse must not
-	// retain stale counters, reasons, bank data, or cylinder data.
-	new (&result) VeAnalyzeFuelEventSnapshot{};
+void VeAnalyzeFuelEvents::fillSummaryContent(VeAnalyzeFuelEventSummary& result, efitick_t nowNt) const {
 	if (!m_configValid) {
 		result.Reasons = static_cast<uint32_t>(FuelEventReason::InvalidConfiguration);
 		return;
@@ -825,15 +827,6 @@ void VeAnalyzeFuelEvents::fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efiti
 		result.HasFreshEvent |= result.Banks[bankIndex].EvidenceFresh;
 	}
 
-	VeAnalyzeFuelEventRecord cylinderRecord;
-	for (size_t cylinderIndex = 0; cylinderIndex < MaximumCylinders; cylinderIndex++) {
-		fillRecord(cylinderRecord, m_cylinders[cylinderIndex], nowNt);
-		fillCylinderSnapshot(result.Cylinders[cylinderIndex], cylinderIndex, nowNt, cylinderRecord, result.Banks);
-		if (isBitSet(m_expectedCylinderMask, cylinderIndex) && !isBitSet(result.FreshCylinderMask, cylinderIndex)) {
-			result.Cylinders[cylinderIndex].Reasons |= static_cast<uint32_t>(FuelEventReason::NoFreshEvent);
-		}
-	}
-
 	result.CoverageComplete =
 			(m_expectedCylinderMask == 0 ||
 			 (result.FreshCylinderMask & m_expectedCylinderMask) == m_expectedCylinderMask) &&
@@ -860,8 +853,54 @@ void VeAnalyzeFuelEvents::fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efiti
 	result.Ready = result.HasFreshEvent && result.CoverageComplete && result.Reasons == 0;
 }
 
+void VeAnalyzeFuelEvents::fillSummary(VeAnalyzeFuelEventSummary& result, efitick_t nowNt) const {
+	// Reconstruct the caller-owned storage in place so reuse cannot retain stale
+	// counters, reasons, latest records, or bank data.
+	new (&result) VeAnalyzeFuelEventSummary{};
+	fillSummaryContent(result, nowNt);
+}
+
+void VeAnalyzeFuelEvents::fillSnapshot(VeAnalyzeFuelEventSnapshot& result, efitick_t nowNt) const {
+	// Reconstruct the complete snapshot in place; no snapshot-sized temporary is
+	// materialized on the stack.
+	new (&result) VeAnalyzeFuelEventSnapshot{};
+	fillSummaryContent(result, nowNt);
+	if (!m_configValid) {
+		return;
+	}
+
+	for (size_t cylinderIndex = 0; cylinderIndex < MaximumCylinders; cylinderIndex++) {
+		fillCylinderSnapshot(result.Cylinders[cylinderIndex], cylinderIndex, nowNt, result);
+	}
+}
+
 VeAnalyzeFuelEventSnapshot VeAnalyzeFuelEvents::snapshot(efitick_t nowNt) const {
 	VeAnalyzeFuelEventSnapshot result;
 	fillSnapshot(result, nowNt);
+	return result;
+}
+
+bool VeAnalyzeFuelEvents::fillCylinderSummary(
+		VeAnalyzeFuelEventCylinderSnapshot& result,
+		size_t cylinderIndex,
+		efitick_t nowNt,
+		const VeAnalyzeFuelEventSummary& summary) const {
+	if (cylinderIndex >= MaximumCylinders) {
+		new (&result) VeAnalyzeFuelEventCylinderSnapshot{};
+		return false;
+	}
+	if (!m_configValid) {
+		new (&result) VeAnalyzeFuelEventCylinderSnapshot{};
+		return true;
+	}
+
+	fillCylinderSnapshot(result, cylinderIndex, nowNt, summary);
+	return true;
+}
+
+VeAnalyzeFuelEventCylinderSnapshot VeAnalyzeFuelEvents::cylinderSummary(
+		size_t cylinderIndex, efitick_t nowNt, const VeAnalyzeFuelEventSummary& summary) const {
+	VeAnalyzeFuelEventCylinderSnapshot result;
+	fillCylinderSummary(result, cylinderIndex, nowNt, summary);
 	return result;
 }

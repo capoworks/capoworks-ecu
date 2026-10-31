@@ -85,67 +85,13 @@ EngineState::EngineState() {
 	resetVeAnalyzeSampleGate(nowNt);
 }
 
-void EngineState::periodicFastCallback() {
-	ScopePerf perf(PE::EngineStatePeriodicFastCallback);
-
 #if EFI_ENGINE_CONTROL
-	efitick_t nowNt = getTimeNowNt();
-	bool isCranking = engine->rpmCalculator.isCranking();
-	float rpm = Sensor::getOrZero(SensorType::Rpm);
-	const auto fuelCalculation = engine->airmassInjectionState.beginCalculation(
-			engineConfiguration->fuelAlgorithm, rpm, engine->getGlobalConfigurationVersion());
-	// The prior completed fuel publication remains live, but this calculation
-	// is not valid until every candidate output has been committed below.
-	airmassCalculationValid = false;
-
-	if (isCranking) {
-		crankingTimer.reset(nowNt);
-	}
-
-	engine->fuelComputer.running.timeSinceCrankingInSecs = crankingTimer.getElapsedSeconds(nowNt);
-
-	engine->ignitionState.updateDwell(rpm, isCranking);
-
-	// todo: move this into slow callback, no reason for IAT corr to be here
-	engine->fuelComputer.running.intakeTemperatureCoefficient = getIatFuelCorrection();
-	// todo: move this into slow callback, no reason for CLT corr to be here
-	engine->fuelComputer.running.coolantTemperatureCoefficient = getCltFuelCorrection();
-
-	engine->module<DfcoController>()->update();
-
-	// post-cranking fuel enrichment.
-	if (engineConfiguration->postCrankingFuelUseTable) {
-		float postCrankingCorr = interpolate3d(
-				config->postCrankingEnrichTable,
-				config->postCrankingEnrichTempBins,
-				Sensor::getOrZero(SensorType::Clt),
-				config->postCrankingEnrichRuntimeBins,
-				engine->fuelComputer.running.timeSinceCrankingInSecs);
-
-		engine->fuelComputer.running.postCrankingFuelCorrection = std::clamp<float>(postCrankingCorr, 1, 5);
-	} else {
-		// for compatibility reasons, apply only if the factor is greater than unity (only allow adding fuel)
-		if (engineConfiguration->postCrankingFactor > 1.0f) {
-			// use interpolation for correction taper
-			engine->fuelComputer.running.postCrankingFuelCorrection = interpolateClamped(
-					0.0f,
-					engineConfiguration->postCrankingFactor,
-					engineConfiguration->postCrankingDurationSec,
-					1.0f,
-					engine->fuelComputer.running.timeSinceCrankingInSecs);
-		} else {
-			engine->fuelComputer.running.postCrankingFuelCorrection = 1.0f;
-		}
-	}
-
-	baroCorrection = getBaroCorrection();
-
-	auto tps = Sensor::get(SensorType::Tps1);
-	updateTChargeK(rpm, tps.value_or(0));
-
-	FuelAirmassCapture fuelCapture;
-	captureFuelAirmassInputs(rpm, fuelCalculation, fuelCapture);
-	auto fuelCandidate = calculateFuelPublication(rpm, isCranking, fuelCapture);
+__attribute__((noinline)) void EngineState::completeFuelPublication(
+		const FuelAirmassCapture& fuelCapture,
+		FuelPublicationCandidate& fuelCandidate,
+		float rpm,
+		bool isCranking,
+		AirmassInjectionState::CalculationToken fuelCalculation) {
 	const bool hasCurrentConsumerContext = fuelCapture.Standalone && fuelCandidate.Valid && !fuelCandidate.Stale &&
 										   fuelCandidate.ConsumerLoads.Prepared;
 	const AirmassConsumerLoadContext currentLoads(fuelCandidate.ConsumerLoads);
@@ -242,7 +188,6 @@ void EngineState::periodicFastCallback() {
 	}
 
 	float cylinderFuelMasses[MAX_CYLINDER_COUNT] = {};
-	CylinderFuelProvenance cylinderFuelProvenance[MAX_CYLINDER_COUNT] = {};
 	float cylinderTiming[MAX_CYLINDER_COUNT] = {};
 	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
 		const uint8_t bankIndex = engineConfiguration->cylinderBankSelect[i];
@@ -258,24 +203,12 @@ void EngineState::periodicFastCallback() {
 						? (modeledCycleFuelMass * cylinderTrim + additiveCycleFuelMass) * luaFuelMult + luaFuelAdd
 						: 0;
 		const float cylinderMass = unbankedFuel * bankTrim;
-		// Provenance only: keep the total calculation above unchanged. Cylinder
-		// trim applies to modeled fuel, never to the additive AE portion.
-		const float preAeBaseFuelMass =
-				injectionActive ? (modeledCycleFuelMass * cylinderTrim * luaFuelMult + luaFuelAdd) * bankTrim : 0;
-		const float appliedAeFuelMass = injectionActive ? additiveCycleFuelMass * luaFuelMult * bankTrim : 0;
 		if (bankIndex >= STFT_BANK_COUNT || !std::isfinite(bankTrim) || bankTrim < 0 || !std::isfinite(cylinderTrim) ||
 			cylinderTrim < 0 || !std::isfinite(cylinderMass) || cylinderMass < 0) {
 			fuelPublicationValid = false;
 		} else {
 			cylinderFuelMasses[i] = cylinderMass;
 		}
-		cylinderFuelProvenance[i] = {
-				preAeBaseFuelMass,
-				appliedAeFuelMass,
-				fuelCapture.CalibrationGeneration,
-				injectionActive && std::isfinite(preAeBaseFuelMass) && preAeBaseFuelMass >= 0 &&
-						std::isfinite(appliedAeFuelMass) && appliedAeFuelMass >= 0,
-		};
 
 		angle_t ignitionTrim = 0;
 		if (!fuelCapture.Standalone || engineConfiguration->isIgnitionEnabled) {
@@ -334,7 +267,6 @@ void EngineState::periodicFastCallback() {
 	fuelCandidate.ShouldUpdateInjectionTiming = nextShouldUpdateInjectionTiming;
 	for (size_t i = 0; i < calculationCylinderCount && i < MAX_CYLINDER_COUNT; i++) {
 		fuelCandidate.CylinderFuelMasses[i] = cylinderFuelMasses[i];
-		fuelCandidate.CylinderFuelProvenanceValues[i] = cylinderFuelProvenance[i];
 	}
 
 	bool publicationCurrent = false;
@@ -431,8 +363,29 @@ void EngineState::periodicFastCallback() {
 					engine->stftCorrection[i] = clResult.banks[i];
 				}
 				for (size_t i = 0; i < calculationCylinderCount; i++) {
-					engine->cylinders[i].setInjectionMassAndProvenance(
-							fuelCandidate.CylinderFuelMasses[i], fuelCandidate.CylinderFuelProvenanceValues[i]);
+					const uint8_t bankIndex = engineConfiguration->cylinderBankSelect[i];
+					float cylinderTrim = 1;
+#ifdef MODULE_CYLINDER_FUEL_TRIM
+					if (fuelCandidate.ApplyCylinderFuelTrim) {
+						cylinderTrim = fuelCandidate.CylinderFuelTrim.Factor[i];
+					}
+#endif // MODULE_CYLINDER_FUEL_TRIM
+					const float bankTrim = bankIndex < STFT_BANK_COUNT ? clResult.banks[bankIndex] : 0;
+					// Cylinder trim applies to modeled fuel, never to the additive AE portion.
+					const float preAeBaseFuelMass =
+							injectionActive
+									? (modeledCycleFuelMass * cylinderTrim * luaFuelMult + luaFuelAdd) * bankTrim
+									: 0;
+					const float appliedAeFuelMass =
+							injectionActive ? additiveCycleFuelMass * luaFuelMult * bankTrim : 0;
+					const CylinderFuelProvenance provenance = {
+							preAeBaseFuelMass,
+							appliedAeFuelMass,
+							fuelCapture.CalibrationGeneration,
+							injectionActive && std::isfinite(preAeBaseFuelMass) && preAeBaseFuelMass >= 0 &&
+									std::isfinite(appliedAeFuelMass) && appliedAeFuelMass >= 0,
+					};
+					engine->cylinders[i].setInjectionMassAndProvenance(fuelCandidate.CylinderFuelMasses[i], provenance);
 				}
 			} else {
 				// A current failed calculation closes admission and clears every
@@ -527,6 +480,71 @@ void EngineState::periodicFastCallback() {
 #if EFI_ANTILAG_SYSTEM
 	engine->antilagController.update();
 #endif // EFI_ANTILAG_SYSTEM
+}
+#endif // EFI_ENGINE_CONTROL
+
+void EngineState::periodicFastCallback() {
+	ScopePerf perf(PE::EngineStatePeriodicFastCallback);
+
+#if EFI_ENGINE_CONTROL
+	efitick_t nowNt = getTimeNowNt();
+	bool isCranking = engine->rpmCalculator.isCranking();
+	float rpm = Sensor::getOrZero(SensorType::Rpm);
+	const auto fuelCalculation = engine->airmassInjectionState.beginCalculation(
+			engineConfiguration->fuelAlgorithm, rpm, engine->getGlobalConfigurationVersion());
+	// The prior completed fuel publication remains live, but this calculation
+	// is not valid until every candidate output has been committed below.
+	airmassCalculationValid = false;
+
+	if (isCranking) {
+		crankingTimer.reset(nowNt);
+	}
+
+	engine->fuelComputer.running.timeSinceCrankingInSecs = crankingTimer.getElapsedSeconds(nowNt);
+
+	engine->ignitionState.updateDwell(rpm, isCranking);
+
+	// todo: move this into slow callback, no reason for IAT corr to be here
+	engine->fuelComputer.running.intakeTemperatureCoefficient = getIatFuelCorrection();
+	// todo: move this into slow callback, no reason for CLT corr to be here
+	engine->fuelComputer.running.coolantTemperatureCoefficient = getCltFuelCorrection();
+
+	engine->module<DfcoController>()->update();
+
+	// post-cranking fuel enrichment.
+	if (engineConfiguration->postCrankingFuelUseTable) {
+		float postCrankingCorr = interpolate3d(
+				config->postCrankingEnrichTable,
+				config->postCrankingEnrichTempBins,
+				Sensor::getOrZero(SensorType::Clt),
+				config->postCrankingEnrichRuntimeBins,
+				engine->fuelComputer.running.timeSinceCrankingInSecs);
+
+		engine->fuelComputer.running.postCrankingFuelCorrection = std::clamp<float>(postCrankingCorr, 1, 5);
+	} else {
+		// for compatibility reasons, apply only if the factor is greater than unity (only allow adding fuel)
+		if (engineConfiguration->postCrankingFactor > 1.0f) {
+			// use interpolation for correction taper
+			engine->fuelComputer.running.postCrankingFuelCorrection = interpolateClamped(
+					0.0f,
+					engineConfiguration->postCrankingFactor,
+					engineConfiguration->postCrankingDurationSec,
+					1.0f,
+					engine->fuelComputer.running.timeSinceCrankingInSecs);
+		} else {
+			engine->fuelComputer.running.postCrankingFuelCorrection = 1.0f;
+		}
+	}
+
+	baroCorrection = getBaroCorrection();
+
+	auto tps = Sensor::get(SensorType::Tps1);
+	updateTChargeK(rpm, tps.value_or(0));
+
+	FuelAirmassCapture fuelCapture;
+	captureFuelAirmassInputs(rpm, fuelCalculation, fuelCapture);
+	auto fuelCandidate = calculateFuelPublication(rpm, isCranking, fuelCapture);
+	completeFuelPublication(fuelCapture, fuelCandidate, rpm, isCranking, fuelCalculation);
 #endif // EFI_ENGINE_CONTROL
 }
 
