@@ -9,10 +9,11 @@ Composite SD + Alpha-N VE Analyze remains an opt-in, session-qualified feature. 
 channels explain the existing qualification latch; they do not rearm it, relax it,
 or change fuel admission.
 
-The firmware also owns a separate 250 Hz TPS sample gate. It is independent of the
-legacy 20 Hz acceleration-enrichment update and of the composite-model qualification
-latch. The gate is currently exposed as diagnostic evidence only: this change does not
-alter TunerStudio filters, fuel scheduling, or the PR1 latch policy.
+The TPS sample gate remains independent of the 20 Hz acceleration-enrichment update
+and the composite-model qualification latch. The matching TunerStudio INI wires the
+sample, rate, and event gates into all three VE Analyze blocks. Fuel and spark totals
+continue to be calculated, the existing composite latch policy is unchanged, and
+client-side physical alignment is not guaranteed.
 
 `blendedVeAnalyzeCandidateEndpoint` records the endpoint identifiable for the
 current candidate: `0` none, `1` Speed Density, or `2` Alpha-N. A uniformly
@@ -294,3 +295,84 @@ sensor cause, then perform the normal engine stop/restart or synchronization
 loss that starts a new session. Firmware does not automatically reset client history,
 force endpoint `2`, expose a rearm command, rearm on a timer alone, or guarantee physical
 alignment of analysis samples with lambda measurement.
+
+## TunerStudio INI integration
+
+This section describes the TunerStudio-side policy added on top of the exported PR2
+and PR3 channels. It does not change the ECU configuration layout, generated INI files,
+or the composite-model qualification condition on `veAnalyzeMap`.
+
+The `Fuel > VE Analyze settings` dialog contains a TunerStudio PC-only
+`Lambda sensor bank` choice: `Lambda 1` (the default) or `Lambda 2`. The selector is a
+PC variable with a default in `[ConstantsExtensions]`; it is not an ECU calibration
+field. Selecting a bank does not average lambda or EGO correction. Instead, one
+`veAnalyzeSelectedLambda` value drives every VE Analyze map and its minimum, maximum,
+and invalid-lambda filters, while `veAnalyzeSelectedEgoCorrection` uses the matching
+`100 + fuelPidCorrection1/2` bank. WUE Analyze remains fixed to `lambdaValues1` and
+its bank-1 `egoCorrectionForVeAnalyze` alias; the selector does not change WUE.
+
+Choose the reference bank before starting a fresh analysis session. Changing the
+bank during a running analysis is unsupported because historical corrections from
+the old bank can mix with current lambda from the new bank. To change banks, stop
+the analysis, start a new session, and verify that the client discarded its previous
+history. Merely switching the selector is not known to clear client history or to
+guarantee recovery; no such client handshake or UI lock is claimed.
+
+Each of the three VE Analyze model blocks requires `veAnalyzeSampleReady == 1`,
+`veAnalyzeRateValid == 1`, and `veAnalyzeFuelEventReady == 1`; a value of `0` in any of
+these channels rejects the row. TunerStudio filters reject when their comparison is
+true, so the INI implements all three gates as `< 1`. Their filter definitions end in
+`userAdjustable=false`, but actual tablet-client behavior for that flag has not been
+validated, so this document does not claim that a particular UI prevents changes.
+The readiness filters are separate from `activeCondition`, which retains the existing
+Speed Density, Alpha-N, MAF, blended-endpoint, Idle VE, and other model qualification.
+The legacy `deltaTps` filters are replaced by a user-adjustable absolute TPS-rate filter
+at `veAnalyzeTpsRateAbs > 5` percentage points per second.
+
+The ECU event collector has its own fixed conservative policy: AE peaks above `1%`,
+film peaks above `2%`, or their combined absolute ratio above `2%` reject the event.
+The client filters use the same initial ratios and can be tightened for a particular
+installation, but increasing a client threshold cannot relax the ECU gate. Existing
+thermal and engine/tune defaults remain unchanged.
+
+The default lambda acceptance window is `0.70` through `1.30`. Existing global CLT,
+IAT, and other engine/tune filters are unchanged. Narrower CLT filters around
+`75-90 C`, IAT filters around `15-35 C`, and a warmup-correction filter of `4%` are
+optional experiments for a particular installation, not new engine or tune defaults.
+
+An unavailable analog lambda sensor is exported as zero. Missing (`0`), nonpositive,
+or NaN selected lambda values fail closed through the invalid-lambda filter. The
+selected-bank check also fails closed when that bank is not represented in the
+configured cylinder-to-bank assignments. This verifies consistency of the TunerStudio
+selection and calibration assignments only; it cannot verify that
+the physical wideband sensor, exhaust location, injector wiring, or bank plumbing
+matches the label. A current installation report describes Lambda 1 as front and
+Lambda 2 as rear, but physical cylinder, injector, and bank wiring remains unverified.
+The tuning workflow must still confirm those physical details.
+
+The per-bank event ratio channels are percentages of each event's pre-AE BASE fuel.
+`veAnalyzeAePercent`, `veAnalyzeWallCorrectionPercent`, and
+`veAnalyzeSumAbsAeFilmPercent` each take the maximum across all four banks, rather than
+following the selected lambda bank. This prevents a quiet or unselected bank from
+hiding a transient elsewhere. Their initial adjustable rejection limits are `1%` for
+AE, `2%` for film, and `2%` for the combined ratio. `veAnalyzeWallCorrectionPercent`
+remains as the saved-film-filter alias, but its value now comes from
+`veAnalyzeFuelBankPeakFilmPercent1` through `...4`; it no longer uses
+`wallFuelCorrectionValue`, `running_fuel`, or an injection multiplier.
+`veAnalyzeSumAbsAeFilmPercent` consumes the ECU-side sum of the independently absolute
+AE and film peaks. It must not apply `abs(AE + film)` in the client.
+`veAnalyzeInjectionMultiplier` remains only for saved-definition compatibility and is
+unused by these event ratios.
+
+For a common VE reference-bank strategy, hold cylinder trims and thermal/film
+calibrations fixed, then examine the other bank's residual separately. Do not average
+the banks, automatically apply rear-cylinder trim, or migrate the reference axis.
+The existing per-cylinder trim-load coordinate selection must be calibrated
+deliberately; the workflow does not silently coerce one source or coordinate to
+another.
+
+The `wallFuelCorrection` and `wallFuel` fields are raw C++ `float` values in grams with
+unchanged names and layout. Their generated telemetry descriptors scale by `1000` and
+declare `mg`, so a raw `0.001 g` value is decoded by the client as `1 mg`.
+`wallFuelCorrectionValue` is a separate packed output that already converts grams to
+milligrams before transport; its scaling must not be applied a second time.
